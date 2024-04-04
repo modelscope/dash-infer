@@ -1,0 +1,40 @@
+{
+    "model_name": "chatglm2-6b-32k",
+    "model_type": "ChatGLM_v2",
+    "model_path": "../outputs/",
+    "data_type": "float32",
+    "device_type": "CPU",
+    "device_ids": [
+        0,
+        1
+    ],
+    "convert_config": {
+        "do_dynamic_quantize_convert": true
+    },
+    "engine_config": {
+        "engine_max_length": 10000,
+        "engine_max_batch": 8,
+        "do_profiling": false,
+        "num_threads": 0,
+        "matmul_precision": "medium"
+    },
+    "generation_config": {
+        "temperature": 0.8,
+        "early_stopping": true,
+        "top_k": 1024,
+        "top_p": 0.8,
+        "repetition_penalty": 1.0,
+        "presence_penalty": 0.0,
+        "min_length": 0,
+        "max_length": 10000,
+        "no_repeat_ngram_size": 0,
+        "eos_token_id": 2,
+        "seed": 1234
+    },
+    "quantization_config": {
+        "activation_type": "bfloat16",
+        "weight_type": "uint8",
+        "SubChannel": true,
+        "GroupSize": 512
+    }
+}

@@ -1,0 +1,323 @@
+/*!
+ * Copyright (c) Alibaba, Inc. and its affiliates.
+ * @file    allspark_service.proto
+ */
+
+syntax = "proto3";
+
+package allspark.allspark_service;
+
+// Interface exported by the service.
+service AllSpark {
+
+  // Build model from structure config.
+  rpc BuildModelFromConfigStruct(ModelStructConfig) returns (AsStatus) {}
+
+  rpc ReloadModelToDeviceMemory(ModelName) returns (AsStatus) {}
+
+  rpc UnloadModelFromDeviceMemory(ModelName) returns (AsStatus) {}
+
+  // Get model type, input tensor , output tensor info
+  rpc GetModelInformation(ModelName) returns (ModelInfo) {}
+
+  rpc GetFileInformation(FileInformationRequest) returns (FileInformationResponse) {}
+  // start model 
+  rpc StartModel(ModelName) returns (AsStatus) {}
+
+  // stop model 
+  rpc StopModel(ModelName) returns (AsStatus) {}
+
+  // release model 
+  rpc ReleaseModel(ModelName) returns (AsStatus) {}
+
+  // start request
+  rpc StartRequest(StartRequestRequest) returns (StartRequestResponse) {}
+
+  // stop request
+  rpc StopRequest(StopRequestRequest) returns (StartRequestResponse) {}
+
+  // release request
+  rpc ReleaseRequest(StopRequestRequest) returns (StartRequestResponse) {}
+
+  // sync request
+  rpc SyncRequest(StopRequestRequest) returns (StartRequestResponse) {}
+
+  rpc GetAsEngineStat(ModelName) returns (AsEngineStat) {}
+  // Get SDK version string
+  // version string will include version, git sha1, and build time,
+  // eg: 0.1.4/(GitSha1:beaca93)/(Build:20230403154806)
+  rpc GetVersionFull(Empty) returns (VersionInfo) {}
+
+  // Get op profiling info
+  // profiling string includes op name, min_time, max_time, count, sum, percentage
+  rpc GetOpProfilingInfo(ModelName) returns (OpProfilingInfo) {}
+
+  // Get rank id (0~rank_num-1)
+  // Since openmpi is used to manage CPU inferer task, which may
+  // launch multiply process to do the inferer, GetRankId is used
+  // to indicate the manager process and get the output in manager process.
+  // @note 0 is the manager process, we get output only if GetRandId return 0.
+  // GetRankId always return 0 in GPU inferer.
+  rpc GetRankId(Empty) returns (RankId) {}
+
+  // Get rank num
+  // It is used to check if service is still alive
+  rpc GetRankNums(Empty) returns (RankId) {}
+
+
+  // shutdown service
+  rpc ShutdownService(Empty) returns (AsStatus) {}
+
+  // callback for ResultQueue
+  rpc GenerateStatus(UUID) returns (GenerateRequestStatus) {}
+  rpc GeneratedLength(UUID) returns (GenerateLen) {}
+  rpc Get(UUID) returns (GeneratedElements) {}
+  rpc GetNoWait(UUID) returns (GeneratedElements) {}
+}
+
+// AllSpark status code
+enum AS_STATUS {
+    ALLSPARK_SUCCESS = 0;  // 正常状态
+
+    ALLSPARK_UNKNOWN_ERROR = 1;  // 兜底错误类型
+    ALLSPARK_PARAM_ERROR = 2;    // 传入的参数值错误
+    ALLSPARK_IO_ERROR = 3;       // IO访问错误
+    ALLSPARK_MEMORY_ERROR = 4;   // 内存越界等错误
+    ALLSPARK_RUNTIME_ERROR = 5;  // 运行时触发的OP错误返回
+    ALLSPARK_EXCEED_LIMIT_ERROR = 7;  // 参数或输入超限
+    ALLSPARK_INVALID_CALL_ERROR = 8;  // 无效调用
+    ALLSPARK_EMPTY_REQUEST = 9;     // 无有效请求
+    ALLSPARK_ILLEGAL_REQUEST_ID = 10; //没有找到有效的request_id
+    ALLSPARK_CACHE_MEMORY_OUT = 11;
+    ALLSPARK_REQUEST_DENIED = 12;  // 停服务状态，拒绝服务
+    ALLSPARK_STREAMING = 200;      // 流式返回
+}
+
+enum GENERATE_STATUS {
+    Init = 0;                 /// Init status.
+    ContextFinished = 1;      /// Context computation finished.
+    Generating = 2;           /// Start generating.
+    GenerateFinished = 3;     /// Generation finished, EOS token was generated.
+    GenerateInterrupted = 4;  /// The Generation was interrupted, often means
+                              /// there is no enough memory, and this request
+                              /// was unfortunedly stopped.
+}
+
+enum DEVICE_TYPE {
+    DEVICETYPE_UNDEFINED = 0;
+    CPU = 1;
+    CUDA = 2;
+}
+
+message DeviceType {
+  DEVICE_TYPE dev_type = 1;
+}
+
+enum DATA_TYPE {
+    DATATYPE_UNDEFINED = 0;
+    FLOAT32 = 1;
+    FLOAT16 = 2;
+    INT8 = 3;
+    INT16 = 4;
+    INT32 = 5;
+    INT64 = 6;
+    STRING = 7;
+    BOOL = 8;
+    BFLOAT16 = 9;
+    UINT8 = 10;
+}
+
+enum DATA_MODE {
+    DENSE = 0;
+    CSC = 1;
+    ELL = 2;
+}
+
+enum AsMHAPrefill {
+  AsPrefillDefault = 0;
+  AsPrefillFlashV2 = 10;
+}
+
+enum AsCacheMode {
+  AsCacheDefault = 0;
+}
+
+enum RequestInferType {
+  Generate = 0;
+  ModelInference = 1;
+}
+
+enum RequestMMType {
+  TextInput = 0;
+}
+
+message AsStatus {
+  AS_STATUS as_status = 1;
+}
+
+message ModelName {
+  string model_name = 1;
+}
+
+message UUID {
+  string uuid = 1;
+}
+
+message GenerateLen {
+  int64 len = 1;
+}
+
+message GenerateRequestStatus {
+  GENERATE_STATUS status = 1;
+}
+
+message Tensor {
+  string name = 1;
+  Shape shape = 2;
+  DeviceType device_type = 3;
+  DATA_TYPE data_type = 4;
+  DATA_MODE data_mode = 5;
+  bytes data = 6;
+  message Shape {
+    repeated int32 dims = 1;
+  }
+}
+
+message TensorMap {
+  map<string, Tensor> tensor_map = 1;
+}
+
+message TensorListMap {
+  map<string, Array> tensor_list_map = 1;
+  message Array {
+    repeated Tensor tensor = 1;
+  }
+}
+
+message ModelStructConfig {
+  string model_name = 1;
+  string model_path = 2;
+  string weights_path = 3;
+  string compute_unit = 4;
+  string matmul_precision = 5;
+  int32  engine_max_length = 8;
+  int32  engine_max_batch = 9;
+  AsCacheMode cache_mode = 14;
+  AsMHAPrefill prefill_mode = 15;
+  bool text_graph = 16;
+  int32  num_threads = 17;
+}
+
+message AsEngineStat {
+  string model_name = 1;
+  int64  free_token = 5;
+  int32  pendding_request = 7;
+  int32  running_request = 8;
+  int64  total_device_memory_pool_size = 9;
+  int64  used_device_memory_pool_size = 10;
+  int64  total_generated_token = 11;
+  int64  total_prefill_token = 12;
+  float  generate_token_persec = 13;
+  float  process_token_persec = 14;
+}
+
+message StartRequestRequest {
+  string model_name = 1;
+  RequestInferType infer_type = 2;
+  RequestMMType mm_type = 3;
+  TensorMap     inputs = 4;
+  repeated TensorListMap mm_embedding = 5;
+  GenerateConfig config = 6;
+}
+
+message StopRequestRequest {
+  string model_name = 1;
+  string   uuid = 2;
+}
+
+message StartRequestResponse {
+  AS_STATUS as_status = 1;
+  string   uuid = 2;
+}
+
+message FileInformationRequest {
+  string model_path = 1;
+  string param_path = 2;
+}
+
+message FileInformationResponse {
+  string create_version_graph = 1;
+  string create_version_param = 2;
+  string current_version_engine = 3;
+}
+
+message GeneratedElements {
+  int32 empty = 1;
+  repeated int64 ids_from_generate = 2;
+  TensorMap tensors_from_model_inference = 3;
+}
+
+message BadWordIds {
+  repeated Array ids = 1;
+
+  message Array {
+    repeated int32 word = 1;
+  }
+}
+
+message StopWordIds {
+  repeated Array ids = 1;
+
+  message Array {
+    repeated int64 word = 1;
+  }
+}
+
+message GenerateConfig{
+  BadWordIds bad_words_ids = 1;
+  StopWordIds stop_words_ids = 2;
+  bool do_sample = 3;
+  bool early_stopping = 4;
+  bool async = 5;
+  int32 async_token_num = 6;
+  int32 first_token_num = 7;
+  string uuid = 8;
+  int32 num_beams = 9;
+  int32 num_return_sequences = 10;
+  float temperature = 11;
+  float top_p = 12;
+  float repetition_penalty = 13;
+  float length_penalty = 14;
+  float presence_penalty = 15;
+  bool  suppress_repetition_in_generation = 16;
+  int32 min_length = 17;
+  int32 max_length = 18;
+  int32 no_repeat_ngram_size = 19;
+  int32 eos_token_id = 20;
+  int32 top_k = 21;
+  int32 input_len = 22;
+  int64 seed = 23;
+  bool loop_context = 24;
+  repeated int32 top_k_arr = 25;
+  repeated float top_p_arr = 26;
+  repeated int64 seed_arr = 27;
+  bool   probe_only = 28;
+}
+
+message ModelInfo {
+  string model_info = 1;
+}
+
+message VersionInfo {
+  string version_info = 1;
+}
+
+message OpProfilingInfo {
+  string op_profiling_info = 1;
+}
+
+message RankId {
+  int32 rank_id = 1;
+}
+
+message Empty {}

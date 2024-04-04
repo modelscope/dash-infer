@@ -1,0 +1,7 @@
+build/
+python/build/
+python/dist/
+python/dashinfer.egg-info/
+python/dashinfer.egg-info
+third_party/from_source/*.o
+__pycache__/

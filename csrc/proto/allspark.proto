@@ -1,0 +1,141 @@
+/*!
+ * Copyright (c) Alibaba, Inc. and its affiliates.
+ * @file    allspark.proto
+ */
+
+syntax = "proto3";
+package allspark;
+
+enum DeviceType {
+    DEVICETYPE_UNDEFINED = 0;
+    CPU = 1;
+    CUDA = 2;
+    COMPILE_TIME_MAX_DEVICE_TYPES=3;
+    CPU_PINNED = 4;
+}
+enum DataMode {
+    DENSE = 0;
+    CSC = 1;
+    ELL = 2;
+}
+enum SplitMode{
+    NOSPLIT = 0;
+    VSPLIT = 1;
+    HSPLIT = 2;
+    QKVSPLIT = 3;
+    KVSPLIT = 4;
+    HSPLIT_QUANTIZE = 5;
+    GROUP_VSPLIT = 6;
+    MQA_VSPLIT = 7;
+}
+enum DataType {
+    DATATYPE_UNDEFINED = 0;
+    FLOAT32 = 1;
+    FLOAT16 = 2;
+    INT8 = 3;
+    INT16 = 4;
+    INT32 = 5;
+    INT64 = 6;
+    STRING = 7;
+    BOOL = 8;
+    BFLOAT16 = 9;
+    UINT8 = 10;
+    POINTER = 20;
+}
+
+enum PrecisionLevel {
+    HIGHEST = 0;
+    HIGH = 1;
+    MEDIUM_BF16 = 2;
+}
+
+enum BinaryType {
+    BINARYTYPE_UNDEFINED = 0;
+    ADD = 1;
+    MUL = 2;
+    FUSED_MUL_ADD_1 = 10;
+    GEGLU = 11;
+    SWIGLU = 12;
+}
+
+enum UnaryType {
+    UNARYTYPE_UNDEFINED = 0;
+    TANH = 1;
+    GELU_ERF = 2;
+    GELU_TANH = 3;
+    RELU = 4;
+    SILU = 5;
+}
+
+message ConfigProto {
+    DataType dtype = 1;
+    float ln_eps = 2;
+    int32 num_heads = 3;
+    bool with_weights = 4;
+    int32 enc_layer = 5;
+    int32 dec_layer = 6;
+    bool is_generate = 7;
+    // generate config
+    int64 start_dec_id = 8;
+    int64 end_dec_id = 9;
+    int32 num_beam = 10;
+    int64 data_mode = 11;
+    UnaryType activation = 12;
+    int32 d_model = 13;
+    int32 enc_num_heads = 14;
+    int32 dec_num_heads = 15;
+    int32 multi_query_group_num = 16;
+    int32 kv_channels = 17;
+    int32 size_per_head = 18;
+}
+
+message BuildVersion {
+    int32 major = 1; // this is not git tag.
+    int32 minor = 2;
+    int32 patch = 3;
+    string git_commit = 4;
+    string git_tag = 5;
+}
+
+message WeightHash {
+    string algorithm = 1;
+    repeated int64 hash_length = 2;
+    repeated string hash = 3;
+}
+
+message BuildMetaProto {
+    BuildVersion version = 1;
+    WeightHash weight_hash = 2;
+    map<string, string> torch_build_config = 3;
+}
+
+message TransformerProto {
+    string model_type = 1;
+    ConfigProto model_conf = 2;
+    repeated TensorProto inputs = 3;
+    repeated TensorProto outputs = 4;
+    map<string, TensorProto> weights = 5;
+    map<string, GraphProto> graphs = 6;
+    repeated string graph_names = 7;
+    BuildMetaProto build_meta = 8;
+}
+
+message GraphProto {
+    repeated TensorProto inputs = 1;
+    repeated TensorProto outputs = 2;
+    repeated OperatorProto ops = 3;
+}
+
+message OperatorProto {
+    string op_type = 1;
+    string op_name = 2;
+    map<string, bytes> attr = 3;
+    repeated TensorProto inputs = 4;
+    repeated TensorProto outputs = 5;
+    repeated TensorProto weights = 6;
+}
+
+message TensorProto {
+    string name = 1;
+    bytes data = 2;
+}

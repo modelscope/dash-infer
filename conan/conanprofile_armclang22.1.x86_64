@@ -1,0 +1,30 @@
+toolchain={{ os.getenv("ARM_COMPILER_ROOT") }}
+#target_host=llvm
+cc_compiler=clang
+cxx_compiler=clang++
+
+[env]
+CONAN_CMAKE_FIND_ROOT_PATH=$toolchain  # Optional, for CMake to find things in that folder
+CONAN_CMAKE_SYSROOT=$toolchain  # Optional, if we want to define sysroot
+#CHOST=$target_host
+AR=armllvm-ar
+#AS=$target_host-as
+RANLIB=armllvm-ranlib
+CC=armclang
+CXX=armclang++
+#STRIP=$target_host-strip
+#RC=$target_host-windres
+
+[settings]
+os=Linux
+os_build=Linux
+arch=armv8
+arch_build=armv8.3
+compiler=clang
+compiler.version=13
+compiler.libcxx=libstdc++11
+build_type=Release
+
+[options]
+
+[build_requires]
