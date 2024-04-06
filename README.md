@@ -1,3 +1,18 @@
+<div align="center">
+
+[![PyPI](https://img.shields.io/pypi/v/dashinfer)](https://pypi.org/project/dashinfer/)
+<!-- [![Documentation Status](https://readthedocs.org/projects/easy-cv/badge/?version=latest)](https://easy-cv.readthedocs.io/en/latest/) -->
+
+<h4 align="center">
+    <p>
+        <b>English</b> |
+        <a href="https://github.com/modelscope/dash-infer/blob/main/README_CN.md">中文</a>
+    </p>
+</h4>
+
+
+</div>
+
 # Introduction
 
 DashInfer is a production-level Large Language Pre-trained Model (LLM) inference engine developed by Tongyi Laboratory, which is currently applied to the backend inference of Alibaba Tongyi-Qwen, Tongyi-Lingma, and DashScope Platform.
@@ -23,10 +38,10 @@ The open-source version of this project encompasses the CPU (x86, ARMv9) inferen
 
 ## Documents
 
-[installation.md](documents/EN/installation.md)
-[examples_cpp.md](documents/EN/examples_cpp.md)
-[examples_python.md](documents/EN/examples_python.md)
-[performance.md](documents/EN/performance.md)
+- [installation.md](documents/EN/installation.md)
+- [examples_cpp.md](documents/EN/examples_cpp.md)
+- [examples_python.md](documents/EN/examples_python.md)
+- [performance.md](documents/EN/performance.md)
 
 # Supported Hardware and Data Types
 
