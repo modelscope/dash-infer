@@ -15,11 +15,9 @@
 
 # Introduction
 
-DashInfer is a production-level Large Language Pre-trained Model (LLM) inference engine developed by Tongyi Laboratory, which is currently applied to the backend inference of Alibaba Tongyi-Qwen, Tongyi-Lingma, and DashScope Platform.
+DashInfer is a native inference engine for Large Language Pre-trained Models (LLMs), with both C++ and Python interfaces. 
 
-DashInfer is written in C++ Runtime, and provides both C++ and Python language interfaces, aiming to deliver a production-level implementation characterized by high inference performance, high model accuracy, high stability, and high portability with minimal third-party dependencies.
-
-The open-source version of this project encompasses the CPU (x86, ARMv9) inference aspect of the engine, marking it as the first CPU LLM inference engine in the open-source community to support both **Continuous Batching** and **NUMA Aware** capabilities. DashInfer can fully utilize the performance of server CPUs to provide more hardware options for inferencing LLM models up to 14B. It has already been applied to some online API service on the DashScope Platform.
+Written in C++ runtime, DashInfer aims to deliver production-level implementations highly optimized for various hardware architectures, including x86 and ARMv9. It supports both Continuous Batching and NUMA Aware capabilities for CPU, and can fully utilize the capabilities of modern server-grade CPUs to host LLMs with size upto 14B. 
 
 ## Main Features
 
@@ -32,8 +30,8 @@ The open-source version of this project encompasses the CPU (x86, ARMv9) inferen
 - **PTQ Quantization**: Using DashInfer's InstantQuant (IQ), weight-only quantization acceleration can be achieved without training fine-tuning, improving deployment efficiency. After accuracy evaluation, IQ has no impact on model accuracy. The current version supports weight-only 8-bit quantization on ARM CPUs.
 - **Optimized Computation Kernels**: With OneDNN and self-developed assembly kernels, DashInfer is able to maximize the performance of the hardware on both ARM and x86.
 - **NUMA Aware Design**: DashInfer supports tensor parallel inference across multiple NUMA nodes, fully leveraging the computational power of server CPUs. By numactl and a multi-process architecture, the NUMA affinity of threads is accurately controlled to fully utilize the performance of multi-node CPUs and avoid the performance degradation caused by cross-NUMA access. For more information on NUMA, see: [Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html).
-- **Context Length**: The current version supports up to 11k context length, with plans to support even longer context lengths in the future.
-- **Multi-Language API Interfaces**: Provide C++ and Python interfaces. You can directly use the C++ interface to Java, Rust and other programming languages.
+- **Context Length**: The current version supports up to 11k context length, with plans to extend to longer context lengths in the future.
+- **Multi-Language API Interfaces**: Both C++ and Python interfaces are supported. It is possible to extend C++ interface to Java, Rust and other programming languages, via standard cross-language interfaces.
 - **Operating System Support**: Supports mainstream Linux server operating systems like Centos7 and Ubuntu22.04, and provides corresponding Docker images.
 
 ## Documents
