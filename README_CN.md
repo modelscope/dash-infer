@@ -1,10 +1,10 @@
 # 简介
 
-DashInfer是由通义实验室开发的生产级别的大语言预训练模型（LLM）推理引擎，目前已应用于阿里巴巴通义千问、通义灵码、灵积平台的后端推理。
+DashInfer是由通义实验室开发的生产级别的预训练大语言模型（LLM）推理引擎，目前已应用于阿里巴巴通义千问、通义灵码、灵积平台的后端推理。
 
 DashInfer采用C++ Runtime编写，提供C++和Python语言接口，旨在提供生产级别的高性能、高模型精度、高稳定性、高可移植性，同时仅需要最小程度的第三方依赖的实现。
 
-本项目开源版本是该引擎的CPU（x86、ARMv9）推理部分的实现，是开源社区**首个同时支持Continuous Batching 和 NUMA Aware 的 CPU LLM 推理引擎**。DashInfer可以充分发挥服务器CPU的性能，为推理14B以下的LLM模型提供更多的硬件选择。目前已在灵积平台上应用于部分LLM模型的线上API服务中。
+本项目开源版本是该引擎的CPU（x86、ARMv9）推理部分的实现，是开源社区**首个同时支持Continuous Batching 和 NUMA-Aware 的 CPU LLM 推理引擎**。DashInfer可以充分发挥服务器CPU的性能，为推理14B以下的LLM模型提供更多的硬件选择。目前已在灵积平台上应用于部分LLM模型的线上API服务中。
 
 ## DashInfer的主要特征
 
@@ -16,24 +16,24 @@ DashInfer采用C++ Runtime编写，提供C++和Python语言接口，旨在提供
 - **支持主流LLM开源模型**：支持主流的开源LLM模型，包括Qwen、LLaMA、ChatGLM等，支持Huggingface格式的模型读取。
 - **PTQ量化**：使用DashInfer的InstantQuant（IQ），无需训练微调即可实现weight-only量化加速，提高部署效率。经过精度测试，IQ对模型精度不会产生影响。目前版本支持ARM CPU上的weight-only 8-bit量化。
 - **优化的计算Kernel**：结合OneDNN和自研汇编kernel，DashInfer能够在ARM和x86上发挥硬件的最大性能。
-- **NUMA Aware Design**：支持多NUMA的tensor并行推理，充分发挥服务器级CPU的算力。通过numactl和多进程架构，精准控制计算线程的NUMA亲和性，充分利用多节点CPU的性能，并且避免跨NUMA访存带来性能下降问题。关于多NUMA的性能指导可以参考：[Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html)。
-- **Context Length**：目前版本支持11k的Context Length，未来还会继续支持更长Context Length。
+- **NUMA-Aware**：支持多NUMA的tensor并行推理，充分发挥服务器级CPU的算力。通过numactl和多进程架构，精准控制计算线程的NUMA亲和性，充分利用多节点CPU的性能，并且避免跨NUMA访存带来性能下降问题。关于多NUMA的性能指导可以参考：[Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html)。
+- **上下文长度（Context Length）**：目前版本支持11k的Context Length，未来还会继续支持更长Context Length。
 - **提供多语言API接口**：提供C++和Python接口，能够直接使用C++接口对接到Java、Rust等其他编程语言。
-- **操作系统支持**：支持Centos7、Ubuntu22.04等主流Linux服务器操作系统，并提供对应的Docker。
+- **操作系统支持**：支持Centos7、Ubuntu22.04等主流Linux服务器操作系统，并提供对应的Docker镜像。
 
 ## 文档
 
-[installation.md](documents/CN/installation.md)
-[examples_cpp.md](documents/CN/examples_cpp.md)
-[examples_python.md](documents/CN/examples_python.md)
-[performance.md](documents/EN/performance.md)
+- [安装](documents/CN/installation.md)
+- [C++示例](documents/CN/examples_cpp.md)
+- [Python示例](documents/CN/examples_python.md)
+- [性能测试](documents/EN/performance.md)
 
 # 硬件支持和数据类型
 
 ## 硬件支持
 
-- **x86 CPU**：要求硬件至少需要支持AVX2指令集。对于第五代至强处理器（Emerald Rapids）、第四代至强处理器（Sapphire Rapids）等（对应于阿里云第8代ECS实例（如g8i）），采用AMX矩阵指令加速计算。
-- **ARMv9 CPU**：要求硬件支持SVE指令集。支持如倚天710等ARMv9架构处理器（对应于阿里云第8代ECS实例（如g8y）），采用SVE向量指令加速计算。
+- **x86 CPU**：要求硬件至少需要支持AVX2指令集。对于第五代至强（Xeon）处理器（Emerald Rapids）、第四代至强（Xeon）处理器（Sapphire Rapids）等（对应于阿里云第8代ECS实例，如g8i），采用AMX矩阵指令加速计算。
+- **ARMv9 CPU**：要求硬件支持SVE指令集。支持如倚天（Yitian）710等ARMv9架构处理器（对应于阿里云第8代ECS实例，如g8y），采用SVE向量指令加速计算。
 
 ## 数据类型
 
@@ -71,9 +71,9 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 ![Workflow and Dependency](documents/resources/image/workflow-deps.jpg?row=true)
 
-1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列话，并生成DashInfer格式的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
+1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列化，并生成DashInfer格式的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
 
-2. **模型推理**：此步骤负责执行模型推理，使用DashInfer推理序列化后的模型使用序列化的模型，不依赖PyTorch等组件。DashInfer采用[DLPack](https://github.com/dmlc/dlpack)格式的tensor来实现与外部框架（如PyTorch）的交互。DLPack格式的tensor，可以通过手动创建或由深度学习框架的tensor转换函数产生。对于C++接口，由于已经将几乎所有依赖静态编译，仅对openmp运行时库以及C++系统库的有依赖。我们进行了[链接符号处理](https://anadoxin.org/blog/control-over-symbol-exports-in-gcc.html/)，以确保只有DashInfer的API接口符号可见，避免与客户系统中已有的公共库（如protobuf等）发生版本冲突。
+2. **模型推理**：此步骤负责执行模型推理，使用DashInfer推理序列化后的模型，不依赖PyTorch等组件。DashInfer采用[DLPack](https://github.com/dmlc/dlpack)格式的tensor来实现与外部框架（如PyTorch）的交互。DLPack格式的tensor，可以通过手动创建或由深度学习框架的tensor转换函数产生。对于C++接口，由于已经将几乎所有依赖静态编译，仅对openmp运行时库以及C++系统库的有依赖。我们进行了[链接符号处理](https://anadoxin.org/blog/control-over-symbol-exports-in-gcc.html/)，以确保只有DashInfer的API接口符号可见，避免与客户系统中已有的公共库（如protobuf等）发生版本冲突。
 
 > 注意：使用Python接口时，可以将步骤1和2的代码放在一起。由于缺少C++层面加载Huggingface模型的功能，C++接口只能进行DashInfer格式的模型推理，因此在使用C++接口前，必须先用Python接口先对模型进行序列化。
 
@@ -138,12 +138,12 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 ## 代码编译阶段
 
-- [conan](https://conan.io/) (1.60.0): For managing c++ third-party dependencies.
+- [conan](https://conan.io/) (1.60.0): For managing C++ third-party dependencies.
 - [cmake](https://cmake.org/) (3.18+): Build system.
 
 ## 模型转换阶段
 
-- [PyTorch](https://pytorch.org/) (cpu): For reading model files, no special version requirements.
+- [PyTorch](https://pytorch.org/) (CPU): For reading model files, no special version requirements.
 - [transformers](https://github.com/huggingface/transformers): For loading model parameters and tokenizer.
 
 ## 模型推理阶段
@@ -152,8 +152,8 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 - [pybind11](https://github.com/pybind/pybind11)(2.8): For binding python interfaces.
 - [onednn](https://github.com/oneapi-src/oneDNN), [mkl](https://www.intel.com/content/www/us/en/docs/onemkl/get-started-guide/2023-0/overview.html): BLAS libraries, for accelerating GEMM calculations.
 - [openmp](https://www.openmp.org/): A standard parallel programming library.
-- [openmpi](https://www.open-mpi.org/): For realizing multi-NUMA service architecture.
-- [grpc](https://grpc.io/): For realizing multi-NUMA service architecture.
+- [openmpi](https://www.open-mpi.org/): For implementing multi-NUMA service architecture.
+- [grpc](https://grpc.io/): For implementing multi-NUMA service architecture.
 
 # 未来规划
 
