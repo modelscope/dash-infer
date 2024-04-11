@@ -1,0 +1,11 @@
+# demo requirements
+huggingface_hub
+modelscope
+tabulate
+gradio
+
+# model requirements
+sentencepiece
+accelerate
+transformers_stream_generator
+tiktoken

@@ -500,9 +500,6 @@ AsStatus AsClientContext::LaunchService() {
   LOG(INFO) << "pid: " << pid << " numa_nums: " << env_numa_str
             << " size cmd: " << cmd.size() << " size args: " << args.size();
   if (pid == 0) {
-    // 设置环境变量
-    putenv("OMPI_ALLOW_RUN_AS_ROOT=1");
-    putenv("OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1");
     // launch mpi daemon process
     LOG(INFO) << "launch service cmd: " << cmd[0];
     int ret = execvp(cmd[0].c_str(), args.data());

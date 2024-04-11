@@ -4,6 +4,7 @@
  */
 
 #include "allsparkz_util.h"
+#include "sparse_util.h"
 
 #include <common/common.h>
 

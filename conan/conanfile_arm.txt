@@ -3,7 +3,6 @@
   gtest/1.11.0
   glog/0.5.0
   libunwind/1.7.2
-  xz_utils/5.4.5
   yaml-cpp/0.7.0
   pybind11/2.8.1
   openmpi/4.1.0
@@ -20,3 +19,6 @@
 [options]
   glog:with_gflags=False
   protobuf:with_zlib=False
+  libsystemd:with_xz=False       # remove xz_utils dep
+  libunwind:minidebuginfo=False  # remove xz_utils dep
+  libunwind:zlibdebuginfo=False  # remove zlib dep

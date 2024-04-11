@@ -26,10 +26,8 @@ install requirements:
 
 ```shell
 conda install -y pytorch-cpu -c pytorch # install cpu-only pytorch
-pip3 install huggingface_hub # for huggingface user
-# pip3 install modelscope # for modelscope user
-pip3 install tabulate gradio # requirements for running examples
-pip3 install sentencepiece accelerate transformers_stream_generator tiktoken # model requirements
+
+pip install -r examples/python/requirements.txt
 ```
 
 install DashInfer python package:
@@ -136,15 +134,22 @@ docker run -d --name="dashinfer-dev-${USER}" \
 docker exec -it "dashinfer-dev-${USER}" /bin/bash
 ```
 
+## 代码克隆
+
+```shell
+git clone git@github.com:modelscope/dash-infer.git
+git lfs pull
+```
+
 ## 第三方依赖
 
 DashInfer使用conan管理第三方依赖。
 
 在首次进行编译时，可能需要较长时间下载第三方依赖包。
 
-对于官方提供的docker image，我们提供编译好的第三方依赖。下载对应的压缩包，解压缩后放到`~/.conan`目录下，可以缩短第三方依赖的编译时间。
+对于官方提供的docker image，我们提供打包好的conan package。若在您的设备上，无法自动下载某些依赖，可以手动下载对应的压缩包，解压缩后放到`~/.conan`目录下。
 
-预编译conan package:
+Conan package archive:
 
 - x86, ubuntu: [link](TODO)
 - x86, centos: [link](TODO)
@@ -157,18 +162,19 @@ DashInfer使用conan管理第三方依赖。
 - x86 CPU
 
 ```shell
-AS_PLATFORM="x86" AS_BUILD_PACKAGE=ON AS_RELEASE_VERSION="1.0.0" ./build.sh
+AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" AS_BUILD_PACKAGE=ON AS_CXX11_ABI=ON ./build.sh
 ```
 
 - ARM CPU
 
 ```shell
-AS_PLATFORM="armclang" AS_BUILD_PACKAGE=ON AS_RELEASE_VERSION="1.0.0" ./build.sh
+AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" AS_BUILD_PACKAGE=ON AS_CXX11_ABI=ON ./build.sh
 ```
 
 > 说明：
-> - AS_BUILD_PACKAGE选项：编译Linux软件安装包，对于Ubuntu操作系统，编译.deb安装包，对于CentOS，编译.rpm安装包，编译得到的.deb/.rpm安装包，位于`<path_to_dashinfer>/build`目录下；
-> - AS_RELEASE_VERSION：指定安装包的版本号。
+> - AS_RELEASE_VERSION：指定安装包的版本号；
+> - AS_BUILD_PACKAGE：编译Linux软件安装包，对于Ubuntu操作系统，编译.deb安装包，对于CentOS，编译.rpm安装包，编译得到的.deb/.rpm安装包，位于`<path_to_dashinfer>/build`目录下；
+> - AS_CXX11_ABI：是否启用CXX11 ABI。
 
 ## 编译python包
 
@@ -177,13 +183,13 @@ AS_PLATFORM="armclang" AS_BUILD_PACKAGE=ON AS_RELEASE_VERSION="1.0.0" ./build.sh
 - x86 CPU
 
 ```shell
-AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" python3 setup.py bdist_wheel
+AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" AS_CXX11_ABI="ON" python3 setup.py bdist_wheel
 ```
 
 - ARM CPU
 
 ```shell
-AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" python3 setup.py bdist_wheel
+AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" AS_CXX11_ABI="ON" python3 setup.py bdist_wheel
 ```
 
 编译得到的.whl安装包位于`<path_to_dashinfer>/python/dist`目录。

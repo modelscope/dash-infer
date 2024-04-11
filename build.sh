@@ -32,13 +32,14 @@ if [ ! -d "./build"  ]; then
     mkdir build && cd build
     if [ "${with_platform,,}" == "armclang" ]; then
       conan profile new cxx11abi --detect --force
-      cp -f ../conan/conanprofile_armclang22.1.x86_64 ~/.conan/profiles/cxx11abi
+      cp -f ../conan/conanprofile_armclang.aarch64 ~/.conan/profiles/cxx11abi
+      cp -r ../conan/settings_arm.yml ~/.conan/settings.yml
       if [ "$enable_glibcxx11_abi" == "ON" ]; then
         conan profile update settings.compiler.libcxx=libstdc++11 cxx11abi
       else
         conan profile update settings.compiler.libcxx=libstdc++ cxx11abi
       fi
-      conan install ../conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf
+      conan install ../conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil
     else
       conan profile new cxx11abi --detect --force
       if [ "$enable_glibcxx11_abi" == "ON" ]; then
@@ -60,7 +61,8 @@ if [ "${with_platform,,}" == "x86" ]; then
       -DCMAKE_BUILD_TYPE=${build_type} \
       -DCONFIG_HOST_CPU_TYPE=X86 \
       -DENABLE_GLIBCXX11_ABI=${enable_glibcxx11_abi} \
-      -DALLSPARK_CBLAS=MKL
+      -DALLSPARK_CBLAS=MKL \
+      -DBUILD_PACKAGE=${build_package} 
 elif [ "${with_platform,,}" == "armclang" ]; then
   cmake .. \
       -DCMAKE_BUILD_TYPE=${build_type} \
@@ -68,7 +70,9 @@ elif [ "${with_platform,,}" == "armclang" ]; then
       -DENABLE_GLIBCXX11_ABI=${enable_glibcxx11_abi} \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
       -DENABLE_ARMCL=ON \
+      -DBUILD_PACKAGE=${build_package} \
       -DALLSPARK_CBLAS=BLIS \
+      -DENABLE_AVX2=OFF \
       -DENABLE_ARM_V84_V9=ON \
       -DENABLE_BF16=ON \
       -DENABLE_FP16=ON \

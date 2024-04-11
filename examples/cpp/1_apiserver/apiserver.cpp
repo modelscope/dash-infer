@@ -399,6 +399,7 @@ int main(int argc, const char** argv) {
           .withWeightsPath(asparam_file)
           .withEngineMaxLength(default_engine_max_length)
           .withEngineMaxBatch(16)
+          .withMatmulPrecision("medium")
           .withNumThreads(compute_cores)  // this number is worker's thread
                                           // number, use phy core(not phy-thread
                                           // number) number in side of each numa

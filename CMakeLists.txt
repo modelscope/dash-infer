@@ -11,7 +11,7 @@ set(project_version_in_env ${STRIPED_VERSION_STRING})
 
 message("Build AllSpark with version:${project_version_in_env}")
 
-project(HIE-AllSpark LANGUAGES C CXX VERSION ${project_version_in_env})
+project(DashInfer LANGUAGES C CXX VERSION ${project_version_in_env})
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build,
@@ -41,8 +41,8 @@ option(ENABLE_ARM_V84_V9 "enable v8.4-a or higher version of Arm instructions, s
 option(ENABLE_FP16 "build with fp16 mode" ON)
 option(ENABLE_BF16 "build with bf16 mode" ON)
 option(ENABLE_SPARSE "build with sparse mode" ON)
-option(BUILD_PYTHON "build with python api" ON)
-option(BUILD_PACKAGE "build rpm or deb package" ON)
+option(BUILD_PYTHON "build with python api" OFF)
+option(BUILD_PACKAGE "build rpm or deb package" OFF)
 option(MEM_CHECK "check memory" OFF)
 option(LOCK_CHECK "check deadlock" OFF)
 option(ENABLE_GLIBCXX11_ABI "build with cxx11 abi" ON)

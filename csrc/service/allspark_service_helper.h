@@ -471,7 +471,7 @@ void makeLauchServiceCmd(std::vector<std::string>& cmd, int node_nums,
                          const std::string& daemon_path, int client_pid,
                          int numa_offset = 0) {
   //   const char* args[] = {
-  //   "mpirun",
+  //   "mpirun", "-mca", "plm_rsh_agent", "false", "--allow-run-as-root",
   //   "-n", "1",
   //   "numactl", "-m", "0", "-N", "0", "allspark_daemon", "client_pid",
   //   "rank_id" ":",
@@ -481,6 +481,12 @@ void makeLauchServiceCmd(std::vector<std::string>& cmd, int node_nums,
   // };
   cmd.clear();
   cmd.push_back(daemon_path + "/mpirun");
+  // allow to run without plm_rsh_agent
+  cmd.push_back("-mca");
+  cmd.push_back("plm_rsh_agent");
+  cmd.push_back("false");
+  // allow to run as root
+  cmd.push_back("--allow-run-as-root");
   for (int i = 0; i < node_nums; i++) {
     cmd.push_back("-n");
     cmd.push_back("1");

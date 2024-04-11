@@ -21,7 +21,7 @@ os_build=Linux
 arch=armv8
 arch_build=armv8.3
 compiler=clang
-compiler.version=13
+compiler.version=18
 compiler.libcxx=libstdc++11
 build_type=Release
 

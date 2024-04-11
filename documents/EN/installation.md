@@ -26,10 +26,8 @@ install requirements:
 
 ```shell
 conda install -y pytorch-cpu -c pytorch # install cpu-only pytorch
-pip3 install huggingface_hub # for huggingface user
-# pip3 install modelscope # for modelscope user
-pip3 install tabulate gradio # requirements for running examples
-pip3 install sentencepiece accelerate transformers_stream_generator tiktoken # model requirements
+
+pip install -r examples/python/requirements.txt
 ```
 
 install DashInfer python package:
@@ -136,15 +134,22 @@ Run the container:
 docker exec -it "dashinfer-dev-${USER}" /bin/bash
 ```
 
+## Clone the Repository
+
+```shell
+git clone git@github.com:modelscope/dash-infer.git
+git lfs pull
+```
+
 ## Third-party Dependencies
 
 DashInfer uses conan to manage third-party dependencies.
 
 During the initial compilation, downloading third-party dependency packages may take a considerable amount of time.
 
-For the official docker image, we provide pre-compiled packages. Download the corresponding zip archive, unzip it and put it in the `~/.conan` directory to shorten the compilation time of the third-party dependencies.
+For the official docker image, we provide a conan package archive. If some of the packages are not accessible on your device, please download the corresponding zip archive, unzip it and put it in the `~/.conan` directory.
 
-Pre-compiled conan packages:
+Conan package archive:
 
 - x86, ubuntu: [link](TODO)
 - x86, centos: [link](TODO)
@@ -157,18 +162,19 @@ Execute the following command under DashInfer root path:
 - x86 CPU
 
 ```shell
-AS_PLATFORM="x86" AS_BUILD_PACKAGE=ON AS_RELEASE_VERSION="1.0.0" ./build.sh
+AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" AS_BUILD_PACKAGE=ON AS_CXX11_ABI=ON ./build.sh
 ```
 
 - ARM CPU
 
 ```shell
-AS_PLATFORM="armclang" AS_BUILD_PACKAGE=ON AS_RELEASE_VERSION="1.0.0" ./build.sh
+AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" AS_BUILD_PACKAGE=ON AS_CXX11_ABI=ON ./build.sh
 ```
 
 > Note:
-> - AS_BUILD_PACKAGE option: Compile Linux software installation packages. For Ubuntu, it compiles .deb packages; for CentOS, it compiles .rpm packages. The compiled .deb/.rpm packages is located in the `<path_to_dashinfer>/build`.
 > - AS_RELEASE_VERSION: Specifies the version number of the installation package.
+> - AS_BUILD_PACKAGE option: Compile Linux software installation packages. For Ubuntu, it compiles .deb packages; for CentOS, it compiles .rpm packages. The compiled .deb/.rpm packages is located in the `<path_to_dashinfer>/build`.
+> - AS_CXX11_ABI: Enable or disable CXX11 ABI.
 
 ## Build Python Package
 
@@ -177,13 +183,13 @@ Execute the following command under `<path_to_dashinfer>/python`:
 - x86 CPU
 
 ```shell
-AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" python3 setup.py bdist_wheel
+AS_PLATFORM="x86" AS_RELEASE_VERSION="1.0.0" AS_CXX11_ABI="ON" python3 setup.py bdist_wheel
 ```
 
 - ARM CPU
 
 ```shell
-AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" python3 setup.py bdist_wheel
+AS_PLATFORM="armclang" AS_RELEASE_VERSION="1.0.0" AS_CXX11_ABI="ON" python3 setup.py bdist_wheel
 ```
 
 The compiled .whl installer is located in the `<path_to_dashinfer>/python/dist`.

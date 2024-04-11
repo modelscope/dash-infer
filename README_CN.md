@@ -1,10 +1,8 @@
 # 简介
 
-DashInfer是由通义实验室开发的生产级别的预训练大语言模型（LLM）推理引擎，目前已应用于阿里巴巴通义千问、通义灵码、灵积平台的后端推理。
+DashInfer用于推理预训练大语言模型（LLM）的推理引擎。
 
-DashInfer采用C++ Runtime编写，提供C++和Python语言接口，旨在提供生产级别的高性能、高模型精度、高稳定性、高可移植性，同时仅需要最小程度的第三方依赖的实现。
-
-本项目开源版本是该引擎的CPU（x86、ARMv9）推理部分的实现，是开源社区**首个同时支持Continuous Batching 和 NUMA-Aware 的 CPU LLM 推理引擎**。DashInfer可以充分发挥服务器CPU的性能，为推理14B以下的LLM模型提供更多的硬件选择。目前已在灵积平台上应用于部分LLM模型的线上API服务中。
+DashInfer采用C++ Runtime编写，提供C++和Python语言接口。DashInfer具有生产级别的高性能表现，适用于多种CPU架构，包括x86和ARMv9。DashInfer支持连续批处理（Continuous Batching）和多NUMA推理（NUMA-Aware），能够充分利用服务器级CPU的算力，为推理14B及以下的LLM模型提供更多的硬件选择。
 
 ## DashInfer的主要特征
 
@@ -71,11 +69,13 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 ![Workflow and Dependency](documents/resources/image/workflow-deps.jpg?row=true)
 
-1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列化，并生成DashInfer格式的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
+1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列化，并生成DashInfer格式（.asparam、.asgraph）的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
 
 2. **模型推理**：此步骤负责执行模型推理，使用DashInfer推理序列化后的模型，不依赖PyTorch等组件。DashInfer采用[DLPack](https://github.com/dmlc/dlpack)格式的tensor来实现与外部框架（如PyTorch）的交互。DLPack格式的tensor，可以通过手动创建或由深度学习框架的tensor转换函数产生。对于C++接口，由于已经将几乎所有依赖静态编译，仅对openmp运行时库以及C++系统库的有依赖。我们进行了[链接符号处理](https://anadoxin.org/blog/control-over-symbol-exports-in-gcc.html/)，以确保只有DashInfer的API接口符号可见，避免与客户系统中已有的公共库（如protobuf等）发生版本冲突。
 
-> 注意：使用Python接口时，可以将步骤1和2的代码放在一起。由于缺少C++层面加载Huggingface模型的功能，C++接口只能进行DashInfer格式的模型推理，因此在使用C++接口前，必须先用Python接口先对模型进行序列化。
+> 说明：
+> - .asparam、.asgraph是由DashInfer内核（allspark）定义的一种特殊的模型格式。
+> - 使用Python接口时，可以将步骤1和2的代码放在一起。由于缺少C++层面加载Huggingface模型的功能，C++接口只能进行DashInfer格式的模型推理，因此在使用C++接口前，必须先用Python接口先对模型进行序列化。
 
 ## 单NUMA架构图
 

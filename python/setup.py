@@ -9,6 +9,7 @@ import subprocess
 from setuptools import setup, Extension, find_namespace_packages
 from setuptools.command.build_ext import build_ext
 
+
 from jinja2 import Template
 
 
@@ -29,15 +30,16 @@ class CMakeBuild(build_ext):
         os.makedirs(self.build_temp, exist_ok=True)
         config = os.getenv("AS_BUILD_TYPE", "Release")
         as_platform = os.getenv("AS_PLATFORM", "x86")
-        enable_glibcxx11_abi = os.getenv("AS_CXX11_ABI", "ON")
+        enable_glibcxx11_abi = os.getenv("AS_CXX11_ABI", "OFF")
+        # python package keep c++03 abi.
 
         cmake_args = []
 
         cmake_args_x86 = [
             "-DBUILD_PYTHON=ON",
+            "-DBUILD_PACKAGE=ON",
             "-DCMAKE_BUILD_TYPE=" + config,
-            "-DPYTHON_LIB_DIRS=" + str(pathlib.Path(extdir)) +
-            "/dashinfer/allspark",
+            "-DPYTHON_LIB_DIRS=" + str(pathlib.Path(extdir)) + "/dashinfer/allspark",
             "-DMEM_CHECK=OFF",
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DENABLE_ARMCL=OFF",
@@ -50,9 +52,9 @@ class CMakeBuild(build_ext):
 
         cmake_args_arm = [
             "-DBUILD_PYTHON=ON",
+            "-DBUILD_PACKAGE=ON",
             "-DCMAKE_BUILD_TYPE=" + config,
-            "-DPYTHON_LIB_DIRS=" + str(pathlib.Path(extdir)) +
-            "/dashinfer/allspark",
+            "-DPYTHON_LIB_DIRS=" + str(pathlib.Path(extdir)) + "/dashinfer/allspark",
             "-DMEM_CHECK=OFF",
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DCONFIG_HOST_CPU_TYPE=ARM",
@@ -95,17 +97,15 @@ class CMakeBuild(build_ext):
 
         conan_install_arm = Template(
             "conan profile new cxx11abi --detect --force\n" +
-            "cp -f {{cwd_parent}}/conan/conanprofile_armclang22.1.x86_64 ~/.conan/profiles/cxx11abi\n"
-            +
-            "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n"
-            +
-            "conan install {{cwd_parent}}/conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf"
+            "cp -f {{cwd_parent}}/conan/conanprofile_armclang.aarch64 ~/.conan/profiles/cxx11abi\n" +
+            "cp -r {{cwd_parent}}/conan/settings_arm.yml ~/.conan/settings.yml\n" +
+            "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n" +
+            "conan install {{cwd_parent}}/conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil"
         ).render(libcxx_setting=libcxx_setting, cwd_parent=str(cwd.parent))
 
         conan_install_other = Template(
             "conan profile new cxx11abi --detect --force\n" +
-            "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n"
-            +
+            "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n" +
             "conan install {{cwd_parent}}/conan/conanfile.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil"
         ).render(libcxx_setting=libcxx_setting, cwd_parent=str(cwd.parent))
 
@@ -120,13 +120,15 @@ class CMakeBuild(build_ext):
 
         # because it's require a conan virtual env, so we must write a shell to execute it.
         bash_template = Template(
-            '#!/bin/bash -x\n' + 'gcc --version\n' + 'set -e\n'
+            '#!/bin/bash -x\n' + 'set -x ; gcc --version\n' + 'set -ex\n'
             # + '{{conan_install_cmd}}\n' # uncomment this line if you want to clean rebuild.
             +
             'if [ ! -f "activate.sh" ]; \nthen {{conan_install_cmd}};\n fi\n'  # conan install in here to make sure protoc and protobuf have same version.
             + 'source ./activate.sh\n' + '{{export_path_cmd}}\n' +
             'cmake --version\n' + './bin/protoc --version\n' +
-            'find -name protoc\n' + 'cmake {{dir}}  {{cmake_args}}\n' +
+            'find -name protoc\n'
+            +'echo current_dir && pwd; cmake {{dir}}  {{cmake_args}} || cmake {{dir}} {{cmake_args}}\n' +
+            'cmake --build . --target all -j32\n' +
             'cmake --build . --target install -j32\n' +
             './bin/protoc allspark.proto --proto_path {{cwd_parent}}/csrc/proto --python_out {{extdir}}/dashinfer/allspark/model\n'
             + '')
@@ -147,19 +149,24 @@ class CMakeBuild(build_ext):
         os.chdir(str(cwd))
         return  # build_extension
 
-
 setup(name="dashinfer",
       version=os.getenv("AS_RELEASE_VERSION", "1.0.0"),
       author="DashInfer team",
       author_email="Dash-Infer@alibabacloud.com",
-      description="DashInfer is a production-level Large Language Pre-trained Model (LLM) inference engine developed by Tongyi Laboratory, which is currently applied to the backend inference of Alibaba Tongyi-Qwen, Tongyi-Lingma, and DashScope Platform.",
+      description="DashInfer is a native inference engine for Large Language Pre-trained Models (LLMs) developed by Tongyi Laboratory.",
       classifiers=[
-          "Development Status :: 1 - Alpha",
-          "Programming Language :: Python :: 3",
+           'Development Status :: 4 - Beta',
+           'License :: OSI Approved :: Apache Software License',
+           'Operating System :: OS Independent',
+            'Programming Language :: Python :: 3',
+            'Programming Language :: Python :: 3.8',
+            'Programming Language :: Python :: 3.10',
       ],
-      license="Apache 2.0",
+      license="Apache License 2.0",
       packages=find_namespace_packages(include=['dashinfer.*']),
-      ext_modules=[CMakeExtension("dashinfer/allspark")],
+      ext_modules=[CMakeExtension("_allspark")],
       cmdclass={"build_ext": CMakeBuild},
-      install_requires=["transformers", "protobuf==3.18", "torch"],
+      install_requires=["protobuf==3.18"],
+      zip_safe=False,
+      python_requires=">=3.8",
       extra_compile_args=["-O3"])
