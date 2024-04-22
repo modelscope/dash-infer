@@ -4,12 +4,13 @@
  */
 
 #include "allsparkz_util.h"
-#include "sparse_util.h"
 
 #include <common/common.h>
 
 #include <cstring>
 #include <fstream>
+
+#include "sparse_util.h"
 
 #ifdef ENABLE_FP16
 #include <common/float16.h>

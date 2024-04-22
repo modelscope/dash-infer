@@ -25,50 +25,47 @@ pip install dashinfer-<dashinfer-version>-xxx.whl
 Run the python example under `<path_to_dashinfer>/examples/python/0_basic`:
 
 ```shell
-python basic_example_qwen.py
+python basic_example_qwen_v10.py
 ```
 
-The models in DashInfer format obtained from the conversion are stored in the `<path_to_dashinfer>/examples/python/outputs`. You can also specify the target path by modifying the `model_path` field of the model configuration file.
+The models in DashInfer format obtained from the conversion are stored in the `~/dashinfer_models/`. You can also specify the target path by modifying the `model_path` field of the model configuration file.
 
 ## Single/Multi-NUMA Inference
 
-DashInfer support Multi-NUMA inference.
-
-### Multi-NUMA Inference
-
-The examples use multi-NUMA reasoning by default and use `mpirun` + `numactl` to bind cpu cores for optimal performance.
-This approach requires `--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host` arguments when creating containers by docker run.
-
-### Single-NUMA Inference on Multi-NUMA CPUs
-
-On CPUs with multiple NUMA nodes, if only 1 NUMA node is needed for inference, `numactl` is also needed for core binding.
-This approach requires `--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host` arguments when creating containers by docker run.
-
-To use single-NUMA inference, you need to change the `device_ids` field in the model configuration file to the NUMA node number you want to run.
-
-```json
-"device_ids": [
-    0
-],
-```
+DashInfer support Single/Multi-NUMA inference.
 
 ### Single-NUMA Inference on Single-NUMA CPUs
 
-On CPUs with single NUMA nodes, `numactl` is not required.
+The examples use single-NUMA inference by default.
+On CPUs with single NUMA node, no special configuration is required.
 
-To use single-NUMA inference, you need to change the `device_ids` field in the model configuration file to be changed to `0`.
+### Single-NUMA Inference on Multi-NUMA CPUs
+
+On CPUs with multiple NUMA nodes, if only 1 NUMA node is needed for inference, `numactl` is necessary for core binding.
+This approach requires `--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host` arguments when creating containers by docker run.
+
+To use single-NUMA inference, you need to change the `device_ids` field in the model configuration file to the NUMA node number you want to use, and set the `multinode_mode` to be true.
 
 ```json
 "device_ids": [
     0
 ],
+"multinode_mode": true,
 ```
 
-And modify the engine type in the EngineHelper.py to `allspark.Engine()`
+### Multi-NUMA Inference
 
-```diff
-- self.engine = allspark.ClientEngine()
-+ self.engine = allspark.Engine()
+For multi-NUMA inference, use `mpirun` + `numactl` to bind cpu cores for optimal performance.
+This approach requires `--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host` arguments when creating containers by docker run.
+
+To use multi-NUMA inference, you need to change the `device_ids` field in the model configuration file to the NUMA node numbers you want to use, and set the `multinode_mode` to be true.
+
+```json
+"device_ids": [
+    0,
+    1
+],
+"multinode_mode": true,
 ```
 
 ## Replace Models
@@ -78,27 +75,27 @@ Replacing other models of the same structure requires following changes in basic
 1. config_file
 
 ```python
-config_file = "model_config/config_qwen_v10_7b.json"
+config_file = "model_config/config_qwen_v10_1_8b.json"
 ```
 
 2. HuggingFace (or ModelScope) model information
 
 ```python
 # download model from huggingface
- original_model = {
-     "source": "huggingface",
-     "model_id": "Qwen/Qwen-7B-Chat",
-     "revision": "",
-     "model_path": ""
- }
+original_model = {
+    "source": "huggingface",
+    "model_id": "Qwen/Qwen-1_8B-Chat",
+    "revision": "",
+    "model_path": ""
+}
 ```
 
 ```python
 # download model from modelscope
 original_model = {
     "source": "modelscope",
-    "model_id": "qwen/Qwen-7B-Chat",
-    "revision": "v1.1.5",
+    "model_id": "qwen/Qwen-1_8B-Chat",
+    "revision": "v1.0.0",
     "model_path": ""
 }
 ```
@@ -136,8 +133,11 @@ During these performance evaluations, the `early_stopping` parameter is set to f
 Enter the directory ``<path_to_dashinfer>/examples/python/1_performance`, and execute following command to run the example:
 
 ```shell
-python performance_test_qwen.py
+python performance_test_qwen_v15.py
+python performance_test_qwen_v15.py --device_ids 0 1 # test multi-NUMA performance
 ```
+
+> On CPUs with multiple NUMA nodes, please refer to [Single/Multi-NUMA Inference] (examples_python.md#L33) section for best performance.
 
 # 2_evaluation
 
@@ -151,7 +151,7 @@ The Gradio demo in the `<path_to_dashinfer>/examples/python/3_gradio` directory 
 
 ## Step 1: Model Conversion
 
-Run `basic_example_qwen.py` first to get the converted model.
+Run `basic_example_qwen_v10.py` first to get the converted model.
 
 ## Step 2: Network Configuration（Optional）
 
@@ -301,6 +301,7 @@ Here is an explanation of the parameters within the config:
 - `data_type`: The data type of the output. Options include: float32.
 - `device_type`: The inference hardware. Options include: CPU.
 - `device_ids`: The NUMA node used for inference. NUMA information of your CPU can be viewed with the Linux command `lscpu`.
+- `multinode_mode`: Whether or not the engine is running on a multi-NUMA CPU. Options include: true, false.
 - `convert_config`: Parameters related to model conversion.
     - `do_dynamic_quantize_convert`: Whether to quantize the weights. Options include: true, false. Currently, only ARM CPUs support quantization.
 - `engine_config`: Inference engine parameters.
@@ -327,5 +328,3 @@ Here is an explanation of the parameters within the config:
     - `weight_type`: The data type for weights in matrix multiplication. Options include: uint8.
     - `SubChannel`: Whether to perform sub-channel quantization on weights. Options include: true, false.
     - `GroupSize`: The granularity of sub-channel quantization. Options include: 64, 128, 256, 512.
-
-

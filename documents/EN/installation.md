@@ -4,12 +4,12 @@
 
 OS: Linux
 
-Python: 3.8, 3.10
+Python: 3.8, 3.9, 3.10, 3.11
 
 Tested compiler version:
 
 - gcc: 7.3.1, 11.4.0
-- armclang: 22.1
+- arm compiler: 22.1, 24.04
 
 For multi-NUMA inference, `numactl`, `openmpi` are required:
 
@@ -25,8 +25,6 @@ For multi-NUMA inference, `numactl`, `openmpi` are required:
 install requirements:
 
 ```shell
-conda install -y pytorch-cpu -c pytorch # install cpu-only pytorch
-
 pip install -r examples/python/requirements.txt
 ```
 
@@ -39,12 +37,6 @@ install DashInfer python package:
 ## Install C++ Package
 
 Download corresponding C++ package, and execute following command to install:
-
-Pre-built C++ Packages:
-
-- x86, ubuntu: [link](TODO)
-- x86, centos: [link](TODO)
-- arm, alinux: [link](TODO)
 
 for Ubuntu:
 
@@ -93,6 +85,16 @@ docker pull registry-1.docker.io/dashinfer/dev-alinux-arm:v1
 
 # python 3.10
 docker pull registry-1.docker.io/dashinfer/dev-alinux-arm:v1_py310
+```
+
+- arm, centos:
+
+```shell
+# python 3.8
+docker pull registry-1.docker.io/dashinfer/dev-centos8-arm:v1
+
+# python 3.10
+docker pull registry-1.docker.io/dashinfer/dev-centos8-arm:v1_py310
 ```
 
 Or build docker image from dockerfile:
@@ -146,14 +148,6 @@ git lfs pull
 DashInfer uses conan to manage third-party dependencies.
 
 During the initial compilation, downloading third-party dependency packages may take a considerable amount of time.
-
-For the official docker image, we provide a conan package archive. If some of the packages are not accessible on your device, please download the corresponding zip archive, unzip it and put it in the `~/.conan` directory.
-
-Conan package archive:
-
-- x86, ubuntu: [link](TODO)
-- x86, centos: [link](TODO)
-- arm, alinux: [link](TODO)
 
 ## Build C++ Package
 

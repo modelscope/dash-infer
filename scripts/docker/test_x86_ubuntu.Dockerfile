@@ -1,7 +1,7 @@
 FROM ubuntu:22.04
 
 RUN apt-get update && \
-    apt-get install build-essential cmake git vim python3-dev libcurl4-openssl-dev wget bzip2 numactl git-lfs rpm pip curl -y
+    apt-get install numactl libopenmpi-dev curl -y
 
 ARG PY_VER=3.8
 
@@ -32,23 +32,14 @@ ENV PATH=/miniconda/bin:${PATH}
 #   deepmodeling: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud\n\
 # " > /root/.condarc
 
-RUN conda clean -i && conda config --show channels && conda create -y --name ds_py python==${PY_VER} && conda update -n base conda
-SHELL ["conda", "run", "-n", "ds_py", "/bin/bash", "-c"]
-RUN echo "source activate ds_py" >> /root/.bashrc && source /root/.bashrc
-
-# build tools
-RUN conda install -y pybind11
+RUN conda clean -i && conda config --show channels && conda create -y --name test_py python==${PY_VER} && conda update -n base conda
+SHELL ["conda", "run", "-n", "test_py", "/bin/bash", "-c"]
+RUN echo "source activate test_py" >> /root/.bashrc && source /root/.bashrc
 
 ##########################################################################
 # uncomment if want to use pip mirror
 ##########################################################################
 # RUN mkdir -p /root/.pip/
 # RUN echo -e "[global]\ntrusted-host=mirrors.aliyun.com\nindex-url = http://mirrors.aliyun.com/pypi/simple\n\n[install]\nuse-wheel=yes" > /root/.pip/pip.conf
-
-RUN pip3 install --upgrade pip && pip3 install -U setuptools
-
-# engine requirements
-RUN conda install -y pytorch-cpu -c pytorch
-RUN pip3 install transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
 
 WORKDIR /root/

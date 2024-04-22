@@ -3,7 +3,7 @@
 1. 下载qwen.tiktoken文件
 
 ```shell
-wget -O qwen_v1.tiktoken "https://modelscope.cn/api/v1/models/qwen/Qwen-7B-Chat/repo?Revision=master&FilePath=qwen.tiktoken"
+wget -O qwen_v1.tiktoken "https://modelscope.cn/api/v1/models/qwen/Qwen-1_8B-Chat/repo?Revision=master&FilePath=qwen.tiktoken"
 ```
 
 2. 安装DashInfer C++ package
@@ -21,7 +21,7 @@ for CentOS:
 
 3. 模型转换
 
-使用pyhton脚本进行模型转换，以得到DashInfer格式的模型，参考[Python示例文档](examples_python.md)。
+使用pyhton脚本（例如`basic_example_qwen_v10.py`）进行模型转换，以得到DashInfer格式的模型，参考[Python示例文档](examples_python.md)。
 
 # 从源码编译示例代码
 
@@ -57,7 +57,7 @@ Basic example编译可以得到两个可执行文件：example_qwen_single_numa�
 例如：
 
 ```shell
-./example_qwen_single_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+./example_qwen_single_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### example_qwen_multi_numa
@@ -73,7 +73,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m <path_to_dash
 例如：
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 参数说明：
@@ -98,7 +98,7 @@ API server example演示了如何基于[restbed](https://github.com/Corvusoft/re
 例如：
 
 ```shell
-./tgi_server -m ../../python/outputs/Qwen-7B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
+./tgi_server -m ../../python/outputs/Qwen-1_8B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 #### Multi-NUMA Server
@@ -112,7 +112,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m <path_to_dashin
 例如：
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### 运行Client

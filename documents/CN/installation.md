@@ -4,12 +4,12 @@
 
 OS: Linux
 
-Python: 3.8, 3.10
+Python: 3.8, 3.9, 3.10, 3.11
 
 测试过的编译器版本:
 
 - gcc: 7.3.1, 11.4.0
-- armclang: 22.1
+- arm compiler: 22.1, 24.04
 
 多NUMA推理，需要安装依赖`numactl`、`openmpi`，例如：
 
@@ -25,8 +25,6 @@ Python: 3.8, 3.10
 install requirements:
 
 ```shell
-conda install -y pytorch-cpu -c pytorch # install cpu-only pytorch
-
 pip install -r examples/python/requirements.txt
 ```
 
@@ -39,12 +37,6 @@ install DashInfer python package:
 ## 安装C++包
 
 下载对应版本的C++ package到本地后，执行以下命令进行安装。
-
-预编译的C++包:
-
-- x86, ubuntu: [link](TODO)
-- x86, centos: [link](TODO)
-- arm, alinux: [link](TODO)
 
 for Ubuntu:
 
@@ -93,6 +85,16 @@ docker pull registry-1.docker.io/dashinfer/dev-alinux-arm:v1
 
 # python 3.10
 docker pull registry-1.docker.io/dashinfer/dev-alinux-arm:v1_py310
+```
+
+- arm, centos:
+
+```shell
+# python 3.8
+docker pull registry-1.docker.io/dashinfer/dev-centos8-arm:v1
+
+# python 3.10
+docker pull registry-1.docker.io/dashinfer/dev-centos8-arm:v1_py310
 ```
 
 或者从dockerfile构建docker image：
@@ -146,14 +148,6 @@ git lfs pull
 DashInfer使用conan管理第三方依赖。
 
 在首次进行编译时，可能需要较长时间下载第三方依赖包。
-
-对于官方提供的docker image，我们提供打包好的conan package。若在您的设备上，无法自动下载某些依赖，可以手动下载对应的压缩包，解压缩后放到`~/.conan`目录下。
-
-Conan package archive:
-
-- x86, ubuntu: [link](TODO)
-- x86, centos: [link](TODO)
-- arm, alinux: [link](TODO)
 
 ## 编译C++包
 

@@ -1,7 +1,7 @@
 # demo requirements
+torch==2.0.1
 huggingface_hub
 modelscope
-tabulate
 gradio
 
 # model requirements

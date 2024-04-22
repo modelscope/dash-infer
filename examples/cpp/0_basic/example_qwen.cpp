@@ -33,7 +33,7 @@ using namespace allspark;
 int default_topk = 1024;
 float default_topp = 0.8;
 int default_engine_max_length =
-    8192;  // this length equal to input_token + max_generate_length;
+    2048;  // this length equal to input_token + max_generate_length;
 int default_max_output = 512;  // max output token size.
 
 #ifdef EXAMPLE_MULTI_NUMA

@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    EngineHelper.py
+# @file    helper.py
 #
 import os
 import sys
@@ -16,7 +16,6 @@ from typing import Any, Optional, List
 import torch
 import torch.utils.dlpack
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers.generation import GenerationConfig
 
 from dashinfer import allspark
 from dashinfer.allspark.quantization import QuantizeConfig
@@ -28,12 +27,14 @@ class EngineHelper():
         self.model_name = config["model_name"]
         self.model_type = config["model_type"]
 
-        self.model_path = config["model_path"]
+        self.model_path = os.path.expanduser(config["model_path"])
         self.data_type = config["data_type"]
         self.device_type = config["device_type"]
-        self.device_ids = config["device_ids"]
-        self.multinode_mode = len(self.device_ids) > 1
         self.device_ids = [config["device_ids"][0]]
+
+        self.multinode_mode = config["multinode_mode"]
+        if len(config["device_ids"]) > 1:
+            self.multinode_mode = True
 
         self.model_name += "_" + self.device_type.lower()
         self.model_name += "_multi" if self.multinode_mode else "_single"
@@ -75,8 +76,10 @@ class EngineHelper():
         self.model_config = None
         self.verbose = False
 
-        self.engine = allspark.ClientEngine()
-        # self.engine = allspark.Engine()
+        if self.multinode_mode:
+            self.engine = allspark.ClientEngine()
+        else:
+            self.engine = allspark.Engine()
 
     @dataclass
     class Request:
@@ -147,21 +150,20 @@ class EngineHelper():
                     f"[Warning] total timecost is not set, cannot calculate QPS."
                 )
 
-            self.df = pd.concat([
-                self.df,
-                pd.DataFrame({
-                    "Batch_size": [self.batch_size],
-                    "Request_num": [self.request_num],
-                    "Avg_in_tokens": [self.avg_input_len],
-                    "Avg_out_tokens": [self.avg_output_len],
-                    "Avg_context_time(s)": [self.avg_context_time],
-                    "Avg_generate_time(s)": [self.avg_generate_time],
-                    "Avg_throughput(token/s)": [self.avg_throughput],
-                    "Throughput(token/s)": [self.total_throughput],
-                    "QPS": [self.qps]
-                })
-            ],
-                                ignore_index=True)
+            new_frame = pd.DataFrame({
+                "Batch_size": [self.batch_size],
+                "Request_num": [self.request_num],
+                "Avg_in_tokens": [self.avg_input_len],
+                "Avg_out_tokens": [self.avg_output_len],
+                "Avg_context_time(s)": [self.avg_context_time],
+                "Avg_generate_time(s)": [self.avg_generate_time],
+                "Avg_throughput(token/s)": [self.avg_throughput],
+                "Throughput(token/s)": [self.total_throughput],
+                "QPS": [self.qps]
+            })
+
+            self.df = (new_frame.copy() if self.df.empty else pd.concat(
+                [self.df, new_frame], ignore_index=True))
 
         def show(self):
             print(
@@ -510,3 +512,16 @@ class EngineHelper():
 
     def process_one_request_stream(self, request):
         yield from self.process_one_request_impl(request, stream_mode=True)
+
+    def save_config_as_json(config, file_path):
+        with open(file_path, 'w') as f:
+            json.dump(config, f, indent=4)
+
+    def get_config_from_json(file_path):
+        config = None
+        if not os.path.exists(file_path):
+            raise ValueError(f"File {file_path} doesn't exist.")
+
+        with open(file_path, 'r') as f:
+            config = json.load(f)
+        return config

@@ -5,10 +5,10 @@
 import os
 import pathlib
 import subprocess
+from pathlib import Path
 
 from setuptools import setup, Extension, find_namespace_packages
 from setuptools.command.build_ext import build_ext
-
 
 from jinja2 import Template
 
@@ -23,11 +23,12 @@ class CMakeBuild(build_ext):
 
     def build_extension(self, ext):
         cwd = pathlib.Path(__file__).parent.absolute()
-        print(self.get_ext_fullpath(ext.name))
-
         extdir = pathlib.Path(self.build_lib).absolute()
+        print(f"ext_fullpath: {self.get_ext_fullpath(ext.name)}\n extdir:{extdir} \ntmp path:{self.build_temp}")
         os.makedirs(extdir, exist_ok=True)
+        os.makedirs(extdir / "lib64", exist_ok=True)
         os.makedirs(self.build_temp, exist_ok=True)
+        os.makedirs(Path(self.build_temp) / "lib64", exist_ok=True)
         config = os.getenv("AS_BUILD_TYPE", "Release")
         as_platform = os.getenv("AS_PLATFORM", "x86")
         enable_glibcxx11_abi = os.getenv("AS_CXX11_ABI", "OFF")
@@ -66,7 +67,7 @@ class CMakeBuild(build_ext):
             "-DALLSPARK_CBLAS=BLIS",
             "-DENABLE_ARM_V84_V9=ON",
             "-DCMAKE_C_COMPILER=armclang",
-            "-DCMAKE_CXX_COMPILER=armclang++",
+            "-DCMAKE_CXX_COMPILER=armclang++"
         ]
 
         if as_platform.startswith("x86"):
@@ -75,7 +76,7 @@ class CMakeBuild(build_ext):
             cmake_args = cmake_args_arm
         else:
             raise Exception("unknown platform")
-        print(f"setup.py: cmake args")
+        print("setup.py: cmake args")
         for arg in cmake_args:
             print(f"\t{arg}")
 
@@ -120,18 +121,15 @@ class CMakeBuild(build_ext):
 
         # because it's require a conan virtual env, so we must write a shell to execute it.
         bash_template = Template(
-            '#!/bin/bash -x\n' + 'set -x ; gcc --version\n' + 'set -ex\n'
+            '#!/bin/bash -x\n' + 'set -x ;\n' + 'set -ex\n'
             # + '{{conan_install_cmd}}\n' # uncomment this line if you want to clean rebuild.
-            +
-            'if [ ! -f "activate.sh" ]; \nthen {{conan_install_cmd}};\n fi\n'  # conan install in here to make sure protoc and protobuf have same version.
-            + 'source ./activate.sh\n' + '{{export_path_cmd}}\n' +
-            'cmake --version\n' + './bin/protoc --version\n' +
-            'find -name protoc\n'
-            +'echo current_dir && pwd; cmake {{dir}}  {{cmake_args}} || cmake {{dir}} {{cmake_args}}\n' +
-            'cmake --build . --target all -j32\n' +
-            'cmake --build . --target install -j32\n' +
-            './bin/protoc allspark.proto --proto_path {{cwd_parent}}/csrc/proto --python_out {{extdir}}/dashinfer/allspark/model\n'
-            + '')
+            + 'if [ ! -f "activate.sh" ]; \nthen {{conan_install_cmd}};\n fi\n'  # conan install in here to make sure protoc and protobuf have same version.
+            + 'source ./activate.sh\n' + '{{export_path_cmd}}\n'
+            + 'cmake --version\n' + './bin/protoc --version\n'
+            + 'find -name protoc\n'
+            + 'cmake {{dir}}  {{cmake_args}} || cmake {{dir}} {{cmake_args}};\n'
+            + 'cmake --build . --target install -j32\n'
+            '')
 
         with open('.python_build.sh', 'w') as f:
             script_content = bash_template.render(
@@ -149,23 +147,25 @@ class CMakeBuild(build_ext):
         os.chdir(str(cwd))
         return  # build_extension
 
+
 setup(name="dashinfer",
       version=os.getenv("AS_RELEASE_VERSION", "1.0.0"),
       author="DashInfer team",
       author_email="Dash-Infer@alibabacloud.com",
-      description="DashInfer is a native inference engine for Large Language Pre-trained Models (LLMs) developed by Tongyi Laboratory.",
+      description="DashInfer is a native inference engine for Pre-trained Large Language Models (LLMs) developed by Tongyi Laboratory.",
       classifiers=[
-           'Development Status :: 4 - Beta',
-           'License :: OSI Approved :: Apache Software License',
-           'Operating System :: OS Independent',
-            'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.8',
-            'Programming Language :: Python :: 3.10',
+          'Development Status :: 4 - Beta',
+          'License :: OSI Approved :: Apache Software License',
+          'Operating System :: OS Independent',
+          'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.8',
+          'Programming Language :: Python :: 3.10',
       ],
       license="Apache License 2.0",
       packages=find_namespace_packages(include=['dashinfer.*']),
       ext_modules=[CMakeExtension("_allspark")],
       cmdclass={"build_ext": CMakeBuild},
+      setup_requires=["jinja2"],
       install_requires=["protobuf==3.18"],
       zip_safe=False,
       python_requires=">=3.8",

@@ -125,6 +125,8 @@ if (ENABLE_BF16)
     list(APPEND ALLSPARK_DEFINITION "-DENABLE_BF16")
 endif()
 
+set(AS_MODEL_PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/csrc/proto/allspark.proto)
+
 add_subdirectory(csrc)
 
 if (BUILD_PYTHON)

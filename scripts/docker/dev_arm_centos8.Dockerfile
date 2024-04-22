@@ -1,28 +1,18 @@
-FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest
+FROM docker.io/centos:8
 
 ARG PY_VER=3.8
 
-RUN echo $'[alinux3-module] \n\
-name=alinux3-module \n\
-baseurl=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/module/$basearch/ \n\
-gpgkey=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/RPM-GPG-KEY-ALINUX-3 \n\
-enabled=1 \n\
-gpgcheck=1' > /etc/yum.repos.d/alinux3-module.repo
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-Linux-*
+RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Linux-*
 
-RUN echo $'[alinux3-os] \n\
-name=alinux3-os \n\
-baseurl=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/os/$basearch/ \n\
-gpgkey=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/RPM-GPG-KEY-ALINUX-3 \n\
-enabled=1 \n\
-gpgcheck=1' > /etc/yum.repos.d/alinux3-os.repo
+RUN dnf -y group install "Development Tools"
+RUN yum install tar wget numactl openssl-devel curl-devel python3 -y --nogpgcheck
 
-RUN yum install git git-lfs g++ make tar procps python3 wget -y --nogpgcheck
-RUN yum install numactl glibc-devel openssl-devel curl-devel automake rpm-build -y --nogpgcheck
+RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash \
+    && yum install git-lfs -y
 
-RUN echo -e "if [ -f /usr/share/bash-completion/bash_completion ]; then \n    . /usr/share/bash-completion/bash_completion \nfi\n" >> /root/.bashrc && source /root/.bashrc
-
-RUN curl -LO https://repo.anaconda.com/miniconda/Miniconda3-py38_23.3.1-0-Linux-aarch64.sh \
-    && bash Miniconda3-py38_23.3.1-0-Linux-aarch64.sh -b \
+RUN curl -LO https://repo.anaconda.com/miniconda/Miniconda3-py38_23.3.1-0-Linux-aarch64.sh
+RUN bash Miniconda3-py38_23.3.1-0-Linux-aarch64.sh -b \
     && rm -f Miniconda3-py38_23.3.1-0-Linux-aarch64.sh
 
 ENV PATH=/root/miniconda3/bin${PATH:+:${PATH}}

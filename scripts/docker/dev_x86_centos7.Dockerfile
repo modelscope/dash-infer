@@ -9,7 +9,7 @@ RUN echo "source /opt/rh/devtoolset-7/enable" >> /root/.bashrc && source /root/.
 ARG PY_VER=3.8
 
 RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash \
-    && yum install git-lfs -y 
+    && yum install git-lfs -y
 
 RUN curl -LO https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-x86_64.sh \
     && bash ./cmake-3.27.9-linux-x86_64.sh --skip-license --prefix=/usr
@@ -49,15 +49,14 @@ RUN echo "source activate ds_py" >> /root/.bashrc && source /root/.bashrc
 # build tools
 RUN conda install -y pybind11
 
-RUN mkdir -p /root/.pip/
-
 ##########################################################################
 # uncomment if want to use pip mirror
 ##########################################################################
+# RUN mkdir -p /root/.pip/
 # RUN echo -e "[global]\ntrusted-host=mirrors.aliyun.com\nindex-url = http://mirrors.aliyun.com/pypi/simple\n\n[install]\nuse-wheel=yes" > /root/.pip/pip.conf
 
 # engine requirements
 RUN conda install -y pytorch-cpu -c pytorch
-RUN pip3 install transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel
+RUN pip3 install transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
 
 WORKDIR /root/

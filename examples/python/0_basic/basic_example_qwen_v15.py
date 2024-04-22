@@ -11,9 +11,7 @@ import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 
 def check_transformers_version():
@@ -91,8 +89,8 @@ def process_request(request_list, engine_helper: EngineHelper):
 if __name__ == '__main__':
     check_transformers_version()
 
-    config_file = "../model_config/config_qwen_v15_7b.json"
-    config = ArgParser.get_config_from_json(config_file)
+    config_file = "../model_config/config_qwen_v15_1_8b.json"
+    config = EngineHelper.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -109,7 +107,7 @@ if __name__ == '__main__':
     ## download model from huggingface
     # original_model = {
     #     "source": "huggingface",
-    #     "model_id": "Qwen/Qwen1.5-7B-Chat",
+    #     "model_id": "Qwen/Qwen1.5-1.8B-Chat",
     #     "revision": "",
     #     "model_path": ""
     # }
@@ -117,7 +115,7 @@ if __name__ == '__main__':
     ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "qwen/Qwen1.5-7B-Chat",
+        "model_id": "qwen/Qwen1.5-1.8B-Chat",
         "revision": "master",
         "model_path": ""
     }

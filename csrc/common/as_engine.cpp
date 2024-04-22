@@ -1606,6 +1606,8 @@ static void PrintEngineStat(AsEngineStat& stat, DeviceType dev_type) {
 
   double avg_prompt_tput = diff_prompt / elapsedSeconds.count();
   double avg_gen_tput = diff_gen / elapsedSeconds.count();
+  avg_prompt_tput = std::max(0.0, avg_prompt_tput);
+  avg_gen_tput = std::max(0.0, avg_gen_tput);
 
   int old_p = std::cout.precision();
 

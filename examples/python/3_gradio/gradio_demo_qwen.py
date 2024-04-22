@@ -14,9 +14,7 @@ from typing import List, Optional, Tuple, Dict
 
 default_system = 'You are a helpful assistant.'
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 log_path = "outputs_gradio_demo_log"
 if not os.path.exists(log_path):
@@ -25,19 +23,19 @@ log_file = log_path + "/log_" + time.strftime("%Y%m%d_%H-%M-%S",
                                               time.localtime()) + ".jsonl"
 log_file_lock = threading.Lock()
 
-config_file = "../model_config/config_qwen_v10_7b.json"
-config = ArgParser.get_config_from_json(config_file)
+config_file = "../model_config/config_qwen_v10_1_8b.json"
+config = EngineHelper.get_config_from_json(config_file)
 
 # from huggingface_hub import snapshot_download
 # hf_model_path = snapshot_download(
-#     repo_id="Qwen/Qwen-7B-Chat",
+#     repo_id="Qwen/Qwen-1_8B-Chat",
 #     ignore_patterns=[r'.+\.bin$', r'.+\.safetensors$'])
 
 from modelscope import snapshot_download
 
 hf_model_path = snapshot_download(
-    "qwen/Qwen-7B-Chat",
-    revision="v1.1.5",
+    "qwen/Qwen-1_8B-Chat",
+    revision="v1.0.0",
     ignore_file_pattern=[r'.+\.bin$', r'.+\.safetensors$'])
 print(f"hf_model_path: {hf_model_path}")
 
@@ -57,7 +55,7 @@ engine_helper.verbose = True
 engine_helper.init_tokenizer(hf_model_path)
 
 if engine_helper.check_model_exist() == False:
-    print("\nPlease run basic_example_qwen.py first.\n")
+    print("\nPlease run basic_example_qwen_v10.py first.\n")
     raise ValueError()
 
 engine_helper.init_engine()
@@ -149,8 +147,8 @@ def model_chat(query: Optional[str], history: Optional[History],
 ###################################################
 
 with gr.Blocks() as demo:
-    gr.Markdown("""<center><font size=8>Qwen-7B-Chat Bot👾</center>""")
-    gr.Markdown("""<center><font size=4>Qwen-7B-Chat is the 7-billion parameter chat model of the Qwen series.</center>""")
+    gr.Markdown("""<center><font size=8>Qwen-1_8B-Chat Bot👾</center>""")
+    gr.Markdown("""<center><font size=4>Qwen-1_8B-Chat is the 1.8-billion parameter chat model of the Qwen series.</center>""")
 
     with gr.Row():
         with gr.Column(scale=3):
@@ -160,7 +158,7 @@ with gr.Blocks() as demo:
         with gr.Column(scale=1):
             modify_system = gr.Button("🛠️ Set system prompt and clear history.", scale=2)
         system_state = gr.Textbox(value=default_system, visible=False)
-    chatbot = gr.Chatbot(label='Qwen-7B-Chat')
+    chatbot = gr.Chatbot(label='Qwen-1_8B-Chat')
     textbox = gr.Textbox(lines=2, label='Input')
 
     with gr.Row():

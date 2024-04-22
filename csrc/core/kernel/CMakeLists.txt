@@ -60,6 +60,13 @@ if(NOT ENABLE_ARM_V84_V9)
 endif(NOT ENABLE_ARM_V84_V9)
 
 list(APPEND KERNEL_SRC ${src_cpu_common})
+
+message(STATUS "allspark kernel deps: ${AS_MODEL_HDR} ${AS_MODEL_CPP}")
+
+list(APPEND KERNEL_SRC ${AS_MODEL_HDR} ${AS_MODEL_CPP})
+
+message("kernel cpp list: ${KERNEL_SRC}")
+
 list(APPEND KERNEL_3RD_LIBS ${THREAD_LIB} ${CBLAS_LIBRARY})
 
 list(APPEND KERNEL_3RD_LIBS CONAN_PKG::openmpi)
@@ -69,16 +76,20 @@ set(ALLSPARK_PUBLIC_DEFINITIONS ${ALLSPARK_PUBLIC_DEFINITIONS})
 message(STATUS "ALLSPARK_PUBLIC_DEFINITIONS:${ALLSPARK_PUBLIC_DEFINITIONS}")
 
 add_library(allspark_kernel STATIC ${KERNEL_SRC})
+
 set_target_properties(allspark_kernel PROPERTIES CXX_STANDARD ${CXX_STD})
+add_dependencies(allspark_kernel as_model_generate)
 
 target_compile_definitions(
     allspark_kernel
     PRIVATE ${ALLSPARK_PUBLIC_DEFINITIONS}
     PUBLIC ${ALLSPARK_PUBLIC_DEFINITIONS})
-target_include_directories(allspark_kernel PUBLIC ${KERNEL_INC_DIR})
+
+target_include_directories(allspark_kernel PUBLIC ${KERNEL_INC_DIR} ${CMAKE_BINARY_DIR}/csrc)
+
 target_link_libraries(allspark_kernel PRIVATE ${KERNEL_3RD_LIBS} CONAN_PKG::glog CONAN_PKG::protobuf)
 target_compile_definitions(allspark_kernel PUBLIC ${ALLSPARK_DEFINITION})
-add_dependencies(allspark_kernel protobuf_target)
+
 target_compile_options(allspark_kernel PUBLIC $<$<COMPILE_LANGUAGE:CXX>:${ALLSPARK_CXX_FLAGS}>)
 if(ALLSPARK_CBLAS MATCHES "BLIS")
     add_dependencies(allspark_kernel project_blis)

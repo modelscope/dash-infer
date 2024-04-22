@@ -25,50 +25,47 @@ pip install dashinfer-<dashinfer-version>-xxx.whl
 在`<path_to_dashinfer>/examples/python/0_basic`目录下运行示例python脚本，例如：
 
 ```shell
-python basic_example_qwen.py
+python basic_example_qwen_v10.py
 ```
 
-转换得到的DashInfer格式的模型存储在`<path_to_dashinfer>/examples/python/outputs`目录下。也可以通过修改模型配置文件的`model_path`字段，修改模型的保存路径。
+转换得到的DashInfer格式的模型存储在`~/dashinfer_models/`目录下。也可以通过修改模型配置文件的`model_path`字段，修改模型的保存路径。
 
 ## 单NUMA/多NUMA 推理
 
-DashInfer支持多NUMA并行推理。
-
-### 多NUMA推理
-
-示例中默认使用的是多NUMA推理，并使用`mpirun`+`numactl`进行绑核，以达到最佳性能。
-该方式需要在docker run的时候添加`--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host`参数。
-
-### 在多NUMA CPU上进行单NUMA推理
-
-在多NUMA节点的CPU上，若只需要1个NUMA节点进行推理，也需要`numactl`进行绑核。
-该方式需要在docker run的时候添加`--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host`参数。
-
-使用单NUMA推理，需要将模型配置文件中的`device_ids`字段改成要运行的NUMA节点编号。
-
-```json
-"device_ids": [
-    0
-],
-```
+DashInfer支持单/多NUMA并行推理。
 
 ### 在单NUMA CPU上进行单NUMA推理
 
-在单NUMA节点的CPU上，若不需要绑定运行的cpu核，则不需要`numactl`。
+示例中默认使用的是单NUMA推理。
+在单NUMA CPU上进行单NUMA推理不需要特殊的权限和配置。
 
-使用单NUMA推理，需要将模型配置文件中的`device_ids`字段改成`0`。
+### 在多NUMA CPU上进行单NUMA推理
+
+在多NUMA节点的CPU上，若只需要1个NUMA节点进行推理，需要用`numactl`进行绑核。
+该方式需要在docker run的时候添加`--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host`参数。
+
+使用单NUMA推理，需要将模型配置文件中的`device_ids`字段改成要运行的NUMA节点编号，并将`multinode_mode`字段设置为true。
 
 ```json
 "device_ids": [
     0
 ],
+"multinode_mode": true,
 ```
 
-并且将EngineHelper.py中的engine类型，改为`allspark.Engine()`
+### 多NUMA推理
 
-```diff
-- self.engine = allspark.ClientEngine()
-+ self.engine = allspark.Engine()
+使用多NUMA推理，需要用`mpirun`+`numactl`进行绑核，以达到最佳性能。
+该方式需要在docker run的时候添加`--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host`参数。
+
+使用多NUMA推理，需要将模型配置文件中的`device_ids`字段改成要运行的NUMA节点编号，并将`multinode_mode`字段设置为true。
+
+```json
+"device_ids": [
+    0,
+    1
+],
+"multinode_mode": true,
 ```
 
 ## 更换模型
@@ -78,27 +75,27 @@ DashInfer支持多NUMA并行推理。
 1. config_file
 
 ```python
-config_file = "model_config/config_qwen_v10_7b.json"
+config_file = "model_config/config_qwen_v10_1_8b.json"
 ```
 
 2. HuggingFace（或ModelScope）的下载参数
 
 ```python
 # download model from huggingface
- original_model = {
-     "source": "huggingface",
-     "model_id": "Qwen/Qwen-7B-Chat",
-     "revision": "",
-     "model_path": ""
- }
+original_model = {
+    "source": "huggingface",
+    "model_id": "Qwen/Qwen-1_8B-Chat",
+    "revision": "",
+    "model_path": ""
+}
 ```
 
 ```python
 # download model from modelscope
 original_model = {
     "source": "modelscope",
-    "model_id": "qwen/Qwen-7B-Chat",
-    "revision": "v1.1.5",
+    "model_id": "qwen/Qwen-1_8B-Chat",
+    "revision": "v1.0.0",
     "model_path": ""
 }
 ```
@@ -136,8 +133,11 @@ input_len_list = [128, 1200]
 在`<path_to_dashinfer>/examples/python/1_performance`目录下运行示例python脚本，例如：
 
 ```shell
-python performance_test_qwen.py
+python performance_test_qwen_v15.py
+python performance_test_qwen_v15.py --device_ids 0 1 # test multi-NUMA performance
 ```
+
+> 多NUMA CPU推理请参考[单NUMA/多NUMA 推理](examples_python.md#L33)章节中的内容，以达到最佳性能。
 
 # 2_evaluation
 
@@ -151,7 +151,7 @@ python performance_test_qwen.py
 
 ## Step 1: 模型转换
 
-运行Gradio demo前，需要先运行basic_example_qwen.py，得到转换后的模型。
+运行Gradio demo前，需要先运行`basic_example_qwen_v10.py`，得到转换后的模型。
 
 ## Step 2: 网络配置（Optional）
 
@@ -301,6 +301,7 @@ To create a public link, set `share=True` in `launch()`.
 - `data_type`: 输出的数据类型，可选项：float32；
 - `device_type`: 推理硬件，可选项：CPU；
 - `device_ids`: 用于推理的NUMA节点，可以通过Linux命令`lscpu`查看CPU的NUMA信息；
+- `multinode_mode`: 是否在多NUMA CPU上进行推理，可选项：true、false；
 - `convert_config`: 模型转换相关参数；
     - `do_dynamic_quantize_convert`: 是否量化权重，可选项：true、false，目前仅ARM CPU支持量化；
 - `engine_config`: 推理引擎参数；

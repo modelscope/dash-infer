@@ -1,25 +1,10 @@
-FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest
+FROM quay.io/pypa/manylinux_2_28_aarch64
+# FROM quay.io/pypa/manylinux2014_aarch64 # 2_17 cannot install conda, conda require  2.25
+
+RUN yum install openssl-devel curl-devel wget python3-devel -y --nogpgcheck
+RUN yum install -y bzip2 epel-release
 
 ARG PY_VER=3.8
-
-RUN echo $'[alinux3-module] \n\
-name=alinux3-module \n\
-baseurl=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/module/$basearch/ \n\
-gpgkey=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/RPM-GPG-KEY-ALINUX-3 \n\
-enabled=1 \n\
-gpgcheck=1' > /etc/yum.repos.d/alinux3-module.repo
-
-RUN echo $'[alinux3-os] \n\
-name=alinux3-os \n\
-baseurl=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/os/$basearch/ \n\
-gpgkey=http://mirrors.cloud.aliyuncs.com/alinux/$releasever/RPM-GPG-KEY-ALINUX-3 \n\
-enabled=1 \n\
-gpgcheck=1' > /etc/yum.repos.d/alinux3-os.repo
-
-RUN yum install git git-lfs g++ make tar procps python3 wget -y --nogpgcheck
-RUN yum install numactl glibc-devel openssl-devel curl-devel automake rpm-build -y --nogpgcheck
-
-RUN echo -e "if [ -f /usr/share/bash-completion/bash_completion ]; then \n    . /usr/share/bash-completion/bash_completion \nfi\n" >> /root/.bashrc && source /root/.bashrc
 
 RUN curl -LO https://repo.anaconda.com/miniconda/Miniconda3-py38_23.3.1-0-Linux-aarch64.sh \
     && bash Miniconda3-py38_23.3.1-0-Linux-aarch64.sh -b \
@@ -44,29 +29,21 @@ ENV LD_LIBRARY_PATH=/opt/arm/gcc-13.2.0_RHEL-8/lib64${LD_LIBRARY_PATH:+:${LD_LIB
 ##########################################################################
 # uncomment if want to use anaconda mirror
 ##########################################################################
-# RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge  && \
-#     conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/ && \
-#     conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/ && \
-#     conda config --remove channels defaults && \
-#     conda config --set show_channel_urls yes
+RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge  && \
+    conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/ && \
+    conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/ && \
+    conda config --remove channels defaults && \
+    conda config --set show_channel_urls yes
 
 RUN conda clean -i && conda config --show channels && conda create -y --name ds_py python==${PY_VER} && conda update -n base conda
 SHELL ["conda", "run", "-n", "ds_py", "/bin/bash", "-c"]
 RUN echo "source activate ds_py" >> /root/.bashrc && source /root/.bashrc
 
-# build tools
-RUN conda install -y pybind11
-
 ##########################################################################
 # uncomment if want to use pip mirror
 ##########################################################################
-# RUN mkdir -p /root/.pip && \
-# echo $'[global] \n\
-# index-url = https://mirrors.aliyun.com/pypi/simple/ \n' > /root/.pip/pip.conf
-
-RUN pip3 install --upgrade pip && pip3 install -U setuptools
-
-# engine requirements
-RUN pip3 install torch==2.0.1 transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
+RUN mkdir -p /root/.pip && \
+echo $'[global] \n\
+index-url = https://mirrors.aliyun.com/pypi/simple/ \n' > /root/.pip/pip.conf
 
 WORKDIR /root/

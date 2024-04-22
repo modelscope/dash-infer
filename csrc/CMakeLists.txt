@@ -1,14 +1,9 @@
-set(PROTO_RAW_FILES ${CMAKE_CURRENT_SOURCE_DIR}/proto/allspark.proto)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS  ${PROTO_RAW_FILES})
-message(STATUS "Protobuf file: ${PROTO_SRCS}, ${PROTO_HDRS}")
-# 在执行 add_subdirectory 之前先执行 protobuf_generate_cpp
-add_custom_command(
-    OUTPUT ${PROTO_SRCS} ${PROTO_HDRS}
-    COMMAND ${PROTOBUF_PROTOC_EXECUTABLE} --cpp_out=${CMAKE_CURRENT_BINARY_DIR} ${PROTO_RAW_FILES}
-    DEPENDS ${PROTO_FILES}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-add_custom_target(protobuf_target DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
+find_package(Protobuf REQUIRED)
+protobuf_generate_cpp(AS_MODEL_CPP AS_MODEL_HDR  ${AS_MODEL_PROTO_FILE})
+# protobuf generate requires a target to trigger.
+add_custom_target(as_model_generate DEPENDS ${AS_MODEL_CPP} ${AS_MODEL_HDR})
+message(STATUS "Protobuf C++ file: ${AS_MODEL_CPP}, ${AS_MODEL_HDR}")
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/core/kernel)
 
 set(ALLSPARK_INC_DIR
@@ -72,12 +67,13 @@ endif()
 
 list(APPEND ALLSPARK_SRCS ${ALLSPARK_DEVICE_COMMON} ${ALLSPARK_ACC_DEVICE_SPECIAL} ${ALLSPARK_HOST_COMMON} ${ALLSPARK_HOST_SPECIAL})
 
-list(APPEND ALLSPARK_SRCS ${PROTO_SRCS})
+list(APPEND ALLSPARK_SRCS ${AS_MODEL_CPP})
 
 add_library(allspark_framework SHARED ${ALLSPARK_SRCS})
-set_target_properties(allspark_framework PROPERTIES CXX_STANDARD ${CXX_STD})  # c17 for cutlass.
 set_target_properties(allspark_framework PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(allspark_framework PRIVATE ${ALLSPARK_INC_DIR})
+
+add_dependencies(allspark_framework as_model_generate)
 
 # rdynamic for backtrace.
 if (CONFIG_HOST_CPU_TYPE STREQUAL "ARM")

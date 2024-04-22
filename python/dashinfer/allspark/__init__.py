@@ -5,6 +5,7 @@
 from .engine import Engine
 from .engine import ClientEngine
 from ._allspark import *
+import os
 
 __all__ = [
     "AsStatus",
@@ -15,3 +16,6 @@ __all__ = [
     "save_allsparky_dltensor_tofile",
     "set_global_header",
 ]
+# since some pytorch will link same version openmp,
+# without this env will be a segfault.
+os.environ["KMP_DUPLICATE_LIB_OK"] = "YES"

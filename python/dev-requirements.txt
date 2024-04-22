@@ -1,0 +1,4 @@
+jinja2
+conan==1.60.0
+pybind11
+scons

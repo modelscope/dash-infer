@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    performance_test_qwen.py
+# @file    performance_test_qwen_v15.py
 #
 import os
 import sys
@@ -13,9 +13,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import argparse
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 
 def download_model(model_id, revision, source="modelscope"):
@@ -77,17 +75,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--config_file', type=str, default='config_qwen_v15_4b.json')
-    parser.add_argument('--device_ids', nargs='+', type=int, default=[0, 1])
+    parser.add_argument('--device_ids', nargs='+', type=int, default=[0])
+    parser.add_argument('--multinode_mode', action='store_true')
 
     args = parser.parse_args()
 
     config_file = "../model_config/" + args.config_file
 
-    # config_file = "../model_config/config_qwen_v15_4b.json"
-    config = ArgParser.get_config_from_json(config_file)
+    config = EngineHelper.get_config_from_json(config_file)
     config["generation_config"]["early_stopping"] = False
     config["generation_config"]["stop_words_ids"] = []
     config["device_ids"] = args.device_ids
+    config["multinode_mode"] = args.multinode_mode
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -142,8 +141,8 @@ if __name__ == '__main__':
     input_len_list = [128, 1200]
 
     for output_len in output_len_list:
-        for batch_size in batch_size_list:
-            for input_len in input_len_list:
+        for input_len in input_len_list:
+            for batch_size in batch_size_list:
                 print(f"### batch_size: {batch_size}, output_len: {output_len}, input_len: {input_len}")
                 sys.stdout.flush()
 

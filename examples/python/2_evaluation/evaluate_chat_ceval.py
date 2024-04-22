@@ -9,9 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 from thefuzz import process
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 '''
 wget https://huggingface.co/datasets/ceval/ceval-exam/resolve/main/ceval-exam.zip
@@ -417,9 +415,24 @@ def main(args, engine_helper):
         dev_result[subject_name] = score
     cal_ceval(dev_result)
 
+def download_model(model_id, revision, source="modelscope"):
+    print(f"Downloading model {model_id} (revision: {revision}) from {source}")
+    if source == "modelscope":
+        from modelscope import snapshot_download
+        model_dir = snapshot_download(model_id, revision=revision)
+    elif source == "huggingface":
+        from huggingface_hub import snapshot_download
+        model_dir = snapshot_download(repo_id=model_id)
+    else:
+        raise ValueError("Unknown source")
+
+    print(f"Save model to path {model_dir}")
+
+    return model_dir
+
 def prepare(args):
     config_file = args.config_file
-    config = ArgParser.get_config_from_json(config_file)
+    config = EngineHelper.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -433,10 +446,27 @@ def prepare(args):
     os.environ["AS_NUMA_OFFSET"] = str(config["device_ids"][0])
     config["model_path"] = args.model_path
 
+    ## download model from modelscope
+    original_model = {
+        "source": "modelscope",
+        "model_id": "qwen/Qwen-7B-Chat",
+        "revision": "v1.1.9",
+        "model_path": ""
+    }
+    original_model["model_path"] = download_model(original_model["model_id"],
+                                                  original_model["revision"],
+                                                  original_model["source"])
+
     ## init EngineHelper class
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
-    engine_helper.init_tokenizer(args.tokenizer_path)
+    engine_helper.init_tokenizer(original_model["model_path"])
+    engine_helper.init_torch_model(original_model["model_path"])
+
+    ## convert huggingface model to dashinfer model
+    ## only one conversion is required
+    if engine_helper.check_model_exist() == False:
+        engine_helper.convert_model(original_model["model_path"])
 
     ## inference
     engine_helper.init_engine()
@@ -446,8 +476,7 @@ def prepare(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test HF checkpoint.")
-    parser.add_argument('--model_path', type=str, default='../outputs/')
-    parser.add_argument('--tokenizer_path', type=str, default='/root/.cache/modelscope/hub/qwen/Qwen-7B-Chat/')
+    parser.add_argument('--model_path', type=str, default='~/dashinfer_models/')
     parser.add_argument('--config_file', type=str, default='../model_config/config_qwen_v10_7b_quantize.json')
 
     # Provide extra arguments required for tasks

@@ -3,7 +3,7 @@
 1. Download qwen.tiktoken
 
 ```shell
-wget -O qwen_v1.tiktoken "https://modelscope.cn/api/v1/models/qwen/Qwen-7B-Chat/repo?Revision=master&FilePath=qwen.tiktoken"
+wget -O qwen_v1.tiktoken "https://modelscope.cn/api/v1/models/qwen/Qwen-1_8B-Chat/repo?Revision=master&FilePath=qwen.tiktoken"
 ```
 
 2. Install DashInfer C++ package
@@ -21,7 +21,7 @@ for CentOS:
 
 3. Model Conversion
 
-Run a python script (e.g. `basic_example_qwen.py`) first to get the DashInfer format model. [Example doc](examples_python.md)
+Run a python script (e.g. `basic_example_qwen_v10.py`) first to get the DashInfer format model. [Documentation for Python Examples](examples_python.md)
 
 # Build Example Code
 
@@ -57,7 +57,7 @@ Run:
 To be more specific:
 
 ```shell
-./example_qwen_single_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+./example_qwen_single_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### example_qwen_multi_numa
@@ -73,7 +73,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m <path_to_dash
 To be more specific:
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 Parameter description:
@@ -98,7 +98,7 @@ Run:
 To be more specific:
 
 ```shell
-./tgi_server -m ../../python/outputs/Qwen-7B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
+./tgi_server -m ../../python/outputs/Qwen-1_8B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 #### Single-NUMA Server
@@ -112,7 +112,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m <path_to_dashin
 To be more specific:
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ../../python/outputs/Qwen-7B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### Run the Client

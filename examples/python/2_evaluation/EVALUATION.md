@@ -27,7 +27,7 @@ cd ../../
 
 # Qwen-7B-Chat (We only provide 0-shot reproduction scripts. 5-shot results are obtained by OpenCompass (https://github.com/InternLM/opencompass).)
 pip install thefuzz
-python evaluate_chat_ceval.py -d data/ceval/
+python evaluate_chat_ceval.py -d data/ceval/data/
 ```
 
 ## MMLU
@@ -52,6 +52,7 @@ Get the HumanEval.jsonl file from [here](https://github.com/openai/human-eval/tr
 ```Shell
 git clone https://github.com/openai/human-eval
 pip install -e human-eval
+pip install jsonlines
 
 # Qwen-7B-Chat
 python evaluate_chat_humaneval.py -f HumanEval.jsonl -o HumanEval_res_chat.jsonl

@@ -49,14 +49,8 @@ AsStatus GemmOpSpr::InitV2(const OperatorProto& op_proto,
     weight_data_type_ = DataType::FLOAT32;
   }
 
-  if (weight_data_type_ == DataType::FLOAT32) {
-    AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map,
-                                      weights_buffer, tensor_map));
-  } else if (weight_data_type_ == DataType::BFLOAT16) {
-    // use onednn bf16 gemm
-    AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map,
-                                      weights_buffer, tensor_map));
-  }
+  AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map, weights_buffer,
+                                    tensor_map));
 
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -88,10 +82,8 @@ AsStatus GemmOpSpr::Forward() {
   if (is_split_k_) {
     in = (char*)in + k_ * rank_id_ * SizeofType(dtype_);
   }
-  if (weight_data_type_ == DataType::FLOAT32) {
-    // use onednn fp32 gemm
-    AS_CHECK_STATUS(GemmOpCPU::Forward());
-  } else if (weight_data_type_ == DataType::BFLOAT16) {
+  if (weight_data_type_ == DataType::FLOAT32 ||
+      weight_data_type_ == DataType::BFLOAT16) {
     AS_CHECK_STATUS(GemmOpCPU::Forward());
   } else {
     LOG(ERROR) << "Unsupported matmul precision";

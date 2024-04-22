@@ -11,9 +11,7 @@ import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 
 def download_model(model_id, revision, source="modelscope"):
@@ -76,7 +74,7 @@ def process_request(request_list, engine_helper: EngineHelper):
 
 if __name__ == '__main__':
     config_file = "../model_config/config_llama2_7b.json"
-    config = ArgParser.get_config_from_json(config_file)
+    config = EngineHelper.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,

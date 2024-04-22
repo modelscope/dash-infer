@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    basic_example_qwen.py
+# @file    basic_example_qwen_v10.py
 #
 import os
 import sys
@@ -11,9 +11,7 @@ import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.append('../engine_helper')
-from EngineHelper import EngineHelper
-import ArgParser
+from dashinfer.helper import EngineHelper
 
 
 def download_model(model_id, revision, source="modelscope"):
@@ -77,8 +75,8 @@ def process_request(request_list, engine_helper: EngineHelper):
 
 
 if __name__ == '__main__':
-    config_file = "../model_config/config_qwen_v10_7b.json"
-    config = ArgParser.get_config_from_json(config_file)
+    config_file = "../model_config/config_qwen_v10_1_8b.json"
+    config = EngineHelper.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -95,7 +93,7 @@ if __name__ == '__main__':
     ## download model from huggingface
     # original_model = {
     #     "source": "huggingface",
-    #     "model_id": "Qwen/Qwen-7B-Chat",
+    #     "model_id": "Qwen/Qwen-1_8B-Chat",
     #     "revision": "",
     #     "model_path": ""
     # }
@@ -103,8 +101,8 @@ if __name__ == '__main__':
     ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "qwen/Qwen-7B-Chat",
-        "revision": "v1.1.5",
+        "model_id": "qwen/Qwen-1_8B-Chat",
+        "revision": "v1.0.0",
         "model_path": ""
     }
     original_model["model_path"] = download_model(original_model["model_id"],
