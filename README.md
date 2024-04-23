@@ -34,6 +34,17 @@ Written in C++ runtime, DashInfer aims to deliver production-level implementatio
 - **Multi-Language API Interfaces**: Both C++ and Python interfaces are supported. It is possible to extend C++ interface to Java, Rust and other programming languages, via standard cross-language interfaces.
 - **Operating System Support**: DashInfer supports mainstream Linux server operating systems like Centos7 and Ubuntu22.04, and provides corresponding Docker images.
 
+## DashInfer Demo
+
+[DashInfer Demo on ModelScope](https://modelscope.cn/studios/modelscope/DashInfer-Demo/summary)
+
+Demo information:
+
+- Model: Qwen1.5-7B-Chat
+- Engine: DashInfer
+- Hardware: x86, Emerald Rapids, 96 vCPU @ 3.2GHz, 16GBx24 DDR
+- Aliyun instance: [ecs.g8i.24xlarge](https://www.alibabacloud.com/help/en/ecs/user-guide/overview-of-instance-families#g8i)
+
 ## Documentation
 
 - [Installation](documents/EN/installation.md)

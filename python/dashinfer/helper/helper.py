@@ -242,7 +242,7 @@ class EngineHelper():
                 lscpu_output = subprocess.check_output(['lscpu'],
                                                        universal_newlines=True)
             except Exception as e:
-                print(f"Error executing lscpu: {e}, use default value 0")
+                print(f"[Warning] Error executing lscpu: {e}, use default value 0")
                 return 0
 
             try:
@@ -255,7 +255,7 @@ class EngineHelper():
                 threads_per_core = int(threads_per_core[0])
                 return int(core_num / threads_per_core)
             except Exception as e:
-                print(f"Error parse lscpu ouput: {e}, use default value 0")
+                print(f"[Warning] Error parse lscpu ouput: {e}, use default value 0")
                 return 0
 
         begin = time.time()

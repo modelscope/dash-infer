@@ -19,12 +19,24 @@ DashInfer采用C++ Runtime编写，提供C++和Python语言接口。DashInfer具
 - **提供多语言API接口**：提供C++和Python接口，能够直接使用C++接口对接到Java、Rust等其他编程语言。
 - **操作系统支持**：支持Centos7、Ubuntu22.04等主流Linux服务器操作系统，并提供对应的Docker镜像。
 
+## DashInfer Demo
+
+[DashInfer Demo on ModelScope](https://modelscope.cn/studios/modelscope/DashInfer-Demo/summary)
+
+Demo信息：
+
+- 模型: Qwen1.5-7B-Chat
+- 推理引擎: DashInfer
+- 硬件: x86, Emerald Rapids, 96 vCPU @ 3.2GHz, 16GBx24 DDR
+- 阿里云实例: [ecs.g8i.24xlarge](https://help.aliyun.com/zh/ecs/user-guide/general-purpose-instance-families#g8i)
+
 ## 文档
 
 - [安装](documents/CN/installation.md)
 - [C++示例](documents/CN/examples_cpp.md)
 - [Python示例](documents/CN/examples_python.md)
 - [性能测试](documents/EN/performance.md)
+- [使用魔搭notebook部署](documents/CN/modelscope_notebook.md)
 
 # 硬件支持和数据类型
 
