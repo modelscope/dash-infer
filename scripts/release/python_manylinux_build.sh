@@ -3,8 +3,6 @@ set -e -x
 
 source activate ds_py
 
-# Env should passed by caller.
-export AS_RELEASE_VERSION="1.0.2"
 repo_root=/root/workspace/DashInfer
 
 # 捕获arch命令的输出
@@ -45,7 +43,7 @@ build_wheel_for_python() {
         echo "Conda environment '${env_name}' does not exist. Creating..."
         conda create -n "$env_name" python="$python_version" -y
     else
-        echo "Conda environment '${ENV_NAME}' already exists. Skipping creation."
+        echo "Conda environment '${env_name}' already exists. Skipping creation."
     fi
 
     conda activate "$env_name"
@@ -56,21 +54,17 @@ build_wheel_for_python() {
     pip wheel ${repo_root}/python --no-deps -w ${repo_root}/python/wheelhouse/ --log wheel_log.txt
 
     conda deactivate
-    conda remove --name "$env_name" --all -y
+    # conda remove --name "$env_name" --all -y
 }
-
-# ccache for faster build
-yum install -y atlas-devel
-pip3 install auditwheel
 
 # rm -rf build
 
 mkdir -p ${repo_root}/python/wheelhouse/
 
-build_wheel_for_python 3.8
-build_wheel_for_python 3.9
-build_wheel_for_python 3.10
-build_wheel_for_python 3.11
+build_wheel_for_python 3.8  2>&1 | tee whl_build_log_py38.txt
+build_wheel_for_python 3.9  2>&1 | tee whl_build_log_py39.txt
+build_wheel_for_python 3.10 2>&1 | tee whl_build_log_py310.txt
+build_wheel_for_python 3.11 2>&1 | tee whl_build_log_py311.txt
 
 # Bundle external shared libraries into the wheels
 for whl in ${repo_root}/python/wheelhouse/*.whl; do

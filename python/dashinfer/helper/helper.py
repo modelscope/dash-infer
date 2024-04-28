@@ -88,8 +88,10 @@ class EngineHelper():
         torch_input: Optional[dict] = None
         in_text: Optional[str] = None
         in_tokens: Optional[List[int]] = None
+        in_tokens_len: Optional[int] = None
         out_text: Optional[str] = None
         out_tokens: Optional[List[int]] = None
+        out_tokens_len: Optional[int] = None
         status: Optional[int] = None
         gen_cfg: Optional[dict] = None
         start_timestamp: Optional[str] = None
@@ -239,8 +241,11 @@ class EngineHelper():
             import subprocess
             try:
                 # execute lscpu command and get its output
-                lscpu_output = subprocess.check_output(['lscpu'],
-                                                       universal_newlines=True)
+                lscpu_output = subprocess.run("LANG=C LC_ALL=C lscpu",
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE,
+                                               shell=True,
+                                               text=True).stdout
             except Exception as e:
                 print(f"[Warning] Error executing lscpu: {e}, use default value 0")
                 return 0
@@ -344,6 +349,7 @@ class EngineHelper():
             request.model_info = self.model_name
             request.in_text = input_text
             request.in_tokens = input_ids[0]
+            request.in_tokens_len = len(input_ids[0])
             request.torch_input = torch_input
             if gen_cfg != None:
                 request.gen_cfg = gen_cfg[i]
@@ -358,7 +364,7 @@ class EngineHelper():
                 print(f"* Request {i}")
                 print(f"*****************")
                 print(f"** text input **\n{request.in_text}\n")
-                print(f"** encoded input, len: {len(request.in_tokens)} **\n{request.in_tokens}\n")
+                print(f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n")
                 print(f"** torch input **")
                 for key, value in request.torch_input.items():
                     print(f"{key}, shape: {value.shape}\n{value}")
@@ -425,8 +431,8 @@ class EngineHelper():
             print(f"* Answer (dashinfer) for Request {request.id}")
             print(f"***********************************")
             print(f"** context_time: {request.context_time} s, generate_time: {request.generate_time} s\n")
-            print(f"** encoded input, len: {len(request.in_tokens)} **\n{request.in_tokens}\n")
-            print(f"** encoded output, len: {len(request.out_tokens)} **\n{request.out_tokens}\n")
+            print(f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n")
+            print(f"** encoded output, len: {request.out_tokens_len} **\n{request.out_tokens}\n")
             print(f"** text input **\n{request.in_text}\n")
             print(f"** text output **\n{request.out_text}\n")
 
@@ -441,8 +447,8 @@ class EngineHelper():
 
         self.profiling_data.reset(self.engine_config["engine_max_batch"])
         for request in request_list:
-            self.profiling_data.update(len(request.in_tokens),
-                                       len(request.out_tokens),
+            self.profiling_data.update(request.in_tokens_len,
+                                       request.out_tokens_len,
                                        request.context_time,
                                        request.generate_time)
 
@@ -485,6 +491,7 @@ class EngineHelper():
                     output_ids.append(new_ids[0])
 
                 request.out_tokens = output_ids
+                request.out_tokens_len = len(output_ids)
                 request.out_text = self.tokenizer.decode(
                     request.out_tokens, skip_special_tokens=True)
                 if stream_mode:

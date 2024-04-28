@@ -67,6 +67,6 @@ RUN conda install -y pybind11
 RUN pip3 install --upgrade pip && pip3 install -U setuptools
 
 # engine requirements
-RUN pip3 install torch==2.0.1 transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
+RUN pip3 install torch transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
 
 WORKDIR /root/

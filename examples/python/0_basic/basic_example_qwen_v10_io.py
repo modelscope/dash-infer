@@ -11,7 +11,7 @@ import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-os.environ['GLOG_minloglevel'] = '2' # disable LOG(INFO) logging
+# os.environ['GLOG_minloglevel'] = '2' # disable LOG(INFO) logging
 from dashinfer.helper import EngineHelper
 
 
@@ -51,7 +51,8 @@ def print_in_place(generator):
             print('\x1b[s', end='') # save cursor position (SCO)
             need_init_cursor_pos = False
 
-        print('\x1b[u', end='') # restores the cursor to the last saved position (SCO)
+        print('\x1b[u', end='') # restore the cursor to the last saved position (SCO)
+        print('\x1b[0J', end='') # erase from cursor until end of screen
         print(part)
     print()
 

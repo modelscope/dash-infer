@@ -46,4 +46,7 @@ RUN mkdir -p /root/.pip && \
 echo $'[global] \n\
 index-url = https://mirrors.aliyun.com/pypi/simple/ \n' > /root/.pip/pip.conf
 
+RUN yum install -y atlas-devel
+RUN pip3 install auditwheel
+
 WORKDIR /root/

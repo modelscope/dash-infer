@@ -66,22 +66,26 @@ static std::string wrap_system_prompt_qwen(const std::string& raw_text) {
   return std::move(result);
 }
 
-static void erase_previous_line() {
-  // move up
-  std::cout << "\033[A";
-  // clear current line
-  std::cout << "\033[K";
-}
-
-static void print_tokens(const std::vector<int64_t>& tokens) {
-  std::cout << "std::vector<int64_t> tokens = {";
+static std::string tokens2str(const std::vector<int64_t>& tokens) {
+  std::string str = "std::vector<int64_t> tokens = {";
   for (size_t i = 0; i < tokens.size(); ++i) {
-    std::cout << tokens[i];
+    str += std::to_string(tokens[i]);
     if (i < tokens.size() - 1) {
-      std::cout << ", ";
+      str += ", ";
     }
   }
-  std::cout << "}" << std::endl;
+  str += "}";
+  return str;
+}
+
+static void inplace_print(std::string str, bool need_init_cursor_pos) {
+  if (need_init_cursor_pos) {
+    std::cout << "\x1b[s";  // save cursor position (SCO)
+  }
+
+  std::cout << "\x1b[u";  // restore the cursor to the last saved position (SCO)
+  std::cout << "\x1b[0J";  // erase from cursor until end of screen
+  std::cout << str;
 }
 
 class DLTensorManager {

@@ -140,11 +140,12 @@ int main(int argc, char** argv) {
 
     // add system prompt for qwen.
     std::string full_prompt_text = wrap_system_prompt_qwen(raw_text);
-
     std::cout << "Input Text: " << full_prompt_text << std::endl;
+
     // convert text to token
     std::vector<int64_t> tokens = tokenizer.Encode(full_prompt_text);
-    print_tokens(tokens);
+    std::string tokens_str = tokens2str(tokens);
+    std::cout << " Input Tokens: " + tokens_str + "\n" << std::endl;
 
     // prepare token into request.
     std::shared_ptr<AsEngine::RequestContent> req_;
@@ -196,6 +197,7 @@ std::string start_request_and_fetch_output(
 
   std::vector<int64_t> output_tokens;
 
+  bool need_init_cursor_pos = true;
   while (true) {
     // this is a block queue, get will wait for output
     ele = queue_->Get();
@@ -232,21 +234,32 @@ std::string start_request_and_fetch_output(
     output_tokens.insert(output_tokens.end(), copy_output_token.begin(),
                          copy_output_token.end());
     auto strs = tokenizer.Decode(output_tokens);
+    std::string tokens_str = " Output Tokens: " + tokens2str(output_tokens);
+    std::string out_str = " Decode Infer Text: " + strs;
 
+    /*
+     * I am QianWen, a large language model created by Alibaba Cloud. I am
+     * designed to answer questions, provide information, and engage in
+     * conversation with users. How can I assist you today?
+     */
     std::vector<int64_t> reference_token = {
-        40, 1079, 264,  3460, 4128, 1614, 3465, 553, 54364, 14817,
-        13, 358,  1079, 2598, 1207, 1103, 54,   268, 13,    151645};
+        40,   1079, 1207,  1103,  54,  268,   11,   264,   3460, 4128, 1614,
+        3465, 553,  54364, 14817, 13,  358,   1079, 6188,  311,  4226, 4755,
+        11,   3410, 1995,  11,    323, 16579, 304,  10435, 448,  3847, 13,
+        2585, 646,  358,   7789,  498, 3351,  30,   151645};
 
     auto ref_text = tokenizer.Decode(reference_token);
-    // I am a large language model created by Alibaba Cloud. I am called
-    // QianWen.
-    std::cout << " Tokens: ";
-    print_tokens(output_tokens);
-    if (job_count == 0)
-      std::cout << " Decode Ref.  Text: " << ref_text << std::endl;
+    std::string ref_str = " Decode Ref.  Text: " + ref_text;
 
-    //      erase_previous_line();
-    std::cout << " Decode Infer Text: " << strs << std::endl;
+    std::string print_str = tokens_str + "\n";
+    if (job_count == 0) {
+      print_str += ref_str + "\n";
+    }
+
+    print_str += out_str + "\n";
+
+    inplace_print(print_str, need_init_cursor_pos);
+    need_init_cursor_pos = false;
   }
 
   if (output_tokens.size() > 0)

@@ -45,4 +45,7 @@ RUN echo "source activate ds_py" >> /root/.bashrc && source /root/.bashrc
 RUN mkdir -p /root/.pip/
 RUN echo -e "[global]\ntrusted-host=mirrors.aliyun.com\nindex-url = http://mirrors.aliyun.com/pypi/simple\n\n[install]\nuse-wheel=yes" > /root/.pip/pip.conf
 
+RUN yum install -y atlas-devel
+RUN pip3 install auditwheel
+
 WORKDIR /root/
