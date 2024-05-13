@@ -76,7 +76,7 @@ class WeightManager {
   // disk io, but in this function it should split the weight concurrently.
   AsStatus LoadWeightForModel(
       const DeviceContext& target_device_ctx,
-      std::shared_ptr<ModelWeightHandler> weight_handler, RankInfo& rank_info);
+      std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info);
 
   /**
    * Get the weight tensor, if will return the weight for this rank, it maybe
@@ -132,7 +132,7 @@ class WeightManagerImpl : public WeightManager {
   // disk io, but in this function it should split the weight concurrently.
   AsStatus LoadWeightForModel(
       const DeviceContext& target_device_ctx,
-      std::shared_ptr<ModelWeightHandler> weight_handler, RankInfo& rank_info);
+      std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info);
 
   std::vector<ModelWeightAccessInfo> GetAccessOrderOfWeightFile(
       std::shared_ptr<ModelWeightHandler> mhandle);

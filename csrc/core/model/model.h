@@ -37,8 +37,9 @@ class AsModel {
   virtual AsStatus Init(const TransformerProto& model_proto,
                         const DeviceContext& ctx);
   // new api
-  virtual AsStatus EnqueueRequest(const DLTensorMap& inputs, TensorMap* outputs,
-                                  GenerateConfig& gen_cfg);
+  virtual AsStatus StartRequestImpl(
+      const std::shared_ptr<RequestHandle> request_handle, TensorMap* outputs,
+      GenerateConfig& gen_cfg);
   virtual AsStatus GenerateContinue();
   virtual AsStatus GenerateContinueDecoder();
   virtual AsStatus GenerateContinueContext();

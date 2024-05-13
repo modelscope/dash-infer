@@ -31,8 +31,8 @@ class Worker {
   AsStatus RebuildModelFromBuffer(
       const std::unique_ptr<TransformerProto>& model_ir);
 
-  AsStatus EnqueueRequest(const DLTensorMap& inputs, TensorMap* outputs,
-                          GenerateConfig& gen_cfg);
+  AsStatus StartRequestImpl(std::shared_ptr<RequestHandle> request_handle,
+                            TensorMap* outputs, GenerateConfig& gen_cfg);
 
   int GetUnFinishedRequest();
   Request* GetRequestById(std::string request_id);

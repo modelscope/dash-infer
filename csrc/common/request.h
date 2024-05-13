@@ -17,6 +17,7 @@ struct Request {
   TensorMap outputs;
   GenerateConfig gen_cfg;
   std::vector<std::vector<std::pair<int64_t, float>>> log_probs_list;
+  std::vector<float> token_logprobs_list;
   bool finish = false;
   int input_len = 0;
   AsEngine::GenerateRequestStatus status =

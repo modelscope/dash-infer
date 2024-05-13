@@ -39,6 +39,7 @@ class GenerateOp : public AsOperator {
   int default_k_ = 1;
   int max_k_ = -1;
   std::unique_ptr<AsTensor> logprobs_;
+  std::unique_ptr<AsTensor> token_logprobs_;
   std::unique_ptr<AsTensor> last_data_;
   std::unique_ptr<AsTensor> topk_value_;
   std::unique_ptr<AsTensor> topp_value_;
@@ -88,11 +89,12 @@ class GenerateOp : public AsOperator {
   void (*sample_init_launcher)(void* sample_state, unsigned long long seed,
                                int batch_size,
                                const DeviceContext* ctx) = nullptr;
-  AsStatus (*logprobs_launcher)(DataType dtype, void* in_logits, void* logprobs,
-                                void* topk_value, int64_t* topk_indice,
-                                int batch_size, int length,
-                                RuntimeContext* runtime_ctx, void* ws_ptr,
-                                size_t ws_bytes,
+  AsStatus (*logprobs_launcher)(DataType dtype, void* in_logits,
+                                int64_t* out_tokens, void* token_logprobs,
+                                void* logprobs, void* topk_value,
+                                int64_t* topk_indice, int batch_size,
+                                int length, RuntimeContext* runtime_ctx,
+                                void* ws_ptr, size_t ws_bytes,
                                 const DeviceContext* ctx) = nullptr;
   AsStatus (*process_logits_launcher)(DataType dtype, int64_t* in_tokens,
                                       void* in_logits, int batch_size,

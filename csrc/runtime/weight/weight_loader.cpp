@@ -203,24 +203,27 @@ void DenseWeightLoader::LoadFromMemory(const void* ptr, size_t len,
   int32_t flags = static_cast<int32_t>(AsTensorFlags::empty_flag);
 
   auto splitMemType = out_tensor->GetDeviceType();
-  // use device to accl to speed.
-  auto whole_weight =
-      std::make_shared<AsTensor>(name_,
-                                 // out_tensor->GetDeviceType(),
-                                 // FIXME: use device type will cause multiple
-                                 // card result not correct, but after change,it
-                                 // will be faster on splitting multiple card.
-                                 splitMemType, tensor_info_.dtype,
-                                 tensor_info_.mode, tensor_info_.shape, flags);
+  if (!this->whole_weight_tensor_) {
+    this->whole_weight_tensor_ = std::make_shared<AsTensor>(
+        name_,
+        // out_tensor->GetDeviceType(),
+        // FIXME: use device type will cause multiple
+        // card result not correct, but after change,it
+        // will be faster on splitting multiple card.
+        splitMemType, tensor_info_.dtype, tensor_info_.mode, tensor_info_.shape,
+        flags);
+  }
+  this->whole_weight_tensor_->SetShape(Shape{tensor_info_.shape});
 
-  assert(len == whole_weight->GetSizeInByte());
   // for input tensor, it will a shape[0,0] tensor, don't copy it.
   // TODO: for those tensor, handle it before weight load.
-  CopyData(whole_weight->GetDataPtr(), whole_weight->GetDeviceType(), ptr,
-           DeviceType::CPU, whole_weight->GetSizeInByte());
+  CopyData(this->whole_weight_tensor_->GetDataPtr(),
+           this->whole_weight_tensor_->GetDeviceType(), ptr, DeviceType::CPU,
+           len);
 
   splitter->SetShape(tensor_info_, out_tensor);
-  splitter->CopyWeight(tensor_info_, out_tensor, whole_weight, ptr, len);
+  splitter->CopyWeight(tensor_info_, out_tensor, whole_weight_tensor_, ptr,
+                       len);
 }
 
 // load a dense tensor from file stream to a tenesor.

@@ -12,6 +12,7 @@
 
 #include "allspark_client.h"
 #include "allspark_service.grpc.pb.h"
+#include "engine_runtime.h"
 namespace allspark {
 
 class AsClientContext final {
@@ -66,22 +67,15 @@ class ClientResultQueueImpl : public AsEngine::ResultQueue {
   std::string uuid_;
 };
 
-class RequestHandle {
- public:
-  RequestHandle() = default;
-  RequestHandle(const std::string& uuid) : uuid_(uuid) {}
-  std::string uuid_;
-};
-
 class ClientRequestManager {
  public:
-  struct RequestData {
+  struct ClientRequestData {
     std::shared_ptr<RequestHandle> handle;
     std::shared_ptr<AsEngine::ResultQueue> queue;
   };
 
   void addRequest(const std::string& key,
-                  std::shared_ptr<RequestData> req_data) {
+                  std::shared_ptr<ClientRequestData> req_data) {
     std::unique_lock<std::mutex> lock(mtx_);
     request_map_[key] = req_data;
   }
@@ -91,7 +85,7 @@ class ClientRequestManager {
     request_map_.erase(key);
   }
 
-  std::shared_ptr<RequestData> getRequest(const std::string& key) {
+  std::shared_ptr<ClientRequestData> getRequest(const std::string& key) {
     auto it = request_map_.find(key);
     if (it != request_map_.end()) {
       return it->second;
@@ -100,7 +94,7 @@ class ClientRequestManager {
   }
 
  private:
-  std::map<std::string, std::shared_ptr<RequestData>> request_map_;
+  std::map<std::string, std::shared_ptr<ClientRequestData>> request_map_;
   std::mutex mtx_;
 };
 

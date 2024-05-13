@@ -3,12 +3,13 @@
 # @file    helper.py
 #
 import os
+import gc
 import sys
-from enum import Enum
-import numpy as np
 import time
 import json
 import pandas as pd
+import numpy as np
+from enum import Enum
 from tabulate import tabulate
 from dataclasses import dataclass, field
 from typing import Any, Optional, List
@@ -20,10 +21,11 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from dashinfer import allspark
 from dashinfer.allspark.quantization import QuantizeConfig
 
-
 class EngineHelper():
 
-    def __init__(self, config):
+    def __init__(self, user_config):
+        config = ConfigManager.create_config(user_config)
+
         self.model_name = config["model_name"]
         self.model_type = config["model_type"]
 
@@ -75,6 +77,7 @@ class EngineHelper():
         self.torch_model_module = None
         self.model_config = None
         self.verbose = False
+        self.config = config
 
         if self.multinode_mode:
             self.engine = allspark.ClientEngine()
@@ -188,7 +191,7 @@ class EngineHelper():
         if self.default_gen_cfg["eos_token_id"] == -1:
             self.default_gen_cfg["eos_token_id"] = self.tokenizer.eos_token_id
 
-    def init_torch_model(self, hf_model_path):
+    def _init_torch_model(self, hf_model_path):
         self.torch_model = AutoModelForCausalLM.from_pretrained(
             hf_model_path, device_map="cpu", trust_remote_code=True).eval()
 
@@ -220,6 +223,11 @@ class EngineHelper():
         self.model_config["size_per_head"] = hidden_size_per_head
 
         self.torch_model_module = self.torch_model.state_dict()
+
+    def _uninit_torch_model(self):
+        self.torch_model = None
+        self.torch_model_module = None
+        gc.collect()
 
     def check_model_exist(self):
         model_path = os.path.join(self.model_path,
@@ -308,13 +316,15 @@ class EngineHelper():
             if self.engine_config["do_profiling"]:
                 profile_info = self.engine.get_op_profiling_info(
                     self.model_name)
-                print()
-                print(f"***************")
-                print(f"* profile_info")
-                print(f"***************")
-                print(f"{profile_info}")
+
+                msg = "\n***************\n"
+                msg += "* profile_info\n"
+                msg += "***************\n"
+                msg += f"{profile_info}\n"
+                print(msg)
 
         self.engine.stop_model(self.model_name)
+        self.engine.release_model(self.model_name)
 
     def create_request(self, prompt: list, gen_cfg=None):
         if prompt == None or len(prompt) == 0:
@@ -378,6 +388,8 @@ class EngineHelper():
             # only convert model on rank 0
             return
 
+        self._init_torch_model(hf_model_path)
+
         if (self.torch_model_module != None):
             print("trans model from huggingface model:", hf_model_path)
             print("Dashinfer model will save to ", self.model_path)
@@ -407,6 +419,8 @@ class EngineHelper():
         else:
             raise ValueError("torch model is not initialized")
 
+        self._uninit_torch_model()
+
     def convert_request_to_jsonstr(self, request):
 
         def skip_unserializable(value):
@@ -427,14 +441,15 @@ class EngineHelper():
             return
 
         if self.verbose:
-            print(f"***********************************")
-            print(f"* Answer (dashinfer) for Request {request.id}")
-            print(f"***********************************")
-            print(f"** context_time: {request.context_time} s, generate_time: {request.generate_time} s\n")
-            print(f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n")
-            print(f"** encoded output, len: {request.out_tokens_len} **\n{request.out_tokens}\n")
-            print(f"** text input **\n{request.in_text}\n")
-            print(f"** text output **\n{request.out_text}\n")
+            msg = "***********************************\n"
+            msg += f"* Answer (dashinfer) for Request {request.id}\n"
+            msg += "***********************************\n"
+            msg += f"** context_time: {request.context_time} s, generate_time: {request.generate_time} s\n\n"
+            msg += f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n\n"
+            msg += f"** encoded output, len: {request.out_tokens_len} **\n{request.out_tokens}\n\n"
+            msg += f"** text input **\n{request.in_text}\n\n"
+            msg += f"** text output **\n{request.out_text}\n\n"
+            print(msg)
 
     def print_inference_result_all(self, request_list):
         for request in request_list:
@@ -481,21 +496,22 @@ class EngineHelper():
                 pass
             elif status == allspark.GenerateRequestStatus.Generating:
                 generated_elem = request.queue.Get()
-                new_ids = generated_elem.ids_from_generate
-                if len(output_ids) == 0 and len(new_ids) > 0:
-                    request.context_time = time.time() - time_start
-                    time_after_ctx = time.time()
-                    request.out_text = ""
+                if generated_elem is not None:
+                    new_ids = generated_elem.ids_from_generate
+                    if len(output_ids) == 0 and len(new_ids) > 0:
+                        request.context_time = time.time() - time_start
+                        time_after_ctx = time.time()
+                        request.out_text = ""
 
-                if (len(new_ids) > 0):
-                    output_ids.append(new_ids[0])
+                    if (len(new_ids) > 0):
+                        output_ids.append(new_ids[0])
 
-                request.out_tokens = output_ids
-                request.out_tokens_len = len(output_ids)
-                request.out_text = self.tokenizer.decode(
-                    request.out_tokens, skip_special_tokens=True)
-                if stream_mode:
-                    yield request.out_text
+                    request.out_tokens = output_ids
+                    request.out_tokens_len = len(output_ids)
+                    request.out_text = self.tokenizer.decode(
+                        request.out_tokens, skip_special_tokens=True)
+                    if stream_mode:
+                        yield request.out_text
             elif status == allspark.GenerateRequestStatus.GenerateFinished:
                 request.generate_time = time.time() - time_after_ctx
                 request.end_timestamp = time.strftime("%Y-%m-%d %H:%M:%S",
@@ -520,10 +536,16 @@ class EngineHelper():
     def process_one_request_stream(self, request):
         yield from self.process_one_request_impl(request, stream_mode=True)
 
+    def fetch_config(self):
+        return self.config
+
+class ConfigManager():
+    @staticmethod
     def save_config_as_json(config, file_path):
         with open(file_path, 'w') as f:
             json.dump(config, f, indent=4)
 
+    @staticmethod
     def get_config_from_json(file_path):
         config = None
         if not os.path.exists(file_path):
@@ -531,4 +553,84 @@ class EngineHelper():
 
         with open(file_path, 'r') as f:
             config = json.load(f)
+        return config
+
+    @staticmethod
+    def get_default_config():
+        default_config = {
+            "model_name": "",
+            "model_type": "",
+            "model_path": "~/dashinfer_models/",
+            "data_type": "float32",
+            "device_type": "CPU",
+            "device_ids": [0],
+            "multinode_mode": False,
+            "convert_config": {
+                "do_dynamic_quantize_convert": False
+            },
+            "engine_config": {
+                "engine_max_length": 2048,
+                "engine_max_batch": 8,
+                "do_profiling": False,
+                "num_threads": 0,
+                "matmul_precision": "medium"
+            },
+            "generation_config": {
+                "temperature": 1.0,
+                "early_stopping": True,
+                "top_k": 1024,
+                "top_p": 0.8,
+                "repetition_penalty": 1.1,
+                "presence_penalty": 0.0,
+                "min_length": 0,
+                "max_length": 2048,
+                "no_repeat_ngram_size": 0,
+                "eos_token_id": [],
+                "stop_words_ids": [],
+                "seed": 1234
+            },
+            "quantization_config": {
+                "activation_type": "bfloat16",
+                "weight_type": "uint8",
+                "SubChannel": True,
+                "GroupSize": 64
+            }
+        }
+        return default_config
+
+    @staticmethod
+    def recursive_merge(dict1, dict2):
+        merge = dict1
+        for key, value in dict2.items():
+            if value == None:
+                pass
+            else:
+                if key in dict1 and isinstance(dict1[key], dict) and isinstance(value, dict):
+                    merge[key] = ConfigManager.recursive_merge(dict1[key], value)
+                else:
+                    merge[key] = value
+        return merge
+
+    @staticmethod
+    def check_config(config):
+        key = "model_name"
+        if key in config and isinstance(config[key], str) and config[key] != "":
+            pass
+        else:
+            raise ValueError("config['{}']: key not exists or unsupported value".format(key))
+
+        key = "model_type"
+        model_types = ["LLaMA_v2", "ChatGLM_v2", "ChatGLM_v3", "Qwen_v10", "Qwen_v15"]
+        if key in config and isinstance(config[key], str) and config[key] in model_types:
+            pass
+        else:
+            raise ValueError("config['{}']: key not exists or unsupported value".format(key))   
+        
+        return
+
+    @staticmethod
+    def create_config(user_config):
+        default_config = ConfigManager.get_default_config()
+        config = ConfigManager.recursive_merge(default_config, user_config)
+        ConfigManager.check_config(config)
         return config

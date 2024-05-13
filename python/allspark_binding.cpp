@@ -74,10 +74,29 @@ static void PyParseInputs(
   for (auto& v : py_inputs) {
     as_inputs.insert(
         make_pair(v.first, static_cast<DLManagedTensor*>(v.second)));
-    PyObject* pyobject = v.second.ptr();
-    Py_INCREF(pyobject);
+    // no needs to add reference
+    // for now, we hold the gil, and will copy all dltensor's data into
+    // own tensor, also no need to move ownership.
   }
 }
+
+class PyInputReferenceGuard {
+ public:
+  std::map<std::string, py::capsule>& py_input_;
+  PyInputReferenceGuard(std::map<std::string, py::capsule>& py_input)
+      : py_input_(py_input) {
+    for (auto& v : py_input_) {
+      PyObject* pyobject = v.second.ptr();
+      Py_INCREF(pyobject);
+    }
+  }
+  ~PyInputReferenceGuard() {
+    for (auto& v : py_input_) {
+      PyObject* pyobject = v.second.ptr();
+      Py_DECREF(pyobject);
+    }
+  }
+};
 
 static void PyParseInputs(
     std::map<std::string, py::object>& py_inputs,  // python dict {"xx": [list]}
@@ -217,6 +236,11 @@ PYBIND11_MODULE(_allspark, m) {
              AsStatus status = self->StopModel(model_name);
              return status;
            })
+      .def("_release_model",
+           [](AsEngine* self, const char* model_name) {
+             AsStatus status = self->ReleaseModel(model_name);
+             return status;
+           })
       .def("_start_request",
            [](AsEngine* self, const char* model_name,
               std::map<std::string, py::capsule>&
@@ -233,7 +257,6 @@ PYBIND11_MODULE(_allspark, m) {
              req->config = as_gen_cfg;
              req->infer_type = AsEngine::RequestInferType::Generate;
              req->inputs = std::make_shared<DLTensorMap>(as_inputs);
-             req->mm_type = AsEngine::RequestMMType::TextInput;
 
              RequestHandle_t request_handle;
              AsEngine::ResultQueue_t result_queue = nullptr;
@@ -355,6 +378,11 @@ PYBIND11_MODULE(_allspark, m) {
              AsStatus status = self->StopModel(model_name);
              return status;
            })
+      .def("_release_model",
+           [](AsClientEngine* self, const char* model_name) {
+             AsStatus status = self->ReleaseModel(model_name);
+             return status;
+           })
       .def("_start_request",
            [](AsClientEngine* self, const char* model_name,
               std::map<std::string, py::capsule>&
@@ -371,7 +399,6 @@ PYBIND11_MODULE(_allspark, m) {
              req->config = as_gen_cfg;
              req->infer_type = AsEngine::RequestInferType::Generate;
              req->inputs = std::make_shared<DLTensorMap>(as_inputs);
-             req->mm_type = AsEngine::RequestMMType::TextInput;
 
              RequestHandle_t request_handle;
              AsEngine::ResultQueue_t result_queue = nullptr;

@@ -96,6 +96,9 @@ class DenseWeightLoader : public WeightLoader {
   virtual void LoadFromMemory(const void* ptr, size_t len,
                               std::shared_ptr<AsTensor> opt_in_tensor,
                               std::shared_ptr<AsTensor> out_tensor);
+
+ private:
+  std::shared_ptr<AsTensor> whole_weight_tensor_;
 };
 
 class WeightSplitter {

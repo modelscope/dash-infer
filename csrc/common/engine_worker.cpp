@@ -46,6 +46,15 @@ AsStatus Worker::BuildModel(const TransformerProto& model_proto,
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+AsStatus Worker::StartRequestImpl(
+    const std::shared_ptr<RequestHandle> request_handle, TensorMap* outputs,
+    GenerateConfig& gen_cfg) {
+  DLOG(INFO) << "Worker::StartRequestImpl" << std::endl;
+  SetWorkerDeviceId(device_id_);
+  AsStatus ret = model_->StartRequestImpl(request_handle, outputs, gen_cfg);
+  return ret;
+}
+
 AsStatus Worker::UnloadModelFromDeviceMemory() {
   SetWorkerDeviceId(device_id_);
   AS_CHECK_STATUS(model_->UnloadModelFromDeviceMemory());
@@ -61,14 +70,6 @@ AsStatus Worker::RebuildModelFromBuffer(
   model_->ReloadModelToDeviceMemory();
   AS_CHECK_STATUS(model_->Init(*model_ir, *device_ctx_));
   return AsStatus::ALLSPARK_SUCCESS;
-}
-
-AsStatus Worker::EnqueueRequest(const DLTensorMap& inputs, TensorMap* outputs,
-                                GenerateConfig& gen_cfg) {
-  SetWorkerDeviceId(device_id_);
-
-  AsStatus ret = model_->EnqueueRequest(inputs, outputs, gen_cfg);
-  return ret;
 }
 
 Request* Worker::GetRequestById(std::string request_id) {

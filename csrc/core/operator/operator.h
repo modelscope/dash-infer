@@ -49,9 +49,7 @@ class AsOperator {
                     ModelProfiler* profiler);
 
   // model to call OP forward/reshape/alloc
-  AsStatus CallForward();
   AsStatus CallForward(RuntimeContext* runtime_ctx);
-  AsStatus CallReshape();
   AsStatus CallReshape(RuntimeContext* runtime_ctx);
   AsStatus CallAlloc(RuntimeContext* runtime_ctx);
 

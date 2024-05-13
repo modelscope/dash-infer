@@ -57,7 +57,7 @@ Run:
 To be more specific:
 
 ```shell
-./example_qwen_single_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+./example_qwen_single_numa -m ~/dashinfer_models/Qwen-1_8B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### example_qwen_multi_numa
@@ -73,7 +73,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m <path_to_dash
 To be more specific:
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./example_qwen_multi_numa -m ~/dashinfer_models/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 Parameter description:
@@ -98,10 +98,10 @@ Run:
 To be more specific:
 
 ```shell
-./tgi_server -m ../../python/outputs/Qwen-1_8B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
+./tgi_server -m ~/dashinfer_models/Qwen-1_8B-Chat_cpu_single_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
-#### Single-NUMA Server
+#### Multi-NUMA Server
 
 Run:
 
@@ -112,7 +112,7 @@ AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m <path_to_dashin
 To be more specific:
 
 ```shell
-AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ../../python/outputs/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
+AS_NUMA_NUM=2 AS_DAEMON_PATH=/usr/bin ./tgi_server_multi_numa -m ~/dashinfer_models/Qwen-1_8B-Chat_cpu_multi_float32 -t ../qwen_v1.tiktoken -c 32
 ```
 
 ### Run the Client

@@ -11,6 +11,7 @@ set(ALLSPARK_INC_DIR
     ${CMAKE_CURRENT_SOURCE_DIR}/common
     ${CMAKE_CURRENT_SOURCE_DIR}/device
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/utility
     ${CMAKE_CURRENT_SOURCE_DIR}/interface
     ${CMAKE_CURRENT_BINARY_DIR}
@@ -86,7 +87,7 @@ if (MEM_CHECK)
     target_link_options(allspark_framework PUBLIC "-fsanitize=address")
 endif()
 
-target_link_libraries(allspark_framework PRIVATE ${ONEDNN_LIBRARY} git_version stdc++fs allspark_kernel CONAN_PKG::glog CONAN_PKG::protobuf  CONAN_PKG::yaml-cpp ${ALLSPARK_3RD_LIBS} )
+target_link_libraries(allspark_framework PRIVATE ${ONEDNN_LIBRARY} git_version stdc++fs allspark_kernel CONAN_PKG::glog CONAN_PKG::protobuf  ${ALLSPARK_3RD_LIBS} )
 
 if(ENABLE_ARMCL)
     add_dependencies(allspark_framework project_armcl)

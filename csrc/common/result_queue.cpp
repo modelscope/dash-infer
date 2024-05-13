@@ -128,6 +128,7 @@ void ResultQueueImpl::AppendGenerateElement(
   std::vector<int64_t> new_tokens = new_ele->ids_from_generate;
   std::vector<std::vector<std::pair<int64_t, float>>> new_prob =
       new_ele->log_probs_list;
+  std::vector<float> new_token_logprobs = new_ele->token_logprobs_list;
   DLOG(INFO) << "AppendGenerateElement, new_tokens.size: " << new_tokens.size()
              << ", store_queue.size: " << store_queue_.size()
              << ", status: " << static_cast<int>(status_);
@@ -142,6 +143,9 @@ void ResultQueueImpl::AppendGenerateElement(
           new_tokens.end());
       store_queue_.front()->log_probs_list.insert(
           queue_front->log_probs_list.end(), new_prob.begin(), new_prob.end());
+      store_queue_.front()->token_logprobs_list.insert(
+          queue_front->token_logprobs_list.end(), new_token_logprobs.begin(),
+          new_token_logprobs.end());
     }
     // LOG(INFO) << "append ele: "  << new_tokens.size()  << "ptr : " <<
     // store_queue_.front().get();

@@ -18,6 +18,8 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+
+#include "thread_utils.h"
 namespace allspark {
 class ThreadPool {
  public:
@@ -41,8 +43,10 @@ class ThreadPool {
 
 // the constructor just launches some amount of workers
 inline ThreadPool::ThreadPool(size_t threads) : stop(false) {
+  LOG(INFO) << "ThreadPool created with: " << threads;
   for (size_t i = 0; i < threads; ++i)
-    workers.emplace_back([this] {
+    workers.emplace_back([this, i] {
+      setThreadName(i, "ASThreadPool");
       for (;;) {
         std::function<void()> task;
 

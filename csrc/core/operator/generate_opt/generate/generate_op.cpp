@@ -44,6 +44,9 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
   logprobs_ =
       std::make_unique<AsTensor>("logprobs", backend, DataType::FLOAT32,
                                  DataMode::DENSE, Shape{max_batch, default_k_});
+  token_logprobs_ =
+      std::make_unique<AsTensor>("token_logprobs", backend, DataType::FLOAT32,
+                                 DataMode::DENSE, Shape{max_batch, 1});
   topk_value_ =
       std::make_unique<AsTensor>("topk_value", backend, dtype_, DataMode::DENSE,
                                  Shape{max_batch, default_k_});
@@ -76,7 +79,6 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
   switch (runtime_ctx->generate_method) {
     case 0: {
       DeviceType backend = ctx_->GetDeviceType();
-      DLOG(INFO) << "SampleOp::Reshape()" << std::endl;
       const Shape& in_shape = tensor_map_->at(in_names_[0])->GetShape();
       batch_size_ = in_shape[0];
       seq_len_ = in_shape[1];
@@ -137,6 +139,7 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
       const int topp_length = run_topk ? max_k_ : vocab_size_;
       // warm up with max length
       AS_CHECK_STATUS(logprobs_->SetShape(Shape{max_batch, vocab_size_}));
+      AS_CHECK_STATUS(token_logprobs_->SetShape(Shape{max_batch, 1}));
       AS_CHECK_STATUS(topk_indice_->SetShape(Shape{max_batch, vocab_size_}));
       AS_CHECK_STATUS(topk_value_->SetShape(Shape{max_batch, vocab_size_}));
       AS_CHECK_STATUS(topp_value_->SetShape(Shape{max_batch, vocab_size_}));
@@ -204,12 +207,6 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
       }
     }
   }
-  if (need_logprobs) {
-    logprobs_launcher(
-        dtype_, in_ptr, logprobs_->GetDataPtr(), topk_value_->GetDataPtr(),
-        static_cast<int64_t*>(topk_indice_->GetDataPtr()), batch_size_,
-        vocab_size_, runtime_ctx, ws_ptr, ws_bytes, ctx_);
-  }
   kernel_launcher(dtype_, static_cast<int64_t*>(out_ptr),
                   topk_value_->GetDataPtr(), topp_value_->GetDataPtr(),
                   static_cast<int64_t*>(topk_indice_->GetDataPtr()), in_ptr,
@@ -218,6 +215,14 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
                   static_cast<float*>(topp_list_->GetDataPtr()),
                   static_cast<float*>(temperature_list_->GetDataPtr()), ctx_,
                   runtime_ctx, ws_ptr, ws_bytes);
+  if (need_logprobs) {
+    logprobs_launcher(dtype_, in_ptr, static_cast<int64_t*>(out_ptr),
+                      token_logprobs_->GetDataPtr(), logprobs_->GetDataPtr(),
+                      topk_value_->GetDataPtr(),
+                      static_cast<int64_t*>(topk_indice_->GetDataPtr()),
+                      batch_size_, vocab_size_, runtime_ctx, ws_ptr, ws_bytes,
+                      ctx_);
+  }
   if (device == DeviceType::CPU) {
     if (nrank_ > 1) {
       AsStatus status = MpiBcast(tensor_map_->at(out_names_[0]));
@@ -229,7 +234,6 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
     }
   }
 
-  DLOG(INFO) << "SampleOp::Forward() returns" << std::endl;
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus GenerateOp::Forward(RuntimeContext* runtime_ctx) {

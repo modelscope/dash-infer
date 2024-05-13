@@ -73,6 +73,7 @@ class RuntimeContext {
   int generate_method = 0;
   std::vector<int64_t> logprobs_indice_host;
   std::vector<float> logprobs_value_host;
+  std::vector<float> token_logprobs_host;
   GenerateContext* GetContextGenCtx() const {
     return gen_ctx_list[current_batch].get();
   }

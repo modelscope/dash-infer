@@ -57,7 +57,6 @@ class RequestManager {
     allspark::AsEngine::ResultQueue_t queue;
     std::shared_ptr<AsEngine::RequestContent> req;
     allspark_service::SharedDLTensorMap shared_inputs;
-    std::vector<allspark_service::SharedDLTensorListMap> shared_mm_embedding;
   };
 
   void addRequest(const std::string& key,
@@ -181,7 +180,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     std::string model_name;
     allspark_service::makeRequestParamsAsFromProto(
         model_name, req_data->req.get(), *request_proto,
-        req_data->shared_inputs, req_data->shared_mm_embedding);
+        req_data->shared_inputs);
     auto status = engine_.StartRequest(model_name.c_str(), req_data->req,
                                        &req_data->handle, &req_data->queue);
     if (status == allspark::AsStatus::ALLSPARK_SUCCESS) {

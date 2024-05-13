@@ -96,8 +96,18 @@ void UpdateProbs(GenerateContext* gen_ctx, RuntimeContext* runtime_ctx,
               ->logprobs_indice_host[current_batch * batch_stride + index],
           runtime_ctx
               ->logprobs_value_host[current_batch * batch_stride + index]));
+      DLOG(INFO)
+          << "indice = "
+          << runtime_ctx
+                 ->logprobs_indice_host[current_batch * batch_stride + index]
+          << ",value ="
+          << runtime_ctx
+                 ->logprobs_value_host[current_batch * batch_stride + index]
+          << std::endl;
     }
     gen_ctx->request->log_probs_list.push_back(log_probs);
+    gen_ctx->request->token_logprobs_list.push_back(
+        runtime_ctx->token_logprobs_host[current_batch]);
   }
 }
 AsStatus PostProcessIdOp::Forward(RuntimeContext* runtime_ctx) {

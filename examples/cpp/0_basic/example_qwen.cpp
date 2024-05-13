@@ -135,6 +135,7 @@ int main(int argc, char** argv) {
       // in second time, user can input text.
 
       std::cout << " Input Your Prompt: ";
+      std::cout << "\x1b[0J";  // erase from cursor until end of screen
       std::cin >> raw_text;
     }
 
@@ -180,7 +181,8 @@ std::string start_request_and_fetch_output(
     Engine* as_engine, std::string model_name,
     std::shared_ptr<AsEngine::RequestContent> req_, int job_count,
     Tokenizer& tokenizer) {
-  RequestHandle_t handle_;  // this handle will filled by start request.
+  allspark::RequestHandle_t
+      handle_;  // this handle will filled by start request.
   allspark::AsEngine::ResultQueue_t queue_;
 
   auto start_req_status =

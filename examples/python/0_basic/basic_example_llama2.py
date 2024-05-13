@@ -9,9 +9,10 @@ import time
 import queue
 import random
 import subprocess
+from jinja2 import Template
 from concurrent.futures import ThreadPoolExecutor
 
-from dashinfer.helper import EngineHelper
+from dashinfer.helper import EngineHelper, ConfigManager
 
 
 def download_model(model_id, revision, source="modelscope"):
@@ -31,13 +32,14 @@ def download_model(model_id, revision, source="modelscope"):
 
 
 def create_test_prompt(default_gen_cfg=None):
-    prompt_list = [
+    input_list = [
         "Where is the capital of Zhejiang?",
         "How many days are in a leap year?",
         "What is the largest planet in our solar system?",
     ]
     gen_cfg_list = []
-    for i in range(len(prompt_list)):
+    prompt_list = input_list
+    for i in range(len(input_list)):
         if default_gen_cfg != None:
             gen_cfg = copy.deepcopy(default_gen_cfg)
             gen_cfg["seed"] = random.randint(0, 10000)
@@ -57,24 +59,23 @@ def process_request(request_list, engine_helper: EngineHelper):
     executor = ThreadPoolExecutor(
         max_workers=engine_helper.engine_config["engine_max_batch"])
 
-    # submit all tasks to the threadpool
-    futures = []
-    for request in request_list:
-        future = executor.submit(engine_helper.process_one_request, request)
-        future.argument = request
-        future.add_done_callback(done_callback)
-        futures.append(future)
-
-    # wait, until all tasks finish
-    for future in futures:
-        future.result()
+    try:
+        # submit all tasks to the threadpool
+        futures = []
+        for request in request_list:
+            future = executor.submit(engine_helper.process_one_request, request)
+            future.argument = request
+            future.add_done_callback(done_callback)
+            futures.append(future)
+    finally:
+        executor.shutdown(wait=True)
 
     return
 
 
 if __name__ == '__main__':
     config_file = "../model_config/config_llama2_7b.json"
-    config = EngineHelper.get_config_from_json(config_file)
+    config = ConfigManager.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -103,7 +104,6 @@ if __name__ == '__main__':
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
     engine_helper.init_tokenizer(original_model["model_path"])
-    engine_helper.init_torch_model(original_model["model_path"])
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required

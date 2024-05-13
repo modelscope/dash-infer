@@ -103,8 +103,16 @@ original_model = {
 3. format of prompt
 
 ```python
-prompt_list[i] = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n" \
-                 + prompt_list[i] + "<|im_end|>\n<|im_start|>assistant\n"
+start_text = "<|im_start|>"
+end_text = "<|im_end|>"
+system_msg = {"role": "system", "content": "You are a helpful assistant."}
+user_msg = {"role": "user", "content": ""}
+assistant_msg = {"role": "assistant", "content": ""}
+
+prompt_template = Template(
+    "{{start_text}}" + "{{system_role}}\n" + "{{system_content}}" + "{{end_text}}\n" +
+    "{{start_text}}" + "{{user_role}}\n" + "{{user_content}}" + "{{end_text}}\n" +
+    "{{start_text}}" + "{{assistant_role}}\n")
 ```
 
 ## Add a New Model

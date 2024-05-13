@@ -25,9 +25,12 @@ add_executable(allspark_daemon ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_
 set_target_properties(allspark_daemon PROPERTIES CXX_STANDARD 17)  # c17 for grpc
 target_link_libraries(allspark_daemon allspark_framework CONAN_PKG::grpc CONAN_PKG::protobuf CONAN_PKG::glog)
 target_include_directories(
-    allspark_daemon
+  allspark_daemon
   PUBLIC
   ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../interface)
 
 add_library(allspark_client SHARED ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_client.cpp allspark_client_impl.cpp allspark_service_parallel.cpp)
@@ -39,4 +42,7 @@ target_include_directories(
   PUBLIC
   ${THREAD_INCLUDE}
   ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../interface)

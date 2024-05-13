@@ -18,8 +18,6 @@ if (NOT CMAKE_BUILD_TYPE)
         options are: Debug/Release/RelWithDebInfo/MinSizeRel." FORCE)
 endif()
 
-# set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
-
 set(CXX_STD "17" CACHE STRING "C++ standard")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 message(STATUS "CMAKE_BUILD_TYPE:${CMAKE_BUILD_TYPE}")

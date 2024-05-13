@@ -13,7 +13,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import argparse
 
-from dashinfer.helper import EngineHelper
+from dashinfer.helper import EngineHelper, ConfigManager
 
 
 def download_model(model_id, revision, source="modelscope"):
@@ -56,17 +56,16 @@ def process_request(request_list, engine_helper: EngineHelper):
     executor = ThreadPoolExecutor(
         max_workers=engine_helper.engine_config["engine_max_batch"])
 
-    # submit all tasks to the threadpool
-    futures = []
-    for request in request_list:
-        future = executor.submit(engine_helper.process_one_request, request)
-        future.argument = request
-        future.add_done_callback(done_callback)
-        futures.append(future)
-
-    # wait, until all tasks finish
-    for future in futures:
-        future.result()
+    try:
+        # submit all tasks to the threadpool
+        futures = []
+        for request in request_list:
+            future = executor.submit(engine_helper.process_one_request, request)
+            future.argument = request
+            future.add_done_callback(done_callback)
+            futures.append(future)
+    finally:
+        executor.shutdown(wait=True)
 
     return
 
@@ -82,7 +81,7 @@ if __name__ == '__main__':
 
     config_file = "../model_config/" + args.config_file
 
-    config = EngineHelper.get_config_from_json(config_file)
+    config = ConfigManager.get_config_from_json(config_file)
     config["generation_config"]["early_stopping"] = False
     config["generation_config"]["stop_words_ids"] = []
     config["device_ids"] = args.device_ids
@@ -121,7 +120,6 @@ if __name__ == '__main__':
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
     engine_helper.init_tokenizer(original_model["model_path"])
-    engine_helper.init_torch_model(original_model["model_path"])
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required

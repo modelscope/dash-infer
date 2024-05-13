@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple, Dict
 
 default_system = 'You are a helpful assistant.'
 
-from dashinfer.helper import EngineHelper
+from dashinfer.helper import EngineHelper, ConfigManager
 
 log_path = "outputs_gradio_demo_log"
 if not os.path.exists(log_path):
@@ -24,7 +24,7 @@ log_file = log_path + "/log_" + time.strftime("%Y%m%d_%H-%M-%S",
 log_file_lock = threading.Lock()
 
 config_file = "../model_config/config_qwen_v10_1_8b.json"
-config = EngineHelper.get_config_from_json(config_file)
+config = ConfigManager.get_config_from_json(config_file)
 
 # from huggingface_hub import snapshot_download
 # hf_model_path = snapshot_download(
@@ -107,7 +107,7 @@ def message_to_prompt(messages: Messages) -> str:
     for item in messages:
         im_start, im_end = "<|im_start|>", "<|im_end|>"
         prompt += f"\n{im_start}{item['role']}\n{item['content']}{im_end}"
-    prompt += f"\n<|im_start|>assistant\n"
+    prompt += f"\n{im_start}assistant\n"
     return prompt
 
 

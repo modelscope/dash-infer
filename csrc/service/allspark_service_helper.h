@@ -309,25 +309,6 @@ void makeInputCfgAsFromProto(
   }
 }
 
-// make AS std::vector<SharedDLTensorListMap> from proto
-void makeInputExtraAsFromProto(
-    std::vector<SharedDLTensorListMap>& extra,
-    const allspark::allspark_service::StartRequestRequest& in) {
-  for (const auto& tensor_list_map : in.mm_embedding()) {
-    SharedDLTensorListMap input_map;
-    for (auto& in_array_proto : tensor_list_map.tensor_list_map()) {
-      std::vector<std::shared_ptr<DLTensorManager>> dl_tensors;
-      for (auto& tensor : in_array_proto.second.tensor()) {
-        auto tensor_manage = std::make_shared<DLTensorManager>();
-        tensor_manage->ToDlTensor(tensor);
-        dl_tensors.push_back(tensor_manage);
-      }
-      input_map[in_array_proto.first] = std::move(dl_tensors);
-    }
-    extra.push_back(std::move(input_map));
-  }
-}
-
 // make share ptr to ptr
 void makeInputVecMapFromSharedVecMap(
     std::vector<allspark::DLTensorListMap>& outs,
@@ -547,20 +528,14 @@ void makeGeneratedElementsAsFromProto(
 void makeRequestParamsAsFromProto(
     std::string& model_name, allspark::AsEngine::RequestContent* req_as,
     const allspark::allspark_service::StartRequestRequest& req_proto,
-    allspark_service::SharedDLTensorMap& shared_inputs,
-    std::vector<allspark_service::SharedDLTensorListMap>& shared_mm_embedding) {
+    allspark_service::SharedDLTensorMap& shared_inputs) {
   makeInputMapAsFromProto(shared_inputs, req_proto.inputs());
   req_as->inputs = std::make_shared<DLTensorMap>();
   makeInputMapFromSharedMap(*req_as->inputs, shared_inputs);
-  if (req_proto.mm_embedding_size() > 0) {
-    makeInputExtraAsFromProto(shared_mm_embedding, req_proto);
-    makeInputVecMapFromSharedVecMap(req_as->mm_embedding, shared_mm_embedding);
-  }
+
   makeInputCfgAsFromProto(req_as->config, req_proto);
   req_as->infer_type =
       static_cast<allspark::AsEngine::RequestInferType>(req_proto.infer_type());
-  req_as->mm_type =
-      static_cast<allspark::AsEngine::RequestMMType>(req_proto.mm_type());
   model_name = req_proto.model_name();
 }
 
@@ -572,20 +547,10 @@ void makeRequestParamsProtoFromAs(
   // set infer_type
   req_proto.set_infer_type(
       static_cast<allspark_service::RequestInferType>(req_as->infer_type));
-  // set mm_type
-  req_proto.set_mm_type(
-      static_cast<allspark_service::RequestMMType>(req_as->mm_type));
   // TensorMap
   allspark_service::TensorMap* tensor_map_proto = req_proto.mutable_inputs();
   makeTensorMapProtoFromAs(*tensor_map_proto, *req_as->inputs);
   // TensorListMap
-  if (req_as->mm_embedding.size() > 0) {
-    for (auto& dllistmap_as : req_as->mm_embedding) {
-      allspark_service::TensorListMap* mm_embedding =
-          req_proto.add_mm_embedding();
-      makeTensorListMapProtoFromAs(*mm_embedding, dllistmap_as);
-    }
-  }
   // GenerateConfig
   allspark_service::GenerateConfig* gen_cfg_proto = req_proto.mutable_config();
   makeGenCfgProtoFromAs(*gen_cfg_proto, req_as->config);

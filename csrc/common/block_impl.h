@@ -76,7 +76,6 @@ class BlockImpl : public Block {
 
   int64_t Resize(int64_t new_size) override {
     if (size_ < new_size) {
-      DLOG(INFO) << "Block::Resize()" << std::endl;
       Free();
       allocator_->Alloc(&ptr_, (int64_t)new_size, "BLOCK");
       size_ = new_size;

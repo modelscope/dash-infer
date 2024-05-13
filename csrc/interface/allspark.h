@@ -207,14 +207,9 @@ class AsEngine final {
   class RequestContent {
    public:
     RequestInferType infer_type;
-    RequestMMType mm_type;
     std::shared_ptr<DLTensorMap>
         inputs;  /// input tensors, format: {input_name_1: tensor,
                  /// input_name_2: tensor}
-    std::vector<DLTensorListMap>
-        mm_embedding;  /// multiple media input embeddings, format:
-                       /// `[{emb_name_1: [tensor,tensor,...]},
-                       /// {emb_name_2:[tensor, tensor, ...]},...]`;
     GenerateConfig config;
   };
 
@@ -227,6 +222,7 @@ class AsEngine final {
                             /// models, only keeps new results and will not
                             /// include history results.
     std::vector<std::vector<std::pair<int64_t, float>>> log_probs_list;
+    std::vector<float> token_logprobs_list;
     DLTensorMap
         tensors_from_model_inference;  /// this output only has data when
                                        /// infer mode is model inference.

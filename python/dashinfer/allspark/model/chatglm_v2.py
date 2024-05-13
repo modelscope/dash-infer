@@ -346,7 +346,7 @@ class ChatGLM_v2(Model):
         ][0]
         for key, torch_name in weight_name_map.items():
             tensor = torch_weight[torch_name].cpu()
-            print("trans_tensor: {}, {}".format(key, torch_name))
+            # print("trans_tensor: {}, {}".format(key, torch_name))
             start_time = time.time()
             if key.find("weight") != -1:
                 tensor = torch.permute(tensor, (1, 0)).contiguous()

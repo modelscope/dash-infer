@@ -63,28 +63,28 @@ AsStatus ChatGLMModel::Forward(const TensorMap& inputs, TensorMap* outputs) {
   }
 
   for (auto& op : graph_ops_["pre_graph"]) {
-    AsStatus status = op->CallReshape();
+    AsStatus status = op->CallReshape(runtime_ctx_.get());
     if (status != AsStatus::ALLSPARK_SUCCESS) {
       LOG(ERROR) << "reshape failed in pre_graph" << std::endl;
       return ErrorProcess(status);
     }
   }
   for (auto& op : graph_ops_["decoder"]) {
-    AsStatus status = op->CallReshape();
+    AsStatus status = op->CallReshape(runtime_ctx_.get());
     if (status != AsStatus::ALLSPARK_SUCCESS) {
       LOG(ERROR) << "reshape failed in decoder" << std::endl;
       return ErrorProcess(status);
     }
   }
   for (auto& op : graph_ops_["pre_graph"]) {
-    AsStatus status = op->CallForward();
+    AsStatus status = op->CallForward(runtime_ctx_.get());
     if (status != AsStatus::ALLSPARK_SUCCESS) {
       LOG(ERROR) << "forward failed in pre_graph" << std::endl;
       return ErrorProcess(status);
     }
   }
   for (auto& op : graph_ops_["decoder"]) {
-    AsStatus status = op->CallForward();
+    AsStatus status = op->CallForward(runtime_ctx_.get());
     if (status != AsStatus::ALLSPARK_SUCCESS) {
       LOG(ERROR) << "forward failed in decoder" << std::endl;
       return ErrorProcess(status);

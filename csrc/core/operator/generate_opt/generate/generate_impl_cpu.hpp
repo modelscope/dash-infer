@@ -27,9 +27,10 @@ AsStatus copy_matrix_cpu(DataType dtype, void* in_ptr, void* new_ptr, int M,
   DispatchCPU(dtype, functor);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus logprobs_cpu(DataType dtype, void* in_logits, void* logprobs,
-                      void* topk_value, int64_t* topk_indice, int batch_size,
-                      int length, RuntimeContext* runtime_ctx, void* ws_ptr,
+AsStatus logprobs_cpu(DataType dtype, void* in_logits, int64_t* out_tokens,
+                      void* token_logprobs, void* logprobs, void* topk_value,
+                      int64_t* topk_indice, int batch_size, int length,
+                      RuntimeContext* runtime_ctx, void* ws_ptr,
                       size_t ws_bytes, const DeviceContext* ctx) {
   auto functor = [&]<typename T>() {
     T* typed_topk_value = static_cast<T*>(topk_value);
@@ -41,9 +42,14 @@ AsStatus logprobs_cpu(DataType dtype, void* in_logits, void* logprobs,
                     length, top_logprobs);
     runtime_ctx->logprobs_indice_host.reserve(batch_size * top_logprobs);
     runtime_ctx->logprobs_value_host.reserve(batch_size * top_logprobs);
+    runtime_ctx->token_logprobs_host.reserve(batch_size);
     for (int i = 0; i < batch_size * top_logprobs; i++) {
       runtime_ctx->logprobs_indice_host[i] = topk_indice[i];
       runtime_ctx->logprobs_value_host[i] = (float)typed_topk_value[i];
+    }
+    for (int i = 0; i < batch_size; i++) {
+      runtime_ctx->token_logprobs_host[i] =
+          (float)(typed_logprobs[i * length + out_tokens[i]]);
     }
   };
   DispatchCPU(dtype, functor);

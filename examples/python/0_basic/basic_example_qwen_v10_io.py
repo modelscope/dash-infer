@@ -6,14 +6,12 @@ import os
 import sys
 import copy
 import time
-import queue
 import random
 import subprocess
+from jinja2 import Template
 from concurrent.futures import ThreadPoolExecutor
 
-# os.environ['GLOG_minloglevel'] = '2' # disable LOG(INFO) logging
-from dashinfer.helper import EngineHelper
-
+from dashinfer.helper import EngineHelper, ConfigManager
 
 def download_model(model_id, revision, source="modelscope"):
     print(f"Downloading model {model_id} (revision: {revision}) from {source}")
@@ -32,10 +30,25 @@ def download_model(model_id, revision, source="modelscope"):
 
 
 def create_test_prompt(inputs, default_gen_cfg=None):
+    start_text = "<|im_start|>"
+    end_text = "<|im_end|>"
+    system_msg = {"role": "system", "content": "You are a helpful assistant."}
+    user_msg = {"role": "user", "content": ""}
+    assistant_msg = {"role": "assistant", "content": ""}
+
+    prompt_template = Template(
+        "{{start_text}}" + "{{system_role}}\n" + "{{system_content}}" + "{{end_text}}\n" +
+        "{{start_text}}" + "{{user_role}}\n" + "{{user_content}}" + "{{end_text}}\n" +
+        "{{start_text}}" + "{{assistant_role}}\n")
+
     gen_cfg_list = []
-    prompt = copy.deepcopy(inputs)
-    prompt = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n" \
-                     + prompt + "<|im_end|>\n<|im_start|>assistant\n"
+    user_msg["content"] = copy.deepcopy(inputs)
+
+    prompt = prompt_template.render(start_text=start_text, end_text=end_text,
+                                    system_role=system_msg["role"], system_content=system_msg["content"],
+                                    user_role=user_msg["role"], user_content=user_msg["content"],
+                                    assistant_role=assistant_msg["role"])
+
     if default_gen_cfg != None:
         gen_cfg = copy.deepcopy(default_gen_cfg)
         gen_cfg["seed"] = random.randint(0, 10000)
@@ -59,7 +72,7 @@ def print_in_place(generator):
 
 if __name__ == '__main__':
     config_file = "../model_config/config_qwen_v10_1_8b.json"
-    config = EngineHelper.get_config_from_json(config_file)
+    config = ConfigManager.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -96,7 +109,6 @@ if __name__ == '__main__':
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
     engine_helper.init_tokenizer(original_model["model_path"])
-    engine_helper.init_torch_model(original_model["model_path"])
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required
@@ -108,9 +120,9 @@ if __name__ == '__main__':
 
     try:
         while True:
-            input_value = input("Please enter your inputs: ")
+            input_value = input("Type in your prompt: ")
             if input_value.lower() == 'exit':
-                print("Exiting program.")
+                print("Exiting the program.")
                 break
 
             prompt_list, gen_cfg_list = create_test_prompt(
@@ -120,6 +132,7 @@ if __name__ == '__main__':
 
             gen = engine_helper.process_one_request_stream(request)
             print_in_place(gen)
+            time.sleep(1)
     
     except KeyboardInterrupt:
         sys.stdout.write("\nProgram interrupted. Exiting...\n")

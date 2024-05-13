@@ -38,7 +38,8 @@ class UpdateIdOp : public AsOperator {
   int seq_len_;
   int beam_size_;
   std::unique_ptr<AsTensor> tmp_id_;
-  std::unique_ptr<AsTensor> tmp_step_;
+  std::unique_ptr<AsTensor> tmp_step_device_;
+  int* tmp_step_host_{nullptr};
 };
 
 }  // namespace allspark

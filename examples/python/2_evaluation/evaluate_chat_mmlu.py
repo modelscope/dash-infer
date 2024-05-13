@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 from thefuzz import process
 
-from dashinfer.helper import EngineHelper
+from dashinfer.helper import EngineHelper, ConfigManager
 
 '''
 wget https://people.eecs.berkeley.edu/~hendrycks/data.tar
@@ -283,7 +283,7 @@ def download_model(model_id, revision, source="modelscope"):
 
 def prepare(args):
     config_file = args.config_file
-    config = EngineHelper.get_config_from_json(config_file)
+    config = ConfigManager.get_config_from_json(config_file)
     config["engine_config"]["engine_max_length"] = 8192
     config["generation_config"]["max_length"] = 8192
 
@@ -314,7 +314,6 @@ def prepare(args):
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
     engine_helper.init_tokenizer(original_model["model_path"])
-    engine_helper.init_torch_model(original_model["model_path"])
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required

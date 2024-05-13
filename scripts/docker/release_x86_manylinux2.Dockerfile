@@ -48,4 +48,10 @@ RUN echo -e "[global]\ntrusted-host=mirrors.aliyun.com\nindex-url = http://mirro
 RUN yum install -y atlas-devel
 RUN pip3 install auditwheel
 
+##########################################################################
+# github action requirements
+##########################################################################
+# RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash \
+#     && yum install git-lfs -y
+
 WORKDIR /root/

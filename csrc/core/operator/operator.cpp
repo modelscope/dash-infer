@@ -296,30 +296,12 @@ AsStatus AsOperator::Forward(RuntimeContext* runtime_ctx) {
   return this->Forward();
 }
 
-AsStatus AsOperator::CallForward() {
-  if (profiler_) {
-    ProfilerAdder adder(*profiler_, "forward", GetOpType(), ctx_);
-    return Forward();
-  } else {
-    return Forward();
-  }
-}
-
 AsStatus AsOperator::CallForward(RuntimeContext* runtime_ctx) {
   if (profiler_) {
     ProfilerAdder adder(*profiler_, "forward", GetOpType(), ctx_);
     return Forward(runtime_ctx);
   } else {
     return Forward(runtime_ctx);
-  }
-}
-
-AsStatus AsOperator::CallReshape() {
-  if (profiler_) {
-    ProfilerAdder adder(*profiler_, "reshape", GetOpType(), ctx_);
-    return Reshape();
-  } else {
-    return Reshape();
   }
 }
 

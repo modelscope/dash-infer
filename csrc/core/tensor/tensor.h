@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "common/block.h"
-#include "common/device_context.h"
 #include "data.h"   // NOLINT
 #include "shape.h"  // NOLINT
 
@@ -24,6 +23,10 @@
 #endif
 
 namespace allspark {
+
+class DeviceContext;
+class TensorUtils;
+
 void CopyData(void* dst_data, DeviceType dst_device, const void* src_data,
               DeviceType src_device, int64_t nbytes,
               const DeviceContext* device_context = nullptr);
@@ -34,8 +37,6 @@ void CopyData(void* dst_data, DeviceType dst_device, const void* src_data,
 enum class AsTensorFlags {
   empty_flag = 0x0,
 };
-
-class TensorUtils;
 
 class AsTensor {
  public:
@@ -69,7 +70,7 @@ class AsTensor {
 
   explicit AsTensor(const AsTensor& src_tensor, DeviceType backend);
 
-  explicit AsTensor(const std::string& new_name, const AsTensor& src_tensor);
+  explicit AsTensor(std::string new_name, const AsTensor& src_tensor);
 
   DLManagedTensor* ToDLPack(DeviceContext* device_ctx,
                             bool do_duplicate = false) const;
@@ -159,7 +160,13 @@ class AsTensor {
   bool mutable_ = true;
 
   friend class TensorUtils;
+  void BuildFromDLTensor(const std::string& name,
+                         const DLManagedTensor* managed_dltensor,
+                         const DeviceType new_tensor_device_type);
 };
+
+static DeviceType DLDeviceTypeToAsDeviceType(
+    const DLDeviceType dltensor_device_type);
 
 inline std::ostream& operator<<(std::ostream& out, AsTensor const& data) {
   out << "AsTensor: name: " << data.GetName()
@@ -228,6 +235,12 @@ class AsTensorBuilder {
   Shape shape_;
   int32_t flags_ = static_cast<int32_t>(AsTensorFlags::empty_flag);
 };
+
+using DLTensorMap = std::map<std::string, DLManagedTensor*>;
+using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
+using TensorMap = std::map<std::string, std::shared_ptr<AsTensor>>;
+using TensorListMap =
+    std::map<std::string, std::vector<std::shared_ptr<AsTensor>>>;
 
 // template argument for if enable type auto convert.
 class TensorUtils {
@@ -353,11 +366,16 @@ class TensorUtils {
                                 DeviceType::CPU);
     DeepCopyVectorPart(dst, dst_col_offset, *vector2tensor, 0, src.size());
   }
+
+  static std::shared_ptr<TensorMap> DeepCopyDLTensorMapToTensorMap(
+      std::shared_ptr<DLTensorMap> in_map);
+
+  static std::shared_ptr<TensorMap> DeepCopyDLTensorMapToTensorMap(
+      std::shared_ptr<DLTensorMap> in_map, const DeviceType target_device_type);
+
+  static std::shared_ptr<TensorListMap> DeepCopyDLTensorListMapToTensorListMap(
+      std::shared_ptr<DLTensorListMap> in_map,
+      const DeviceType target_device_type);
 };
 
-using DLTensorMap = std::map<std::string, DLManagedTensor*>;
-using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
-using TensorMap = std::map<std::string, std::shared_ptr<AsTensor>>;
-using TensorListMap =
-    std::map<std::string, std::vector<std::shared_ptr<AsTensor>>>;
 }  // namespace allspark

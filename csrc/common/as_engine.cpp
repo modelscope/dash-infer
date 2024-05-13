@@ -34,6 +34,7 @@
 #include "engine_worker.h"
 #include "interface/allspark_check.h"
 #include "thread_pool.h"
+#include "thread_utils.h"
 #include "utility/timer.h"
 #include "weight/weight_loader.h"
 #include "weight/weight_manager.h"
@@ -118,8 +119,10 @@ class AsEngineImpl final {
   AsStatus RunTextGenerationContinue(const char* model_name);
   AsStatus RunTextGenerationContext(const char* model_name);
 
-  AsStatus StartRequestImpl(const char* model_name, const DLTensorMap& inputs,
+  AsStatus StartRequestImpl(const char* model_name,
+                            std::shared_ptr<RequestHandle> request_handle,
                             DLTensorMap* outputs, GenerateConfig& gen_cfg);
+
   AsStatus StopRequestByRequestID(const char* model_name,
                                   std::string request_id);
   AsStatus ReleaseRequestByRequestID(const char* model_name,
@@ -142,6 +145,9 @@ class AsEngineImpl final {
   AsStatus InputParamsVerify(
       const char* model_name,
       std::shared_ptr<AsEngine::RequestContent>& request_info);
+
+  void ExpandRankThreadPool();
+
   bool is_device_id_set_ = false;
 
   bool is_multi_nodes_;
@@ -501,11 +507,16 @@ AsStatus AsEngineImpl::BuildModel(
   }
   device_ctx_->SetModelMaxLength(engine_max_length_);
   device_ctx_->SetModelMaxBatch(engine_max_batch_);
+
+  LOG(INFO) << "Start BuildModel";
+
+  ExpandRankThreadPool();
   std::vector<std::thread> vthreads(nranks_);
   std::vector<std::promise<AsStatus>> promise_vec(nranks_);
   for (int i = 0; i < nranks_; ++i) {
     // load models & weights
     vthreads[i] = std::thread([&, i]() {
+      setThreadName(i, "ModelBuildThread");
       try {
         LOG(INFO) << "Start Build model for rank: " << i;
         auto ret = workers_[i]->BuildModel(*model_ir, weight_manager_,
@@ -617,6 +628,9 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
                                       name, model_state_map_[name]);
   }
 
+  // start the thread pool
+  ExpandRankThreadPool();
+
   // collect mem stats from all workers
   int64_t min_bytes_available = std::numeric_limits<int64_t>::max();
   int64_t rank_0_bytes_available{0};
@@ -689,7 +703,6 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
   warmup_req->config = *(warmup_cfg);
   warmup_req->infer_type = AsEngine::RequestInferType::Generate;
   warmup_req->inputs = std::make_shared<DLTensorMap>(warmup_inputs);
-  warmup_req->mm_type = AsEngine::RequestMMType::TextInput;
 
   RequestHandle* warmup_handle{nullptr};
   AsEngine::ResultQueue* warmup_queue{nullptr};
@@ -726,7 +739,6 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
     warmup_req->config = *(warmup_cfg);
     warmup_req->infer_type = AsEngine::RequestInferType::Generate;
     warmup_req->inputs = std::make_shared<DLTensorMap>(warmup_inputs);
-    warmup_req->mm_type = AsEngine::RequestMMType::TextInput;
 
     RequestHandle* warmup_handle{nullptr};
     AsEngine::ResultQueue* warmup_queue{nullptr};
@@ -811,6 +823,12 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
   return AsStatus::ALLSPARK_SUCCESS;
 #endif
   // end warm up
+}
+void AsEngineImpl::ExpandRankThreadPool() {
+  if (nranks_ > threadpool_size_) {
+    threadpool_size_ = nranks_ * 2;
+    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
+  }
 }
 
 AsStatus AsEngineImpl::StopModel(const char* model_name) {
@@ -943,7 +961,7 @@ AsStatus AsEngineImpl::StartRequest(
     RequestHandle** request_handle, AsEngine::ResultQueue** queue) {
   DLOG(INFO) << "[" << model_name << "] "
              << "StartRequest";
-
+  // verify input param.
   auto ret = InputParamsVerify(model_name, request_info);
   if (ret != AsStatus::ALLSPARK_SUCCESS) {
     LOG(ERROR) << "[" << model_name << "] "
@@ -954,11 +972,16 @@ AsStatus AsEngineImpl::StartRequest(
   auto reply_promise = std::make_shared<std::promise<AsStatus>>();
 
   // replace uuid id with new.
-  auto handle = std::make_shared<RequestHandle>();
-  handle->request_uuid = GenNewUUID();
+  auto handle = std::make_shared<RequestHandle>(GenNewUUID());
   handle->context_length =
       (*request_info->inputs)["input_ids"]->dl_tensor.shape[1];
   request_info->config.uuid = handle->request_uuid;
+
+  // copy input from user's dltensor to our as tensor.
+  // to avoid manage dltensor's reference
+  // store this in request handle to hide from user
+  handle->inputs_internal = TensorUtils::DeepCopyDLTensorMapToTensorMap(
+      request_info->inputs, DeviceType::CPU);
 
   auto new_queue = std::make_shared<ResultQueueImpl>();
 
@@ -1422,10 +1445,9 @@ AsStatus AsEngineImpl::InputParamsVerify(
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus AsEngineImpl::StartRequestImpl(const char* model_name,
-                                        const DLTensorMap& inputs,
-                                        DLTensorMap* outputs,
-                                        GenerateConfig& gen_cfg) {
+AsStatus AsEngineImpl::StartRequestImpl(
+    const char* model_name, std::shared_ptr<RequestHandle> request_handle,
+    DLTensorMap* outputs, GenerateConfig& gen_cfg) {
   DLOG(INFO) << "[" << model_name << "] "
              << "AsEngineImpl::RunTextGeneration" << std::endl;
 
@@ -1445,9 +1467,10 @@ AsStatus AsEngineImpl::StartRequestImpl(const char* model_name,
   }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
-    result[i] =
-        threadpool_->enqueue([this, i, &inputs, &out_tensors, &gen_cfg]() {
-          return workers_[i]->EnqueueRequest(inputs, &out_tensors, gen_cfg);
+    result[i] = threadpool_->enqueue(
+        [this, i, &request_handle, &out_tensors, &gen_cfg]() {
+          return workers_[i]->StartRequestImpl(request_handle, &out_tensors,
+                                               gen_cfg);
         });
   }
 
@@ -1500,6 +1523,8 @@ FetchGenrationResultAndIncreaseCounter(
       if (request->gen_cfg.logprobs) {
         ele->log_probs_list.push_back(
             request->log_probs_list[handle->generate_length + i]);
+        ele->token_logprobs_list.push_back(
+            request->token_logprobs_list[handle->generate_length + i]);
       }
     }
     handle->generate_length = new_length - handle->context_length;
@@ -1709,9 +1734,16 @@ void AsEngineImpl::ModelRunningThread(
             DLOG(INFO) << "[" << model_name << "] "
                        << "RunTextGeneration";
             util::Timer t1;
-            auto ret = this->StartRequestImpl(model_name.c_str(),
-                                              *msg->request->inputs, nullptr,
-                                              msg->request->config);
+            auto request_handle_sp = msg->request_handle.lock();
+            if (!request_handle_sp) {
+              LOG(ERROR)
+                  << "request handle already released, cannot start request. ";
+              break;
+            }
+
+            auto ret =
+                this->StartRequestImpl(model_name.c_str(), request_handle_sp,
+                                       nullptr, msg->request->config);
             DLOG(INFO) << "[" << model_name << "] "
                        << "RunTextGeneration finish " << t1.elapsed() << " ms";
             break;
@@ -1862,15 +1894,15 @@ void AsEngineImpl::ModelRunningThread(
             request_ids.push_back(handle->request_uuid);
           }
         }
-        int n = request_ids.size();
-        if (n == 0) {
+        int running_requests = request_ids.size();
+        if (running_requests == 0) {
           LOG(ERROR) << " No Generating reqeust!";
           break;
         }
 
         srand(time(nullptr));
 
-        int x = rand() % n;
+        int x = rand() % running_requests;
         std::string stop_request_id = request_ids[x];
         auto ret =
             this->StopRequestByRequestID(model_name.c_str(), stop_request_id);

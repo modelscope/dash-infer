@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <core/tensor/tensor.h>
+
 #include <condition_variable>
 #include <future>
 #include <memory>
@@ -59,6 +61,13 @@ class RequestHandle {
   size_t generate_length = 0;
   size_t context_length = 0;
   size_t continue_count = 0;
+
+  // copy input from user's dltensor to our as tensor.
+  // to avoid manage dltensor 's reference
+  std::shared_ptr<std::map<std::string, std::shared_ptr<AsTensor>>>
+      inputs_internal;
+
+  RequestHandle(const std::string uuid) : request_uuid(uuid) {}
 };
 
 class ResultQueueImpl : public AsEngine::ResultQueue {

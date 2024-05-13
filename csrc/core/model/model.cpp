@@ -113,6 +113,7 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   DLOG(INFO) << "Start process model graph.";
   for (auto& g_name : model_proto.graph_names()) {
     std::vector<std::unique_ptr<AsOperator>> ops;
+
     for (auto& op_proto : graph.at(g_name).ops()) {
       OpRegistType op_type(op_proto.op_type(), ctx.GetDeviceType());
 
@@ -511,13 +512,10 @@ AsStatus AsModel::GenerateContinueContext() {
   util::Timer t0;
   std::unique_lock<std::mutex> lock(gen_ctx_lock_);
 
-  DLOG(INFO) << "pthread_self: " << (unsigned long)pthread_self();
-
   DLOG(INFO) << " gen ctx list " << runtime_ctx_->GetGenCtxListSize()
-             << " pending init " << pending_request_queue_.size()
-             << " t1(ms): " << t0.elapsed();
+             << " pending init " << pending_request_queue_.size();
 
-  if (pending_request_queue_.size() > 0 &&
+  if (!pending_request_queue_.empty() &&
       runtime_ctx_->GetGenCtxListSize() < ctx_->GetModelMaxBatch()) {
     std::shared_ptr<Request> request = pending_request_queue_.front();
     pending_request_queue_.pop();
@@ -604,7 +602,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
       }
     }
 
-    DLOG(INFO) << " gen(ms): " << t0.elapsed();
+    DLOG(INFO) << " Generate Continue Decoder: time(ms): " << t0.elapsed();
     tensors_["max_dec_ids"]->SetShape(
         Shape{batch_size, ctx_->GetModelMaxLength()});
     for (auto& op : graph_ops_["post_graph"]) {
@@ -641,21 +639,14 @@ AsStatus AsModel::GenerateContinueDecoder() {
   return AsStatus::ALLSPARK_STREAMING;
 }
 
-AsStatus AsModel::EnqueueRequest(const DLTensorMap& inputs, TensorMap* outputs,
-                                 GenerateConfig& gen_cfg) {
-  TensorMap host_input_tensors;
-
-  for (auto& t : inputs) {
-    host_input_tensors.insert(
-        {t.first,
-         std::make_shared<AsTensor>(t.first, t.second, DeviceType::CPU)});
-  }
+AsStatus AsModel::StartRequestImpl(
+    const std::shared_ptr<RequestHandle> request_handle, TensorMap* outputs,
+    GenerateConfig& gen_cfg) {
   DLOG(INFO) << "AsModel::StartRequestImpl()" << std::endl;
-
   std::shared_ptr<Request> request_ptr = std::make_shared<Request>(
-      gen_cfg.uuid, host_input_tensors, *outputs, gen_cfg);
-
-  request_ptr->input_len = (request_ptr->inputs["input_ids"]->GetShape())[1];
+      gen_cfg.uuid, *request_handle->inputs_internal, *outputs, gen_cfg);
+  request_ptr->input_len = request_ptr->inputs["input_ids"]->GetShape()[1];
+  DLOG(INFO) << "request_ptr->input_len=" << request_ptr->input_len;
 
   pending_request_queue_.push(request_ptr);
 

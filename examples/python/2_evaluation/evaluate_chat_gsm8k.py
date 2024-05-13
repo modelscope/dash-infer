@@ -12,7 +12,7 @@ import numpy as np
 import tqdm
 from datasets import load_from_disk, load_dataset
 
-from dashinfer.helper import EngineHelper
+from dashinfer.helper import EngineHelper, ConfigManager
 
 """
 python eval/evaluate_chat_gsm8k.py [--use-fewshot]
@@ -101,7 +101,7 @@ def download_model(model_id, revision, source="modelscope"):
 
 def prepare(args):
     config_file = args.config_file
-    config = EngineHelper.get_config_from_json(config_file)
+    config = ConfigManager.get_config_from_json(config_file)
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -130,7 +130,6 @@ def prepare(args):
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
     engine_helper.init_tokenizer(original_model["model_path"])
-    engine_helper.init_torch_model(original_model["model_path"])
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required

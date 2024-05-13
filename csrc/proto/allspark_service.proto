@@ -224,9 +224,7 @@ message AsEngineStat {
 message StartRequestRequest {
   string model_name = 1;
   RequestInferType infer_type = 2;
-  RequestMMType mm_type = 3;
   TensorMap     inputs = 4;
-  repeated TensorListMap mm_embedding = 5;
   GenerateConfig config = 6;
 }
 

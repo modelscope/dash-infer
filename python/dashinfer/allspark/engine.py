@@ -204,6 +204,12 @@ class Engine(AsEngine):
     ) -> AsStatus:
         return self._stop_model(model_name)
 
+    def release_model(
+        self,
+        model_name: str,
+    ) -> AsStatus:
+        return self._release_model(model_name)
+
     def start_request(
         self,
         model_name: str,
@@ -309,6 +315,12 @@ class ClientEngine(AsClientEngine):
         model_name: str,
     ) -> AsStatus:
         return self._stop_model(model_name)
+
+    def release_model(
+        self,
+        model_name: str,
+    ) -> AsStatus:
+        return self._release_model(model_name)
 
     def start_request(
         self,

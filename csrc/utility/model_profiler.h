@@ -77,7 +77,7 @@ class ProfileEventStatistic {
 class ModelProfiler {
  public:
   // name, [min,max,avg,total_cnt,sum,percentage]
-  using stat_type = std::pair<std::string, std::array<double, 6> >;
+  using stat_type = std::pair<std::string, std::array<double, 6>>;
   using profile_events = std::unordered_map<std::string, ProfileEventStatistic>;
   using event_map = std::unordered_map<std::string, profile_events>;
 

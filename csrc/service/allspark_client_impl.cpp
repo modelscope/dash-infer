@@ -274,7 +274,8 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
       AS_CLIENT_GET_SUCCESS_STATUS(context_size_, response_proto, success);
       if (success) {
         // create handle and queues
-        auto req_data = std::make_shared<ClientRequestManager::RequestData>();
+        auto req_data =
+            std::make_shared<ClientRequestManager::ClientRequestData>();
         auto uuid = response_proto[0].uuid();
         req_data->handle = std::make_shared<RequestHandle>(uuid);
         req_data->queue = std::make_shared<ClientResultQueueImpl>(uuid);
@@ -287,7 +288,7 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
     case RequestOperation::Stop: {
       allspark::allspark_service::StopRequestRequest request_proto;
       std::string model_name_str = std::string(model_name);
-      request_proto.set_uuid((*request_handle)->uuid_);
+      request_proto.set_uuid((*request_handle)->request_uuid);
       request_proto.set_model_name(model_name_str);
       allspark_service::parallel_loop(0, context_size_, [&](int id) {
         CALL_RPC_FUNC(stub_[id], StopRequest, &context[id], request_proto,
@@ -298,7 +299,7 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
     case RequestOperation::Release: {
       allspark::allspark_service::StopRequestRequest request_proto;
       std::string model_name_str = std::string(model_name);
-      request_proto.set_uuid((*request_handle)->uuid_);
+      request_proto.set_uuid((*request_handle)->request_uuid);
       request_proto.set_model_name(model_name_str);
       allspark_service::parallel_loop(0, context_size_, [&](int id) {
         CALL_RPC_FUNC(stub_[id], ReleaseRequest, &context[id], request_proto,
@@ -310,7 +311,8 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
         auto uuid = response_proto[0].uuid();
         req_manager_->eraseRequest(uuid);
       }
-      DLOG(INFO) << "Client Release request uuid: " << (*request_handle)->uuid_
+      DLOG(INFO) << "Client Release request uuid: "
+                 << (*request_handle)->request_uuid
                  << " response_proto[0].uuid(): " << response_proto[0].uuid();
       break;
     }
@@ -318,7 +320,7 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
       allspark::allspark_service::StopRequestRequest request_proto;
       std::string model_name_str = std::string(model_name);
       if (*request_handle != nullptr) {
-        request_proto.set_uuid((*request_handle)->uuid_);
+        request_proto.set_uuid((*request_handle)->request_uuid);
       }
       request_proto.set_model_name(model_name_str);
       allspark_service::parallel_loop(0, context_size_, [&](int id) {

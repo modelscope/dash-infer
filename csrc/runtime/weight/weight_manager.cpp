@@ -127,7 +127,7 @@ WeightManagerImpl::GetAccessOrderOfWeightFile(
 //  in kernel buffer, so it's O(n) times io.
 AsStatus WeightManagerImpl::LoadWeightForModel(
     const DeviceContext& target_device_ctx,
-    std::shared_ptr<ModelWeightHandler> weight_handler, RankInfo& rank_info) {
+    std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info) {
   LOG(INFO) << "Start Loading weight for model " << rank_info;
   util::Timer start;
 
@@ -197,12 +197,7 @@ AsStatus WeightManagerImpl::LoadWeightForModel(
 
       tensor->SetDataType(weight_info.info.dtype);
       tensor->SetDataMode(weight_info.info.mode);
-      auto status = tensor->SetShape(Shape(weight_info.info.shape));
-
-      if (!AS_STATUS_OK(status)) {
-        munmap((void*)weight_mem_base, sb.st_size);
-        return AsStatus::ALLSPARK_RUNTIME_ERROR;
-      }
+      AS_CHECK_STATUS(tensor->SetShape(Shape(weight_info.info.shape)));
 
       if (weight_info.info.mode != DataMode::DENSE) {
         fseek(fp_ptr.get(), weight_info.weight_offset, SEEK_SET);
@@ -234,7 +229,6 @@ AsStatus WeightManagerImpl::LoadWeightForModel(
               SEEK_PTR_BYTES(weight_mem_base, weight_info.weight_offset),
               weight_info.size_bytes, nullptr, tensor);
         } catch (AsException& e) {
-          munmap((void*)weight_mem_base, sb.st_size);
           return AsStatus::ALLSPARK_RUNTIME_ERROR;
         }
 
@@ -462,7 +456,7 @@ std::shared_ptr<ModelWeightHandler> WeightManager::RegisterModel(
 
 AsStatus WeightManager::LoadWeightForModel(
     const DeviceContext& target_device_ctx,
-    std::shared_ptr<ModelWeightHandler> weight_handler, RankInfo& rank_info) {
+    std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info) {
   WeightManagerImpl* impl = GetImpl(this);
   return impl->LoadWeightForModel(target_device_ctx, weight_handler, rank_info);
 }
