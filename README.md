@@ -15,8 +15,6 @@
 
 # Introduction
 
-DashInfer is a native inference engine for Pre-trained Large Language Models (LLMs), with both C++ and Python interfaces.
-
 Written in C++ runtime, DashInfer aims to deliver production-level implementations highly optimized for various hardware architectures, including x86 and ARMv9. It supports both Continuous Batching and NUMA-Aware capabilities for CPU, and can fully utilize the capabilities of modern server-grade CPUs to host LLMs up to 14B in size.
 
 ## Main Features
