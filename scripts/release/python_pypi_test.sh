@@ -27,8 +27,9 @@ run_python_example() {
     # python basic_example_chatglm2.py
     # python basic_example_chatglm3.py
     # python basic_example_llama2.py
-    python basic_example_qwen_v15.py
     python basic_example_qwen_v10.py
+    python basic_example_qwen_v15.py
+    # python basic_example_qwen_v20.py
     cd ${root_path}
 
     cd ${root_path}/examples/python/1_performance

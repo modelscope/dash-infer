@@ -304,7 +304,7 @@ The `<path_to_dashinfer>/examples/python/model_config` directory provides severa
 Here is an explanation of the parameters within the config:
 
 - `model_name`: Custom name for the DashInfer model.
-- `model_type`: The type of the DashInfer model. Options include: LLaMA_v2, ChatGLM_v2, ChatGLM_v3, Qwen_v10, Qwen_v15.
+- `model_type`: The type of the DashInfer model. Options include: LLaMA_v2, ChatGLM_v2, ChatGLM_v3, Qwen_v10, Qwen_v15, Qwen_v20.
 - `model_path`: The export path for the DashInfer model.
 - `data_type`: The data type of the output. Options include: float32.
 - `device_type`: The inference hardware. Options include: CPU.

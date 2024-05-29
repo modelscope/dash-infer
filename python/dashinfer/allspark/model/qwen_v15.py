@@ -34,6 +34,8 @@ class Qwen_v15(Model):
         cfg.ln_eps = torch_cfg.get('rms_norm_eps', 1e-5)
         cfg.num_heads = torch_cfg.get('num_attention_heads', 12)
         cfg.multi_query_group_num = torch_cfg.get('num_key_value_heads', 0)
+        if (cfg.multi_query_group_num == 0):
+            cfg.multi_query_group_num = cfg.num_heads
         cfg.dec_layer = torch_cfg.get('num_hidden_layers', 12)
         hidden_size_ = torch_cfg.get('hidden_size', 4096)
         cfg.kv_channels = int(hidden_size_ / cfg.num_heads)
@@ -113,7 +115,7 @@ class Qwen_v15(Model):
             self.split_map["embedding.word_embeddings"] = VSPLIT
             for i in range(cfg.dec_layer):
                 prefix = "decoder.layer.{}.".format(i)
-                if cfg.multi_query_group_num == 0 or cfg.multi_query_group_num == cfg.num_heads:
+                if cfg.multi_query_group_num == cfg.num_heads:
                     self.split_map[prefix + "attention.self.weight"] = QKVSPLIT
                     self.split_map[prefix + "attention.self.bias"] = QKVSPLIT
                 else:
@@ -203,16 +205,32 @@ class Qwen_v15(Model):
             if self.use_logn_attn and hasattr(self, "model_sequence_length"):
                 rotary_attributes["logn_model_embedding"] = int(
                     self.model_sequence_length)
+            if cfg.multi_query_group_num != cfg.num_heads:
+                rotary_attributes["multi_query_group_num"] = int(
+                    cfg.multi_query_group_num)
             rotary_embedding = Rotary(
                 prefix + "rotary",
                 [attn_self_gemm.outputs[0], mask.outputs[1]],
                 rotary_attributes,
             )()
-            attn = MultiHeadAttention(
-                prefix + "attention",
-                [rotary_embedding.outputs[0], mask.outputs[0]],
-                {"num_heads": cfg.num_heads},
-            )()
+            if cfg.multi_query_group_num == cfg.num_heads:
+                attn = MultiHeadAttention(
+                    prefix + "attention",
+                    [rotary_embedding.outputs[0], mask.outputs[0]],
+                    {"num_heads": cfg.num_heads},
+                )()
+            else:
+                attn = MultiQueryAttention(
+                    prefix + "attention",
+                    [rotary_embedding.outputs[0], mask.outputs[0]],
+                    {
+                        "num_heads": cfg.num_heads,
+                        "size_per_head": cfg.size_per_head,
+                        "multi_query_group_num": cfg.multi_query_group_num,
+                        "multinode": 1,
+                        "hidden_size": hidden_size_
+                    },
+                )()
             attn_op_list = []
             ffn_op_list = []
             ffn_ln = None
@@ -360,6 +378,8 @@ class Qwen_v15(Model):
                     op.inputs[0].CopyFrom(preprocess_ids.outputs[0])
                 elif op.op_type == "MultiHeadAttention":
                     op.op_type = "DecOptMHA"
+                elif op.op_type == "MultiQueryAttention":
+                    op.op_type = "DecOptMQA"
             gen_op = GenerateOp(
                 "generate",
                 [graph.ops[-1].outputs[0], preprocess_ids.outputs[1]],
@@ -388,6 +408,7 @@ class Qwen_v15(Model):
             k for k, v in Model.dtype_dict.items() if v == self.dtype
         ][0]
         for key, torch_name in weight_name_map.items():
+            # print("trans_tensor: {}, {}".format(key, torch_name))
             if isinstance(torch_name, list):  # attention qkv weights
                 tensor = (torch.concat(
                     [torch_weight[name] for name in torch_name]).cpu())
@@ -403,11 +424,11 @@ class Qwen_v15(Model):
             else:
                 group_list = [
                     self.model.model_conf.num_heads *
-                    self.model.model_conf.kv_channels,
+                    self.model.model_conf.size_per_head,
                     self.model.model_conf.multi_query_group_num *
-                    self.model.model_conf.kv_channels,
+                    self.model.model_conf.size_per_head,
                     self.model.model_conf.multi_query_group_num *
-                    self.model.model_conf.kv_channels
+                    self.model.model_conf.size_per_head
                 ]
             quantize_mode = False if key not in quantize_map else quantize_map[
                 key]

@@ -8,9 +8,6 @@
         0
     ],
     "multinode_mode": false,
-    "convert_config": {
-        "do_dynamic_quantize_convert": false
-    },
     "engine_config": {
         "engine_max_length": 11000,
         "engine_max_batch": 8,
@@ -31,5 +28,13 @@
         "eos_token_id": 2,
         "seed": 1234
     },
-    "quantization_config": null
+    "convert_config": {
+        "do_dynamic_quantize_convert": false
+    },
+    "quantization_config": {
+        "activation_type": "bfloat16",
+        "weight_type": "uint8",
+        "SubChannel": true,
+        "GroupSize": 512
+    }
 }

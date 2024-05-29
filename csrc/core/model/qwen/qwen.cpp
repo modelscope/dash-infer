@@ -24,4 +24,5 @@ AsStatus QwenModel::Init(const TransformerProto& model_proto,
 REGISTER_MODEL("Qwen", QwenModel)
 REGISTER_MODEL("Qwen_v10", QwenModel_v10)
 REGISTER_MODEL("Qwen_v15", QwenModel_v15)
+REGISTER_MODEL("Qwen_v20", QwenModel_v20)
 }  // namespace allspark

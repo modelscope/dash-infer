@@ -35,6 +35,7 @@ class ModelControlState final {
       result_queue_map;
 
   bool model_stopping = false;  // after GracefulStopModel called...
+  bool model_stopped = false;   // after GracefulStopModel is done.
 
   ModelControlState(const std::string& name) : model_name(name) {
     lock = std::make_unique<std::mutex>();

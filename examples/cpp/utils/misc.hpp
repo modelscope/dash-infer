@@ -20,22 +20,22 @@ static bool file_exists(const std::string& path) {
 
 static bool check_model_file_exists(const std::string& model_path,
                                     const std::string& tiktoken_file) {
-  std::string asgraph_file = model_path + ".asgraph";
-  std::string asparam_file = model_path + ".asparam";
+  std::string dimodel_file = model_path + ".dimodel";
+  std::string ditensors_file = model_path + ".ditensors";
 
   std::cout << "Model Path: " << model_path << std::endl;
-  std::cout << "ASGraph File: " << asgraph_file << std::endl;
-  std::cout << "ASParam File: " << asparam_file << std::endl;
+  std::cout << "Dash-Infer Model File: " << dimodel_file << std::endl;
+  std::cout << "Dash-Infer Tensor File: " << ditensors_file << std::endl;
   std::cout << "Token table File: " << tiktoken_file << std::endl;
 
-  if (!file_exists(asgraph_file)) {
-    std::cerr << "Error: ASGraph file does not exist at '" << asgraph_file
+  if (!file_exists(dimodel_file)) {
+    std::cerr << "Error: dimodel file does not exist at '" << dimodel_file
               << "'" << std::endl;
     return false;
   }
 
-  if (!file_exists(asparam_file)) {
-    std::cerr << "Error: ASParam file does not exist at '" << asparam_file
+  if (!file_exists(ditensors_file)) {
+    std::cerr << "Error: ditensors file does not exist at '" << ditensors_file
               << "'" << std::endl;
     return false;
   }

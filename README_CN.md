@@ -1,6 +1,19 @@
-# 简介
+<div align="center">
 
-DashInfer用于推理预训练大语言模型（LLM）的推理引擎。
+[![PyPI](https://img.shields.io/pypi/v/dashinfer)](https://pypi.org/project/dashinfer/)
+<!-- [![Documentation Status](https://readthedocs.org/projects/easy-cv/badge/?version=latest)](https://easy-cv.readthedocs.io/en/latest/) -->
+
+<h4 align="center">
+    <p>
+        <a href="https://github.com/modelscope/dash-infer/blob/main/README.md">English</a> |
+        <b>中文</b>
+    </p>
+</h4>
+
+
+</div>
+
+# 简介
 
 DashInfer采用C++ Runtime编写，提供C++和Python语言接口。DashInfer具有生产级别的高性能表现，适用于多种CPU架构，包括x86和ARMv9。DashInfer支持连续批处理（Continuous Batching）和多NUMA推理（NUMA-Aware），能够充分利用服务器级CPU的算力，为推理14B及以下的LLM模型提供更多的硬件选择。
 
@@ -82,12 +95,12 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 ![Workflow and Dependency](documents/resources/image/workflow-deps.jpg?row=true)
 
-1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列化，并生成DashInfer格式（.asparam、.asgraph）的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
+1. **模型加载与序列化**：此过程负责读取模型权重、配置模型转换参数及量化参数，并根据这些信息对模型进行序列化，并生成DashInfer格式（.dimodel、.ditensors）的模型。此功能仅提供Python接口，并依赖于PyTorch和transformers库来访问权重。不同模型对PyTorch和transformers的版本要求可能有所不同，DashInfer本身并没有特殊的版本要求。
 
 2. **模型推理**：此步骤负责执行模型推理，使用DashInfer推理序列化后的模型，不依赖PyTorch等组件。DashInfer采用[DLPack](https://github.com/dmlc/dlpack)格式的tensor来实现与外部框架（如PyTorch）的交互。DLPack格式的tensor，可以通过手动创建或由深度学习框架的tensor转换函数产生。对于C++接口，由于已经将几乎所有依赖静态编译，仅对openmp运行时库以及C++系统库的有依赖。我们进行了[链接符号处理](https://anadoxin.org/blog/control-over-symbol-exports-in-gcc.html/)，以确保只有DashInfer的API接口符号可见，避免与客户系统中已有的公共库（如protobuf等）发生版本冲突。
 
 > 说明：
-> - .asparam、.asgraph是由DashInfer内核（allspark）定义的一种特殊的模型格式。
+> - .dimodel、.ditensors是由DashInfer内核定义的一种特殊的模型格式。
 > - 使用Python接口时，可以将步骤1和2的代码放在一起。由于缺少C++层面加载Huggingface模型的功能，C++接口只能进行DashInfer格式的模型推理，因此在使用C++接口前，必须先用Python接口先对模型进行序列化。
 
 ## 单NUMA架构图

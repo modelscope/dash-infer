@@ -8,10 +8,10 @@ import copy
 import time
 import queue
 import random
+import argparse
 import subprocess
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-import argparse
 
 from dashinfer.helper import EngineHelper, ConfigManager
 
@@ -76,6 +76,7 @@ if __name__ == '__main__':
     parser.add_argument('--config_file', type=str, default='config_qwen_v15_4b.json')
     parser.add_argument('--device_ids', nargs='+', type=int, default=[0])
     parser.add_argument('--multinode_mode', action='store_true')
+    parser.add_argument('--quantize', action='store_true')
 
     args = parser.parse_args()
 
@@ -86,6 +87,7 @@ if __name__ == '__main__':
     config["generation_config"]["stop_words_ids"] = []
     config["device_ids"] = args.device_ids
     config["multinode_mode"] = args.multinode_mode
+    config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,

@@ -94,6 +94,7 @@ def prepare(args):
     os.environ["AS_NUMA_NUM"] = str(len(config["device_ids"]))
     os.environ["AS_NUMA_OFFSET"] = str(config["device_ids"][0])
     config["model_path"] = args.model_path
+    config["convert_config"]["do_dynamic_quantize_convert"] = True
 
     ## download model from modelscope
     original_model = {
@@ -125,7 +126,7 @@ def prepare(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test HF checkpoint.")
     parser.add_argument('--model_path', type=str, default='~/dashinfer_models/')
-    parser.add_argument('--config_file', type=str, default='../model_config/config_qwen_v10_7b_quantize.json')
+    parser.add_argument('--config_file', type=str, default='../model_config/config_qwen_v10_7b.json')
 
     parser.add_argument(
         "-f",

@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    basic_example_qwen_v15.py
+# @file    basic_example_qwen_v20.py
 #
 import os
 import copy
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--quantize', action='store_true')
     args = parser.parse_args()
 
-    config_file = "../model_config/config_qwen_v15_1_8b.json"
+    config_file = "../model_config/config_qwen_v20_1_5b.json"
     config = ConfigManager.get_config_from_json(config_file)
     config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     ## download model from huggingface
     # original_model = {
     #     "source": "huggingface",
-    #     "model_id": "Qwen/Qwen1.5-1.8B-Chat",
+    #     "model_id": "Qwen/Qwen2-1.5B",
     #     "revision": "",
     #     "model_path": ""
     # }
@@ -136,7 +136,7 @@ if __name__ == '__main__':
     ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "qwen/Qwen1.5-1.8B-Chat",
+        "model_id": "qwen/Qwen2-1.5B",
         "revision": "master",
         "model_path": ""
     }

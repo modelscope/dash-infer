@@ -84,6 +84,7 @@ AsStatus BatchMQAOp::Init(const OperatorProto& op_proto,
   // type inference
   dtype_ = tensor_map_->at(in_names_[0])->GetDataType();
   tensor_map_->at(out_names_[0])->SetDataType(dtype_);
+
   // attr
   auto& attr_map = op_proto.attr();
   if (attr_map.find("multinode") != attr_map.end()) {
@@ -91,28 +92,19 @@ AsStatus BatchMQAOp::Init(const OperatorProto& op_proto,
   } else {
     multi_nodes_ = true;
   }
+
   if (attr_map.find("num_heads") == attr_map.end()) {
     LOG(ERROR) << "BatchMQAOp : can't find num_heads attribute." << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
   num_heads_ = *(int*)(attr_map.at("num_heads").c_str());
-  if (attr_map.find("hidden_size") == attr_map.end()) {
-    LOG(ERROR) << "BatchMQAOp : can't find hidden_size attribute." << std::endl;
-    return AsStatus::ALLSPARK_PARAM_ERROR;
+
+  size_per_head_ = ctx.GetSizePerHead();
+  if (attr_map.find("multi_query_group_num") != attr_map.end()) {
+    group_num_ = *(int*)(attr_map.at("multi_query_group_num").c_str());
+  } else {
+    group_num_ = num_heads_;
   }
-  hidden_size_ = *(int*)(attr_map.at("hidden_size").c_str());
-  if (hidden_size_ % num_heads_) {
-    LOG(ERROR) << "Invalid attribute in BatchMQAOp. hidden_size : "
-               << hidden_size_ << ", num_heads : " << num_heads_ << std::endl;
-    return AsStatus::ALLSPARK_RUNTIME_ERROR;
-  }
-  size_per_head_ = hidden_size_ / num_heads_;
-  if (attr_map.find("multi_query_group_num") == attr_map.end()) {
-    LOG(ERROR) << "BatchMQAOp : can't find multi_query_group_num attribute."
-               << std::endl;
-    return AsStatus::ALLSPARK_PARAM_ERROR;
-  }
-  group_num_ = *(int*)(attr_map.at("multi_query_group_num").c_str());
 
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
@@ -120,7 +112,6 @@ AsStatus BatchMQAOp::Init(const OperatorProto& op_proto,
       kernel_launcher = cpu_dec_single_mqa;
       if (multi_nodes_) {
         const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
-        hidden_size_ /= cpu_ctx->GetNranks();
         num_heads_ /= cpu_ctx->GetNranks();
         if (group_num_ != 1) {
           group_num_ /= cpu_ctx->GetNranks();
@@ -134,6 +125,7 @@ AsStatus BatchMQAOp::Init(const OperatorProto& op_proto,
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
   kv_stride_ = size_per_head_ * group_num_;
+  hidden_size_ = size_per_head_ * num_heads_;
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus BatchMQAOp::Reshape(RuntimeContext* runtime_ctx) {
@@ -146,11 +138,12 @@ AsStatus BatchMQAOp::Reshape(RuntimeContext* runtime_ctx) {
   qkv_stride_ = y_shape[2];
   if (qkv_stride_ != hidden_size_ + 2 * kv_stride_) {
     LOG(ERROR) << "Invalid qkv_stride_ in BatchMQAOp"
-               << "qkv_strde = " << qkv_stride_
-               << ",hidden_size = " << hidden_size_
+               << ", qkv_strde = " << qkv_stride_
+               << ", hidden_size = " << hidden_size_
                << ", kv_stride = " << kv_stride_ << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
+
   // set variable
   gemm_batch_ = single_batch * num_heads_;
   if (alpha_ < 0) {

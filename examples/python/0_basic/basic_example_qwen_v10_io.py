@@ -7,6 +7,7 @@ import sys
 import copy
 import time
 import random
+import argparse
 import subprocess
 from jinja2 import Template
 from concurrent.futures import ThreadPoolExecutor
@@ -71,8 +72,13 @@ def print_in_place(generator):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--quantize', action='store_true')
+    args = parser.parse_args()
+
     config_file = "../model_config/config_qwen_v10_1_8b.json"
     config = ConfigManager.get_config_from_json(config_file)
+    config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,

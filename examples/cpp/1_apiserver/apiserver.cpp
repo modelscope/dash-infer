@@ -383,8 +383,8 @@ int main(int argc, const char** argv) {
   auto all_exists = check_model_file_exists(model_path, tiktoken_file);
   if (!all_exists) return 1;
 
-  std::string asgraph_file = model_path + ".asgraph";
-  std::string asparam_file = model_path + ".asparam";
+  std::string dimodel_file = model_path + ".dimodel";
+  std::string ditensors_file = model_path + ".ditensors";
 
   // create an inference engine instance.
   setup_tiktoken_tokenizer(tiktoken_file, tokenizer);
@@ -395,8 +395,8 @@ int main(int argc, const char** argv) {
   AsModelConfigBuilder model_config_builder;
   auto model_config =
       model_config_builder.withModelName(model_name)
-          .withModelPath(asgraph_file)
-          .withWeightsPath(asparam_file)
+          .withModelPath(dimodel_file)
+          .withWeightsPath(ditensors_file)
           .withEngineMaxLength(default_engine_max_length)
           .withEngineMaxBatch(16)
           .withMatmulPrecision("medium")

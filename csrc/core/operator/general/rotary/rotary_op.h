@@ -82,6 +82,9 @@ class RotaryOp : public AsOperator {
   float rotary_pct_;
   float seqlen_extrapolation_;
   int ntk_model_embed_;
+  int group_num_ = 0;
+  int qkv_stride_ = 0;
+  int kv_stride_ = 0;
 };
 
 }  // namespace allspark

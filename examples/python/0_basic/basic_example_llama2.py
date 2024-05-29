@@ -3,11 +3,10 @@
 # @file    basic_example_llama2.py
 #
 import os
-import sys
 import copy
 import time
-import queue
 import random
+import argparse
 import subprocess
 from jinja2 import Template
 from concurrent.futures import ThreadPoolExecutor
@@ -74,8 +73,13 @@ def process_request(request_list, engine_helper: EngineHelper):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--quantize', action='store_true')
+    args = parser.parse_args()
+
     config_file = "../model_config/config_llama2_7b.json"
     config = ConfigManager.get_config_from_json(config_file)
+    config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,

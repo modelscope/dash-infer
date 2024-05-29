@@ -1,6 +1,6 @@
 {
-    "model_name": "Qwen-7B-Chat",
-    "model_type": "Qwen_v10",
+    "model_name": "Qwen2-0.5B",
+    "model_type": "Qwen_v20",
     "model_path": "~/dashinfer_models/",
     "data_type": "float32",
     "device_type": "CPU",
@@ -8,9 +8,6 @@
         0
     ],
     "multinode_mode": false,
-    "convert_config": {
-        "do_dynamic_quantize_convert": true
-    },
     "engine_config": {
         "engine_max_length": 2048,
         "engine_max_batch": 8,
@@ -42,10 +39,13 @@
             ]
         ]
     },
+    "convert_config": {
+        "do_dynamic_quantize_convert": false
+    },
     "quantization_config": {
         "activation_type": "bfloat16",
         "weight_type": "uint8",
         "SubChannel": true,
-        "GroupSize": 128
+        "GroupSize": 512
     }
 }

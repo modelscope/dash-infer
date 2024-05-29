@@ -98,10 +98,14 @@ AsStatus RotaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   if (attr_map.find("rotary_base") != attr_map.end()) {
     base_ = *(float*)(attr_map.at("rotary_base").c_str());
   }
-  xlogn_ = -1;
-  if (attr_map.find("logn_model_embedding") != attr_map.end()) {
-    xlogn_ = *(int*)(attr_map.at("logn_model_embedding").c_str());
+
+  // attr.8 multi_query_group_num
+  if (attr_map.find("multi_query_group_num") != attr_map.end()) {
+    group_num_ = *(int*)(attr_map.at("multi_query_group_num").c_str());
+  } else {
+    group_num_ = num_heads_;
   }
+  size_per_head_ = ctx.GetSizePerHead();
 
   // backend switch
   DeviceType backend = ctx.GetDeviceType();
@@ -109,6 +113,9 @@ AsStatus RotaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
     case DeviceType::CPU: {
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       num_heads_ /= cpu_ctx->GetNranks();
+      if (group_num_ != 1) {
+        group_num_ /= cpu_ctx->GetNranks();
+      }
       break;
     }
     default:
@@ -116,6 +123,8 @@ AsStatus RotaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                  << DeviceType_Name(backend) << " device type" << std::endl;
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
+  kv_stride_ = size_per_head_ * group_num_;
+  hidden_size_ = size_per_head_ * num_heads_;
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus RotaryOp::Reshape(RuntimeContext* runtime_ctx) {
@@ -124,42 +133,40 @@ AsStatus RotaryOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape y_shape(x_shape);
   batch_size_ = y_shape[0];
   seq_len_ = y_shape[1];
-  hidden_size_ = y_shape[2] / 3;
-  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
-  // set variable
-  if (hidden_size_ % num_heads_) {
-    LOG(ERROR) << "Invalid attribute in RotaryOp. hidden_size : "
-               << hidden_size_ << ", num_heads : " << num_heads_ << std::endl;
+  qkv_stride_ = y_shape[2];
+  if (qkv_stride_ != hidden_size_ + 2 * kv_stride_) {
+    LOG(ERROR) << "Invalid qkv_stride_ in RotaryOp"
+               << ", qkv_strde = " << qkv_stride_
+               << ", hidden_size = " << hidden_size_
+               << ", kv_stride = " << kv_stride_ << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  size_per_head_ = hidden_size_ / num_heads_;
-  gemm_batch_ = batch_size_ * num_heads_;
+  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus RotaryOp::RunRotary(int run_batch_size, AsTensor* rotary_step,
                              AsTensor* rotary_inv_freq) {
   int* run_step = (int*)rotary_step->GetDataPtr();
   float* inv_freq = (float*)rotary_inv_freq->GetDataPtr();
-  int qkv_stride = 3 * hidden_size_;
+  int qkv_stride = qkv_stride_;
   int* batch_offset = nullptr;
-  int offset = hidden_size_ * SizeofType(dtype_);
   void* q_buf = (char*)tensor_map_->at(in_names_[0])->GetDataPtr();
-  void* k_buf = (char*)q_buf + offset;
-  void* v_buf = (char*)k_buf + offset;
+  void* k_buf = (char*)q_buf + hidden_size_ * SizeofType(dtype_);
+  void* v_buf = (char*)k_buf + kv_stride_ * SizeofType(dtype_);
   void* outq_buf = (char*)tensor_map_->at(out_names_[0])->GetDataPtr();
-  void* outk_buf = (char*)outq_buf + offset;
-  void* outv_buf = (char*)outk_buf + offset;
+  void* outk_buf = (char*)outq_buf + hidden_size_ * SizeofType(dtype_);
+  void* outv_buf = (char*)outk_buf + kv_stride_ * SizeofType(dtype_);
 
   rotary_launcher(dtype_, outq_buf, q_buf, inv_freq, batch_offset,
                   run_batch_size, seq_len_, run_step, hidden_size_, num_heads_,
                   size_per_head_, 0, qkv_stride, rotary_type_, rotary_pct_,
                   xlogn_, ctx_);
   rotary_launcher(dtype_, outk_buf, k_buf, inv_freq, batch_offset,
-                  run_batch_size, seq_len_, run_step, hidden_size_, num_heads_,
+                  run_batch_size, seq_len_, run_step, hidden_size_, group_num_,
                   size_per_head_, 0, qkv_stride, rotary_type_, rotary_pct_, -1,
                   ctx_);
   rotary_launcher(dtype_, outv_buf, v_buf, nullptr, batch_offset,
-                  run_batch_size, seq_len_, run_step, hidden_size_, num_heads_,
+                  run_batch_size, seq_len_, run_step, hidden_size_, group_num_,
                   size_per_head_, 0, qkv_stride, rotary_type_, rotary_pct_, -1,
                   ctx_);
   return AsStatus::ALLSPARK_SUCCESS;

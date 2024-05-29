@@ -245,10 +245,6 @@ AsStatus AsEngineImpl::SetNumThreads(int num_threads) {
   DLOG(INFO) << "AsEngineImpl::SetNumThreads()" << std::endl;
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
   device_ctx_->SetNumThreads(num_threads);
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < workers_.size(); ++i) {
     result[i] = threadpool_->enqueue([this, i, &num_threads]() {
@@ -561,10 +557,6 @@ AsStatus AsEngineImpl::UnloadModelFromDeviceMemory(const char* model_name) {
   DLOG(INFO) << "[" << model_name << "] "
              << "AsEngineImpl::UnloadModelFromDeviceMemory()" << std::endl;
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue(
@@ -635,10 +627,6 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
   int64_t min_bytes_available = std::numeric_limits<int64_t>::max();
   int64_t rank_0_bytes_available{0};
   if (use_adaptive_cache_) {
-    if (nranks_ > threadpool_size_) {
-      threadpool_size_ = nranks_ * 2;
-      threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-    }
     std::future<int64_t> result[nranks_];
     for (int i = 0; i < nranks_; ++i) {
       result[i] = threadpool_->enqueue([this, i]() -> int64_t {
@@ -850,6 +838,7 @@ AsStatus AsEngineImpl::StopModel(const char* model_name) {
   model_state->cond_var->notify_all();
 
   auto ret = reply_promise->get_future().get();
+  model_state->model_stopping = true;
 
   if (ret != AsStatus::ALLSPARK_SUCCESS) {
     LOG(ERROR) << "[" << model_name << "] "
@@ -885,10 +874,6 @@ AsStatus AsEngineImpl::ReloadModelFromDeviceMemory(const char* model_name) {
   }
 
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue([this, i, &model_ir]() {
@@ -1159,10 +1144,6 @@ AsStatus AsEngineImpl::RunTextGenerationContinue(const char* model_name) {
     return AsStatus::ALLSPARK_INVALID_CALL_ERROR;
   }
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue([this, i]() {
@@ -1236,10 +1217,6 @@ AsStatus AsEngineImpl::RunTextGenerationContext(const char* model_name) {
     return AsStatus::ALLSPARK_INVALID_CALL_ERROR;
   }
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue([this, i]() {
@@ -1293,11 +1270,7 @@ AsStatus AsEngineImpl::StopRequestByRequestID(const char* model_name,
     LOG(ERROR) << "Invalid model name : " << model_name << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
-  AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
+
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue([this, i, request_id]() {
@@ -1305,6 +1278,7 @@ AsStatus AsEngineImpl::StopRequestByRequestID(const char* model_name,
     });
   }
 
+  AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
   // 即使失败、异常，也要让各子线程运行完毕，以保证原子性。在可恢复的情况下，确保下一次请求有干净的环境
   AsStatus failed_ret = AsStatus::ALLSPARK_SUCCESS;
   for (int i = 0; i < nranks_; ++i) {
@@ -1333,11 +1307,7 @@ AsStatus AsEngineImpl::ReleaseRequestByRequestID(const char* model_name,
     LOG(ERROR) << "Invalid model name : " << model_name << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
-  AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
+
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue([this, i, request_id]() {
@@ -1345,6 +1315,7 @@ AsStatus AsEngineImpl::ReleaseRequestByRequestID(const char* model_name,
     });
   }
 
+  AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
   // 即使失败、异常，也要让各子线程运行完毕，以保证原子性。在可恢复的情况下，确保下一次请求有干净的环境
   AsStatus failed_ret = AsStatus::ALLSPARK_SUCCESS;
   for (int i = 0; i < nranks_; ++i) {
@@ -1461,10 +1432,6 @@ AsStatus AsEngineImpl::StartRequestImpl(
       {out_name, std::make_shared<AsTensor>(out_name, DeviceType::CPU,
                                             DataType::INT64, DataMode::DENSE,
                                             Shape{1, engine_max_length_})});
-  if (nranks_ > threadpool_size_) {
-    threadpool_size_ = nranks_ * 2;
-    threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
-  }
   std::future<AsStatus> result[nranks_];
   for (int i = 0; i < nranks_; ++i) {
     result[i] = threadpool_->enqueue(
@@ -1668,7 +1635,6 @@ void AsEngineImpl::ModelRunningThread(
                      s.c_str());  // set the name (pthread_self() returns the
                                   // pthread_t of the current thread)
   bool looping = true;
-  long loop_cnt = 0;
   bool graceful_stop_phase = false;
   bool graceful_final_released = false;
   std::unique_ptr<EngineControlMessage> graceful_stop_msg = nullptr;
@@ -1682,7 +1648,6 @@ void AsEngineImpl::ModelRunningThread(
 
   while (looping) {
     util::Timer time_outer;
-    loop_cnt++;
     UpdateAsEngineStat();
     // print the engine state for easier service trace.
     // for multiple numa, only print this info on node 0.
@@ -1957,6 +1922,7 @@ void AsEngineImpl::ModelRunningThread(
         if (graceful_final_released) {
           assert(graceful_stop_msg != nullptr);
           graceful_stop_msg->promise->set_value(AsStatus::ALLSPARK_SUCCESS);
+          model_state->model_stopped = true;
           DLOG(INFO) << "All done, gracefully stopped!";
           break;
         }
@@ -2144,4 +2110,23 @@ std::string AsEngineStat::ToString() const {
   return result;
 }
 
+std::map<std::string, std::string> AsEngineStat::ToMap() const {
+  std::map<std::string, std::string> engine_stat_map;
+  engine_stat_map["free_token"] = std::to_string(free_token);
+  engine_stat_map["total_token"] = std::to_string(total_token);
+  engine_stat_map["pendding_request"] = std::to_string(pendding_request);
+  engine_stat_map["running_request"] = std::to_string(running_request);
+  engine_stat_map["total_device_memory_pool_size"] =
+      std::to_string(total_device_memory_pool_size);
+  engine_stat_map["used_device_memory_pool_size"] =
+      std::to_string(used_device_memory_pool_size);
+  engine_stat_map["total_generated_token"] =
+      std::to_string(total_generated_token);
+  engine_stat_map["total_prefill_token"] = std::to_string(total_prefill_token);
+  engine_stat_map["generate_token_persec"] =
+      std::to_string(generate_token_persec);
+  engine_stat_map["process_token_persec"] =
+      std::to_string(process_token_persec);
+  return engine_stat_map;
+}
 }  // namespace allspark

@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    basic_example_qwen_v15.py
+# @file    basic_example_qwen_v15_dimodel.py
 #
 import os
 import copy
@@ -11,35 +11,8 @@ import subprocess
 from jinja2 import Template
 from concurrent.futures import ThreadPoolExecutor
 
+from modelscope import snapshot_download
 from dashinfer.helper import EngineHelper, ConfigManager
-
-
-def check_transformers_version():
-    import transformers
-    required_version = "4.37.0"
-    current_version = transformers.__version__
-
-    if current_version < required_version:
-        raise Exception(
-            f"Transformers version {current_version} is lower than required version {required_version}. Please upgrade transformers to version {required_version}."
-        )
-        exit()
-
-
-def download_model(model_id, revision, source="modelscope"):
-    print(f"Downloading model {model_id} (revision: {revision}) from {source}")
-    if source == "modelscope":
-        from modelscope import snapshot_download
-        model_dir = snapshot_download(model_id, revision=revision)
-    elif source == "huggingface":
-        from huggingface_hub import snapshot_download
-        model_dir = snapshot_download(repo_id=model_id)
-    else:
-        raise ValueError("Unknown source")
-
-    print(f"Save model to path {model_dir}")
-
-    return model_dir
 
 
 def create_test_prompt(default_gen_cfg=None):
@@ -103,15 +76,16 @@ def process_request(request_list, engine_helper: EngineHelper):
 
 
 if __name__ == '__main__':
-    check_transformers_version()
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--quantize', action='store_true')
     args = parser.parse_args()
 
-    config_file = "../model_config/config_qwen_v15_1_8b.json"
+    model_path = snapshot_download("dash-infer/Qwen1.5-1.8B-Chat-DI")
+
+    config_file = model_path + "/" + "di_config.json"
     config = ConfigManager.get_config_from_json(config_file)
     config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
+    config["model_path"] = model_path
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
     package_location = subprocess.run(cmd,
@@ -124,34 +98,10 @@ if __name__ == '__main__':
     os.environ["AS_NUMA_NUM"] = str(len(config["device_ids"]))
     os.environ["AS_NUMA_OFFSET"] = str(config["device_ids"][0])
 
-    ## download original model
-    ## download model from huggingface
-    # original_model = {
-    #     "source": "huggingface",
-    #     "model_id": "Qwen/Qwen1.5-1.8B-Chat",
-    #     "revision": "",
-    #     "model_path": ""
-    # }
-
-    ## download model from modelscope
-    original_model = {
-        "source": "modelscope",
-        "model_id": "qwen/Qwen1.5-1.8B-Chat",
-        "revision": "master",
-        "model_path": ""
-    }
-    original_model["model_path"] = download_model(original_model["model_id"],
-                                                  original_model["revision"],
-                                                  original_model["source"])
-
     ## init EngineHelper class
     engine_helper = EngineHelper(config)
     engine_helper.verbose = True
-    engine_helper.init_tokenizer(original_model["model_path"])
-
-    ## convert huggingface model to dashinfer model
-    ## only one conversion is required
-    engine_helper.convert_model(original_model["model_path"])
+    engine_helper.init_tokenizer(model_path)
 
     ## inference
     engine_helper.init_engine()

@@ -231,12 +231,12 @@ class EngineHelper():
 
     def check_model_exist(self):
         model_path = os.path.join(self.model_path,
-                                  self.model_name + ".asgraph")
+                                  self.model_name + ".dimodel")
         if not os.path.exists(model_path):
             print(f"\nNo such file or directory: {model_path}\n")
             return False
         model_path = os.path.join(self.model_path,
-                                  self.model_name + ".asparam")
+                                  self.model_name + ".ditensors")
         if not os.path.exists(model_path):
             print(f"\nNo such file or directory: {model_path}\n")
             return False
@@ -279,9 +279,9 @@ class EngineHelper():
         as_model_config = allspark.AsModelConfig(
             model_name=self.model_name,
             model_path=os.path.join(self.model_path,
-                                    self.model_name + ".asgraph"),
+                                    self.model_name + ".dimodel"),
             weights_path=os.path.join(self.model_path,
-                                      self.model_name + ".asparam"),
+                                      self.model_name + ".ditensors"),
             engine_max_length=self.engine_config["engine_max_length"],
             engine_max_batch=self.engine_config["engine_max_batch"],
         )
@@ -620,7 +620,7 @@ class ConfigManager():
             raise ValueError("config['{}']: key not exists or unsupported value".format(key))
 
         key = "model_type"
-        model_types = ["LLaMA_v2", "ChatGLM_v2", "ChatGLM_v3", "Qwen_v10", "Qwen_v15"]
+        model_types = ["LLaMA_v2", "ChatGLM_v2", "ChatGLM_v3", "Qwen_v10", "Qwen_v15", "Qwen_v20"]
         if key in config and isinstance(config[key], str) and config[key] in model_types:
             pass
         else:

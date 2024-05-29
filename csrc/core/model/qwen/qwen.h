@@ -31,4 +31,10 @@ class QwenModel_v15 : public QwenModel {
       : QwenModel(model_type){};
 };
 
+class QwenModel_v20 : public QwenModel {
+ public:
+  explicit QwenModel_v20(const std::string& model_type = "")
+      : QwenModel(model_type){};
+};
+
 }  // namespace allspark

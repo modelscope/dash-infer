@@ -186,9 +186,11 @@ PYBIND11_MODULE(_allspark, m) {
       .def(py::init<>(
           [](std::string model_name) { return new AsEngineStat(model_name); }))
       .def("ToString", [](AsEngineStat* self) { return self->ToString(); })
+      .def("dict", [](AsEngineStat* self) { return self->ToMap(); })
       // required field: model_name / model_path / weights_path
       .def_readwrite("model_name", &AsEngineStat::model_name)
       .def_readwrite("free_token", &AsEngineStat::free_token)
+      .def_readwrite("total_token", &AsEngineStat::total_token)
       .def_readwrite("pendding_request", &AsEngineStat::pendding_request)
       .def_readwrite("running_request", &AsEngineStat::running_request)
       .def_readwrite("total_generated_token",
@@ -204,12 +206,24 @@ PYBIND11_MODULE(_allspark, m) {
                      &AsEngineStat::used_device_memory_pool_size);
 
   py::class_<GeneratedElements, std::shared_ptr<GeneratedElements>>(
-      m, "GeneratedElements")
+      m, "GeneratedElements", py::module_local(),
+      "Generated Token class, contains token(s) and related information, it "
+      "may contains multiple tokens between last get.")
       .def(py::init<>())  // 默认构造函数
-      .def_readwrite("ids_from_generate", &GeneratedElements::ids_from_generate)
-      .def_readwrite("log_probs_list", &GeneratedElements::log_probs_list)
+      .def_readwrite("ids_from_generate", &GeneratedElements::ids_from_generate,
+                     "Token(s) from this generation")
+      .def_readwrite(
+          "log_probs_list", &GeneratedElements::log_probs_list,
+          "A probability list for each token, including the top_logprobs "
+          "tokens and their probabilities when generated.\n"
+          "Dimension: [num_token][top_logprobs], where each token has a "
+          "pair [token_id, prob].")
+      .def_readwrite("token_logprobs_list",
+                     &GeneratedElements::token_logprobs_list,
+                     "Stores the probability value for each selected token.")
       .def_readwrite("tensors_from_model_inference",
-                     &GeneratedElements::tensors_from_model_inference);
+                     &GeneratedElements::tensors_from_model_inference,
+                     "Tensor outputs from model inference.");
 
   // Allspark API
   // We should make sure interfaces are the same with AsClientEngine
@@ -279,7 +293,10 @@ PYBIND11_MODULE(_allspark, m) {
               return emptyVec;
             }
           },
-          py::return_value_policy::copy)
+          py::return_value_policy::copy,
+          "get output token non-block api, return None if no new token "
+          "available"
+          "[deprecated function] please use ResultQueue function.")
       .def(
           "_get_wait",
           [](AsEngine* self, const char* model_name, void* result_queue) {
@@ -296,7 +313,10 @@ PYBIND11_MODULE(_allspark, m) {
               return emptyVec;
             }
           },
-          py::return_value_policy::copy)
+          py::return_value_policy::copy,
+          "get output token block api, will block until new token or status "
+          "change"
+          ". [deprecated function] please use ResultQueue function.")
       .def("_get_request_status",
            [](AsEngine* self, const char* model_name, void* result_queue) {
              return ((AsEngine::ResultQueue_t)result_queue)->GenerateStatus();
@@ -524,29 +544,46 @@ PYBIND11_MODULE(_allspark, m) {
     util::set_global_header(weights_path);
   });
 
-  py::class_<ResultQueue, std::shared_ptr<ResultQueue>>(m, "ResultQueue")
+  py::class_<ResultQueue, std::shared_ptr<ResultQueue>>(
+      m, "ResultQueue", py::module_local(),
+      "The ResultQueue class is designed to generate status and retrieve "
+      "results")
       .def(py::init<>())  // Assuming there's a default constructor
-      .def("GenerateStatus", &ResultQueue::GenerateStatus)
-      .def("GeneratedLength", &ResultQueue::GeneratedLength)
-      .def("Get",
-           [](ResultQueue* self) -> py::object {
-             py::gil_scoped_release release;
-             auto ele = self->Get();
-             py::gil_scoped_acquire acquire;
-             if (ele == nullptr) {
-               return py::none();
-             } else {
-               return py::cast(ele);
-             }
-           })
-      .def("GetNoWait", [](ResultQueue* self) -> py::object {
-        auto ele = self->GetNoWait();
-        if (ele == nullptr) {
-          return py::none();
-        } else {
-          return py::cast(ele);
-        }
-      });
+
+      .def("GenerateStatus", &ResultQueue::GenerateStatus,
+           "Get generation status, this api will not block.")
+
+      .def("GeneratedLength", &ResultQueue::GeneratedLength,
+           "Get current generated length, it's accumulated generate token "
+           "number")
+
+      .def(
+          "Get",
+          [](ResultQueue* self) -> py::object {
+            py::gil_scoped_release release;
+            auto ele = self->Get();
+            py::gil_scoped_acquire acquire;
+            if (ele == nullptr) {
+              return py::none();
+            } else {
+              return py::cast(ele);
+            }
+          },
+          "Fetches new tokens(s) from the queue, will be block until new token "
+          "generated.")
+
+      .def(
+          "GetNoWait",
+          [](ResultQueue* self) -> py::object {
+            auto ele = self->GetNoWait();
+            if (ele == nullptr) {
+              return py::none();
+            } else {
+              return py::cast(ele);
+            }
+          },
+          "Fetches new token(s) from the queue, will return None if no new "
+          "tokens, non block api.");
 }
 
 #undef CHECK_CONFIG

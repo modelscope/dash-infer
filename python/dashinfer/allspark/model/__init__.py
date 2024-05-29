@@ -7,6 +7,7 @@ from .chatglm_v2 import *
 from .chatglm_v3 import *
 from .qwen_v10 import *
 from .qwen_v15 import *
+from .qwen_v20 import *
 
 __all__ = [
     "LLaMA_v2",
@@ -14,4 +15,5 @@ __all__ = [
     "ChatGLM_v3",
     "Qwen_v10",
     "Qwen_v15",
+    "Qwen_v20",
 ]

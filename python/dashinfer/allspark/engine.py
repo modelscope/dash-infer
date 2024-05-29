@@ -22,6 +22,7 @@ class EngineBase:
             "ChatGLM_v3": ChatGLM_v3,
             "Qwen_v10": Qwen_v10,
             "Qwen_v15": Qwen_v15,
+            "Qwen_v20": Qwen_v20,
         }
 
         self.version = ""
@@ -65,12 +66,12 @@ class EngineBase:
         if not path.isdir(save_dir):
             makedirs(save_dir)
         assert model_name, 'model_name should not be empty!'
-        model_path = path.join(save_dir, model_name + ".asgraph")
-        weights_path = path.join(save_dir, model_name + ".asparam")
+        model_path = path.join(save_dir, model_name + ".dimodel")
+        weights_path = path.join(save_dir, model_name + ".ditensors")
 
         start_time = time.time()
-        print("save asgraph to ", model_path)
-        print("save asparam to ", weights_path)
+        print("save dimodel to ", model_path)
+        print("save ditensors to ", weights_path)
         # 清空原本的权重文件
         with open(weights_path, "w") as f:
             f.truncate(0)
@@ -128,7 +129,7 @@ class EngineBase:
             hash_length = len(weight_file_content)
             hash.hash_length.extend([hash_length])
             hash_md5 = hashlib.md5(weight_file_content).hexdigest()
-            print("calculate md5 of asgraph = ", hash_md5)
+            print("calculate md5 of dimodel = ", hash_md5)
             hash.hash.extend([hash_md5])
         # config dict
         def valid_torch_kvpair(key, value) -> bool:

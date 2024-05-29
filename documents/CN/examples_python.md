@@ -304,7 +304,7 @@ To create a public link, set `share=True` in `launch()`.
 以下是对config中的参数说明：
 
 - `model_name`: DashInfer模型名称，自定义；
-- `model_type`: DashInfer模型类型，可选项：LLaMA_v2、ChatGLM_v2、ChatGLM_v3、Qwen_v10、Qwen_v15；
+- `model_type`: DashInfer模型类型，可选项：LLaMA_v2、ChatGLM_v2、ChatGLM_v3、Qwen_v10、Qwen_v15、Qwen_v20；
 - `model_path`: DashInfer模型导出路径；
 - `data_type`: 输出的数据类型，可选项：float32；
 - `device_type`: 推理硬件，可选项：CPU；

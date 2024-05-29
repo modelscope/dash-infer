@@ -36,7 +36,7 @@ enum class AsCacheMode {
 };
 
 /**
- * Converted asparam, asgraph file info class.
+ * Converted ditensors, dimodel file info class.
  */
 
 class AsFileInfo {
@@ -74,8 +74,8 @@ struct GenerateConfig {
       bad_words_ids;  ///< IDs of words to avoid during generation, will supress
                       ///< thoese ids's generation.
   float temperature = 1.0;         ///< Sampling temperature.
-  int top_k = 1;                   ///< Top-K sampling hyperparameter.
-  float top_p = 0.0;               ///< Top-P sampling hyperparameter.
+  int top_k = 50;                  ///< Top-K sampling hyperparameter.
+  float top_p = 1.0;               ///< Top-P sampling hyperparameter.
   float repetition_penalty = 1.0;  ///< Penalty for word repetition.
   float length_penalty = 1.0;      ///< Penalty for the length of the sequence.
   float presence_penalty = 0;      ///< Penalty for the presence of words.
@@ -153,6 +153,7 @@ class AsEngineStat {
   AsEngineStat(std::string in_model_name)
       : model_name(std::move(in_model_name)) {}
   std::string ToString() const;
+  std::map<std::string, std::string> ToMap() const;
 
  public:
   std::string model_name;
@@ -213,19 +214,41 @@ class AsEngine final {
     GenerateConfig config;
   };
 
-  // two type of elements, one is generated IDs, the other is for
-  // oridinary requests.
+  /**
+   * The GeneratedElements class represents generated elements and associated
+   * probability information. It consists of four main data members:
+   * 1. ids_from_generate - Stores generated IDs, which only keep new results
+   * and exclude historical ones.
+   * 2. log_probs_list - Stores a probability list for each token, along with
+   * the top_logprobs tokens and their probabilities when generated.
+   * 3. token_logprobs_list - Stores the probability value for each selected
+   * token.
+   * 4. tensors_from_model_inference - Contains tensors from model inference.
+   */
   class GeneratedElements {
    public:
-    std::vector<int64_t>
-        ids_from_generate;  /// this output is for GPT style generative
-                            /// models, only keeps new results and will not
-                            /// include history results.
+    /**
+     * Stores generated IDs used by GPT-style generative models, excluding
+     * historical results.
+     */
+    std::vector<int64_t> ids_from_generate;
+
+    /**
+     * A probability list for each token, including the top_logprobs tokens and
+     * their probabilities when generated. Dimension: [num_token][top_logprobs],
+     * where each token has a pair [token_id, prob].
+     */
     std::vector<std::vector<std::pair<int64_t, float>>> log_probs_list;
+
+    /**
+     * Stores the probability value for each selected token.
+     */
     std::vector<float> token_logprobs_list;
-    DLTensorMap
-        tensors_from_model_inference;  /// this output only has data when
-                                       /// infer mode is model inference.
+
+    /**
+     * Tensor outputs from model inference.
+     */
+    DLTensorMap tensors_from_model_inference;
   };
 
   enum class GenerateRequestStatus {
@@ -238,26 +261,78 @@ class AsEngine final {
                           /// was unfortunedly stopped.
   };
 
+  /**
+   * @class ResultQueue
+   *
+   * The ResultQueue class is designed to generate status, and retrieve results
+   * in a queue. It provides four main virtual methods:
+   * 1. A method for generating status;
+   * 2. A method to get the length of generated results;
+   * 3. A method to fetch a result from the queue; and
+   * 4. A method to fetch a result without waiting.
+   */
   class ResultQueue {
    public:
+    /**
+     * Generates the status of a request.
+     *
+     * @return GenerateRequestStatus Returns the status of the generation
+     * request.
+     */
     virtual GenerateRequestStatus GenerateStatus() {
       throw std::runtime_error("Function not implemented.");
     }
+
+    /**
+     * Retrieves the length of generated results.
+     *
+     * @return size_t Returns the length of the generated results.
+     */
     virtual size_t GeneratedLength() {
       throw std::runtime_error("Function not implemented.");
     }
+
+    /**
+     * Fetches a result from the queue, will be block until new token generated
+     *
+     * @return std::shared_ptr<GeneratedElements> Returns a smart pointer to the
+     * generated elements.
+     */
     virtual std::shared_ptr<GeneratedElements> Get() {
       throw std::runtime_error("Function not implemented.");
     }
+
+    /**
+     * Retrieves a result from the queue without waiting.
+     *
+     * @return std::shared_ptr<GeneratedElements> Returns a smart pointer to the
+     * generated elements.
+     */
     virtual std::shared_ptr<GeneratedElements> GetNoWait() {
       throw std::runtime_error("Function not implemented.");
     }
   };
+
+  /**
+   * @typedef ResultQueue_t
+   *
+   * ResultQueue_t is an alias for a pointer to a ResultQueue object, providing
+   * a clearer syntax for pointer usage.
+   */
   typedef ResultQueue* ResultQueue_t;
 
   AsEngine();
   ~AsEngine();
 
+  /**
+   * Builds a model from the provided configuration structure.
+   *
+   * @param model_config A reference to the model configuration struct
+   * containing all necessary settings for building the model.
+   * @return Returns an AsStatus value indicating the success or failure of the
+   * model building operation. If successful, returns AS_SUCCESS; otherwise,
+   * returns an error code indicating the specific issue.
+   */
   AsStatus BuildModelFromConfigStruct(AsModelConfig& model_config);
 
   /**
@@ -341,6 +416,11 @@ class AsEngine final {
    */
   AsStatus SyncRequest(const char* model_name, RequestHandle_t request_handle);
 
+  /**
+   * Retrieves the statistic information for specified model
+   * @param model_name the model name already install into engine.
+   * @return return the statistic information structure
+   */
   AsEngineStat GetAsEngineStat(const char* model_name);
 
   /**

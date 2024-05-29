@@ -72,8 +72,8 @@ int main(int argc, char** argv) {
   auto all_exists = check_model_file_exists(model_path, tiktoken_file);
   if (!all_exists) return 1;
 
-  std::string asgraph_file = model_path + ".asgraph";
-  std::string asparam_file = model_path + ".asparam";
+  std::string dimodel_file = model_path + ".dimodel";
+  std::string ditensors_file = model_path + ".ditensors";
 
   // create an inference engine instance.
   std::unique_ptr<Engine> as_engine = std::make_unique<Engine>();
@@ -88,15 +88,15 @@ int main(int argc, char** argv) {
   // the convert model part, please see python example,
   // it will generate a running model from
   // a huggleface type model to a allspark model,
-  // file name will be like "qwen_v15.asparam, qwen_v15.asgraph"
+  // file name will be like "qwen_v15.ditensors, qwen_v15.dimodel"
   //
 
   // use model config builder to build model config.
   AsModelConfigBuilder model_config_builder;
   auto model_config =
       model_config_builder.withModelName(model_name)
-          .withModelPath(asgraph_file)
-          .withWeightsPath(asparam_file)
+          .withModelPath(dimodel_file)
+          .withWeightsPath(ditensors_file)
           .withEngineMaxLength(default_engine_max_length)
           .withEngineMaxBatch(16)
           .withMatmulPrecision("medium")
