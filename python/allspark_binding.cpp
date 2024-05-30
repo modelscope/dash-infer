@@ -127,8 +127,7 @@ PYBIND11_MODULE(_allspark, m) {
       .value("ALLSPARK_SUCCESS", AsStatus::ALLSPARK_SUCCESS)
       .value("ALLSPARK_STREAMING", AsStatus::ALLSPARK_STREAMING);
   py::enum_<AsCacheMode>(m, "AsCacheMode")
-      .value("AsCacheDefault", AsCacheMode::AsCacheDefault)
-      .value("AsCacheQuantI8", AsCacheMode::AsCacheQuantI8);
+      .value("AsCacheDefault", AsCacheMode::AsCacheDefault);
   py::enum_<AsMHAPrefill>(m, "AsMHAPrefill")
       .value("AsPrefillDefault", AsMHAPrefill::AsPrefillDefault);
   py::enum_<AsEngine::GenerateRequestStatus>(m, "GenerateRequestStatus")

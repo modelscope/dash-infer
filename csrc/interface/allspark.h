@@ -32,7 +32,6 @@ enum class AsMHAPrefill {
 
 enum class AsCacheMode {
   AsCacheDefault = 0,
-  AsCacheQuantI8 = 1,
 };
 
 /**

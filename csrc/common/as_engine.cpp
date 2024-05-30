@@ -2068,9 +2068,6 @@ std::string AsModelConfig::ToString() const {
     case AsCacheMode::AsCacheDefault:
       cache_mode_string = "AsCacheDefault";
       break;
-    case AsCacheMode::AsCacheQuantI8:
-      cache_mode_string = "AsCacheQuantI8";
-      break;
     default:
       cache_mode_string = "AsCacheUnknown";
   }
