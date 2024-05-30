@@ -40,7 +40,7 @@ def create_test_prompt(inputs, default_gen_cfg=None):
     prompt_template = Template(
         "{{start_text}}" + "{{system_role}}\n" + "{{system_content}}" + "{{end_text}}\n" +
         "{{start_text}}" + "{{user_role}}\n" + "{{user_content}}" + "{{end_text}}\n" +
-        "{{start_text}}" + "{{assistant_role}}\n")
+        "{{start_text}}" + "{{assistant_role}}\n\n")
 
     gen_cfg_list = []
     user_msg["content"] = copy.deepcopy(inputs)
