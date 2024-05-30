@@ -46,7 +46,7 @@ def create_test_prompt(default_gen_cfg=None):
     prompt_template = Template(
         "{{start_text}}" + "{{system_role}}\n" + "{{system_content}}" + "{{end_text}}\n" +
         "{{start_text}}" + "{{user_role}}\n" + "{{user_content}}" + "{{end_text}}\n" +
-        "{{start_text}}" + "{{assistant_role}}\n")
+        "{{start_text}}" + "{{assistant_role}}\n\n")
 
     gen_cfg_list = []
     prompt_list = []
@@ -67,10 +67,21 @@ def create_test_prompt(default_gen_cfg=None):
 
 def process_request(request_list, engine_helper: EngineHelper):
 
+    def print_inference_result(request):
+        msg = "***********************************\n"
+        msg += f"* Answer (dashinfer) for Request {request.id}\n"
+        msg += "***********************************\n"
+        msg += f"** context_time: {request.context_time} s, generate_time: {request.generate_time} s\n\n"
+        msg += f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n\n"
+        msg += f"** encoded output, len: {request.out_tokens_len} **\n{request.out_tokens}\n\n"
+        msg += f"** text input **\n{request.in_text}\n\n"
+        msg += f"** text output **\n{request.out_text}\n\n"
+        print(msg)
+
     def done_callback(future):
         request = future.argument
         future.result()
-        engine_helper.print_inference_result(request)
+        print_inference_result(request)
 
     # create a threadpool
     executor = ThreadPoolExecutor(

@@ -370,15 +370,15 @@ class EngineHelper():
         if self.verbose:
             for i in range(len(request_list)):
                 request = request_list[i]
-                print(f"*****************")
-                print(f"* Request {i}")
-                print(f"*****************")
-                print(f"** text input **\n{request.in_text}\n")
-                print(f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n")
-                print(f"** torch input **")
+                msg = "*****************\n"
+                msg += f"* Request {i}\n"
+                msg += "*****************\n"
+                msg += f"** text input **\n{repr(request.in_text)}\n\n"
+                msg += f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n\n"
+                msg += f"** torch input **\n"
                 for key, value in request.torch_input.items():
-                    print(f"{key}, shape: {value.shape}\n{value}")
-                print()
+                    msg += f"{key}, shape: {value.shape}\n{value}\n"
+                print(msg)
         '''
 
         return request_list

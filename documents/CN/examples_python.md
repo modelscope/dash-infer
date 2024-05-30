@@ -112,7 +112,7 @@ assistant_msg = {"role": "assistant", "content": ""}
 prompt_template = Template(
     "{{start_text}}" + "{{system_role}}\n" + "{{system_content}}" + "{{end_text}}\n" +
     "{{start_text}}" + "{{user_role}}\n" + "{{user_content}}" + "{{end_text}}\n" +
-    "{{start_text}}" + "{{assistant_role}}\n")
+    "{{start_text}}" + "{{assistant_role}}\n\n")
 ```
 
 ## 增加新模型
