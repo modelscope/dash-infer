@@ -20,6 +20,7 @@ class EngineBase:
             "LLaMA_v2": LLaMA_v2,
             "ChatGLM_v2": ChatGLM_v2,
             "ChatGLM_v3": ChatGLM_v3,
+            "ChatGLM_v4": ChatGLM_v4,
             "Qwen_v10": Qwen_v10,
             "Qwen_v15": Qwen_v15,
             "Qwen_v20": Qwen_v20,
