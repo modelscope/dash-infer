@@ -31,4 +31,10 @@ class ChatGLM_v3Model : public ChatGLMModel {
   explicit ChatGLM_v3Model(const std::string& model_type = "")
       : ChatGLMModel(model_type){};
 };
+
+class ChatGLM_v4Model : public ChatGLMModel {
+ public:
+  explicit ChatGLM_v4Model(const std::string& model_type = "")
+      : ChatGLMModel(model_type){};
+};
 }  // namespace allspark

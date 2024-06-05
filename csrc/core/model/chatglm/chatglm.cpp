@@ -102,4 +102,5 @@ AsStatus ChatGLMModel::Forward(const TensorMap& inputs, TensorMap* outputs) {
 
 REGISTER_MODEL("ChatGLM_v2", ChatGLM_v2Model)
 REGISTER_MODEL("ChatGLM_v3", ChatGLM_v3Model)
+REGISTER_MODEL("ChatGLM_v4", ChatGLM_v4Model)
 }  // namespace allspark
