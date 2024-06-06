@@ -28,7 +28,7 @@ DashInfer采用C++ Runtime编写，提供C++和Python语言接口。DashInfer具
 - **PTQ量化**：使用DashInfer的InstantQuant（IQ），无需训练微调即可实现weight-only量化加速，提高部署效率。经过精度测试，IQ对模型精度不会产生影响。目前版本支持ARM CPU上的weight-only 8-bit量化。
 - **优化的计算Kernel**：结合OneDNN和自研汇编kernel，DashInfer能够在ARM和x86上发挥硬件的最大性能。
 - **NUMA-Aware**：支持多NUMA的tensor并行推理，充分发挥服务器级CPU的算力。通过numactl和多进程架构，精准控制计算线程的NUMA亲和性，充分利用多节点CPU的性能，并且避免跨NUMA访存带来性能下降问题。关于多NUMA的性能指导可以参考：[Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html)。
-- **上下文长度（Context Length）**：目前版本支持11k的Context Length，未来还会继续支持更长Context Length。
+- **上下文长度（Context Length）**：目前版本支持32k的Context Length，未来还会继续支持更长Context Length。
 - **提供多语言API接口**：提供C++和Python接口，能够直接使用C++接口对接到Java、Rust等其他编程语言。
 - **操作系统支持**：支持Centos7、Ubuntu22.04等主流Linux服务器操作系统，并提供对应的Docker镜像。
 

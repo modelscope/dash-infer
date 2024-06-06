@@ -607,7 +607,7 @@ void MHAKernel(float* out, const float* q, const float* k, const float* v,
                   size_per_head, alpha, q + qkv_offset, qkv_stride,
                   k + qkv_offset, qkv_stride, beta, score_buf, step);
       for (int j = 0; j < seq_length; ++j) {
-        int k = i * seq_length + j;
+        size_t k = i * seq_length + j;
         vSoftmaxMask(step, score + k * step,
                      mask + (m * seq_length + j) * step);
       }
@@ -627,7 +627,7 @@ void MHAKernel(float* out, const float* q, const float* k, const float* v,
                   size_per_head, alpha, q + qkv_offset, qkv_stride,
                   k + qkv_offset, qkv_stride, beta, score_buf, step);
       for (int j = 0; j < seq_length; ++j) {
-        int k = i * seq_length + j;
+        size_t k = i * seq_length + j;
         vSoftmax(step, score + k * step);
       }
       cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, seq_length,
@@ -656,7 +656,7 @@ void MHAKernel(float* out, const float* q, const float* k, const float* v,
                   size_per_head, alpha, q + q_offset, q_stride, k + kv_offset,
                   kv_stride, beta, score_buf, step * num_heads);
       for (int j = 0; j < seq_length; ++j) {
-        int k = m * seq_length * num_heads + j * num_heads + n;
+        size_t k = m * seq_length * num_heads + j * num_heads + n;
         vSoftmaxMask(step, score + k * step,
                      mask + (m / beam_size * step + j) * step);
       }
@@ -676,7 +676,7 @@ void MHAKernel(float* out, const float* q, const float* k, const float* v,
                   size_per_head, alpha, q + q_offset, q_stride, k + kv_offset,
                   kv_stride, beta, score_buf, step * num_heads);
       for (int j = 0; j < seq_length; ++j) {
-        int k = m * seq_length * num_heads + j * num_heads + n;
+        size_t k = m * seq_length * num_heads + j * num_heads + n;
         ;
         vSoftmax(step, score + k * step);
       }
@@ -782,7 +782,7 @@ void BatchSoftmax<float>(float* score, const float* mask, int batch_size,
       int m = i / num_heads;
       int n = i % num_heads;
       parallel_for(seq_len, [&](int j) {
-        int k = m * seq_len * num_heads + j * num_heads + n;
+        size_t k = m * seq_len * num_heads + j * num_heads + n;
         vSoftmaxMask(step, score + k * step,
                      mask + (m / beam_size * step + j) * step);
       });
@@ -792,7 +792,7 @@ void BatchSoftmax<float>(float* score, const float* mask, int batch_size,
       int m = i / num_heads;
       int n = i % num_heads;
       parallel_for(seq_len, [&](int j) {
-        int k = m * seq_len * num_heads + j * num_heads + n;
+        size_t k = m * seq_len * num_heads + j * num_heads + n;
         vSoftmax(step, score + k * step);
       });
     });
@@ -813,7 +813,7 @@ void BatchDecoderSoftmax<float>(float* score, const float* mask, int batch_size,
              mask + (m / beam_size * input_len + input_len - 1) * input_len,
              input_len * sizeof(float));
       parallel_for(seq_len, [&](int j) {
-        int k = m * seq_len * num_heads + j * num_heads + n;
+        size_t k = m * seq_len * num_heads + j * num_heads + n;
         vSoftmaxMask(step, score + k * step, mask_in.data());
       });
     });
