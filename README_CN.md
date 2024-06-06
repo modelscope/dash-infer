@@ -189,7 +189,7 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 # 未来规划
 
 - [ ] 首包加速：加入CPU实现的Flash-Attention等Attention加速技术；
-- [ ] Context Length：扩展到32k以上；
+- [x] Context Length：扩展到32k以上；
 - [ ] 低bit量化支持：支持4-bit量化；
 - [ ] QAT量化支持：支持GPTQ算法量化微调过的模型；
 - [ ] MoE：支持MoE模型和架构。
