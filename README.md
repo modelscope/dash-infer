@@ -188,7 +188,7 @@ This subsection lists the third-party dependencies for the different stages of D
 # Future Plans
 
 - [ ] Accelerate attention with Flash-Attention
-- [ ] Expand context length to over 32k
+- [x] Expand context length to over 32k
 - [ ] Support 4-bit quantization
 - [ ] Support quantized models fine-tuned with GPTQ
 - [ ] Support MoE architecture
