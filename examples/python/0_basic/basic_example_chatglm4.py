@@ -42,7 +42,7 @@ def create_test_prompt(default_gen_cfg=None):
 
     prompt_template = Template(
         "[gMASK] <sop> " + "<|{{user_role}}|>\n" + "{{user_content}}" +
-        "<|{{assistant_role}}|>\n")
+        "<|{{assistant_role}}|>\n\n")
 
     gen_cfg_list = []
     prompt_list = []
