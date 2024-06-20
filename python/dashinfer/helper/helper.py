@@ -620,7 +620,7 @@ class ConfigManager():
             raise ValueError("config['{}']: key not exists or unsupported value".format(key))
 
         key = "model_type"
-        model_types = ["LLaMA_v2", "ChatGLM_v2", "ChatGLM_v3", "ChatGLM_v4", "Qwen_v10", "Qwen_v15", "Qwen_v20"]
+        model_types = ["LLaMA_v2", "LLaMA_v3", "ChatGLM_v2", "ChatGLM_v3", "ChatGLM_v4", "Qwen_v10", "Qwen_v15", "Qwen_v20"]
         if key in config and isinstance(config[key], str) and config[key] in model_types:
             pass
         else:

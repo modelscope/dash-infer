@@ -18,6 +18,7 @@ class EngineBase:
     def __init__(self):
         self.model_map = {
             "LLaMA_v2": LLaMA_v2,
+            "LLaMA_v3": LLaMA_v3,
             "ChatGLM_v2": ChatGLM_v2,
             "ChatGLM_v3": ChatGLM_v3,
             "ChatGLM_v4": ChatGLM_v4,
