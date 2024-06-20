@@ -27,6 +27,7 @@ DashInfer采用C++ Runtime编写，提供C++和Python语言接口。DashInfer具
 - **支持主流LLM开源模型**：支持主流的开源LLM模型，包括Qwen、LLaMA、ChatGLM等，支持Huggingface格式的模型读取。
 - **PTQ量化**：使用DashInfer的InstantQuant（IQ），无需训练微调即可实现weight-only量化加速，提高部署效率。经过精度测试，IQ对模型精度不会产生影响。目前版本支持ARM CPU上的weight-only 8-bit量化。
 - **优化的计算Kernel**：结合OneDNN和自研汇编kernel，DashInfer能够在ARM和x86上发挥硬件的最大性能。
+- **支持Flash Attention**：显著加速了长序列的Attention计算过程，大大降低首包延迟。
 - **NUMA-Aware**：支持多NUMA的tensor并行推理，充分发挥服务器级CPU的算力。通过numactl和多进程架构，精准控制计算线程的NUMA亲和性，充分利用多节点CPU的性能，并且避免跨NUMA访存带来性能下降问题。关于多NUMA的性能指导可以参考：[Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html)。
 - **上下文长度（Context Length）**：目前版本支持32k的Context Length，未来还会继续支持更长Context Length。
 - **提供多语言API接口**：提供C++和Python接口，能够直接使用C++接口对接到Java、Rust等其他编程语言。
@@ -189,11 +190,12 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 # 未来规划
 
-- [ ] 首包加速：加入CPU实现的Flash-Attention等Attention加速技术；
+- [x] 首包加速：加入CPU实现的Flash-Attention等Attention加速技术；
 - [x] Context Length：扩展到32k以上；
 - [ ] 低bit量化支持：支持4-bit量化；
 - [ ] QAT量化支持：支持GPTQ算法量化微调过的模型；
 - [ ] MoE：支持MoE模型和架构。
+
 
 # License
 

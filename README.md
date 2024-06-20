@@ -27,6 +27,7 @@ Written in C++ runtime, DashInfer aims to deliver production-level implementatio
 - **Support for Mainstream Open-Source LLMs**: DashInfer supports mainstream open-source LLMs, including Qwen, LLaMA, ChatGLM, etc., and supports loading models in the Huggingface format.
 - **Post Training Quantization (PTQ)**: Using DashInfer's InstantQuant (IQ), weight-only quantization acceleration can be achieved without fine-tuning, improving deployment efficiency. Accuracy evaluation shows that IQ has no impact on model accuracy. The current version supports weight-only 8-bit quantization on ARM CPUs.
 - **Optimized Computation Kernels**: With OneDNN and self-developed assembly kernels, DashInfer is able to maximize the performance of the hardware on both ARM and x86.
+- **Supports Flash Attention**: Significantly accelerates the attention computation for long sequences, drastically reducing the latency for the first-token.
 - **NUMA-Aware Design**: DashInfer supports tensor parallel inference across multiple NUMA nodes, fully leveraging the computing power of server CPUs. With numactl and a multi-process architecture, the NUMA affinity of threads is accurately controlled to maximize the performance of multi-node CPUs and avoid the performance degradation caused by cross-NUMA access. For more information on NUMA, see: [Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html).
 - **Context Length**: The current version supports up to 32k context length, with plans to extend to longer context lengths in the future.
 - **Multi-Language API Interfaces**: Both C++ and Python interfaces are supported. It is possible to extend C++ interface to Java, Rust and other programming languages, via standard cross-language interfaces.
@@ -188,7 +189,7 @@ This subsection lists the third-party dependencies for the different stages of D
 
 # Future Plans
 
-- [ ] Accelerate attention with Flash-Attention
+- [x] Accelerate attention with Flash-Attention
 - [x] Expand context length to over 32k
 - [ ] Support 4-bit quantization
 - [ ] Support quantized models fine-tuned with GPTQ

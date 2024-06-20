@@ -60,6 +60,7 @@ class CMakeBuild(build_ext):
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DCONFIG_HOST_CPU_TYPE=ARM",
             "-DENABLE_AVX2=OFF",
+            "-DENABLE_AVX512=OFF",
             "-DENABLE_BF16=ON",
             "-DENABLE_FP16=ON",
             "-DENABLE_ARMCL=ON",

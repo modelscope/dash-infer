@@ -29,6 +29,38 @@ Date:   Mon Mar 25 20:51:46 2024 -0400
 - 192 vCPU @ 3.2GHz, 16GBx64 DDR
 - Aliyun instance: [ecs.g8i.48xlarge](https://www.alibabacloud.com/help/en/ecs/user-guide/overview-of-instance-families#g8i), [ecs.g8i.48xlarge 中文页面](https://help.aliyun.com/zh/ecs/user-guide/general-purpose-instance-families#g8i)
 
+### Meta-Llama-3-8B-Instruct
+
+#### llama.cpp
+
+| Physical core * NUMA | Precision | Batch size | Input length | Output length | First-token latency (s) | Throughput per batch (Tokens/s) | Throughput (Tokens/s) |
+| :------------------: | :-------: | :--------: | :----------: | :-----------: | :---------------------: | :-----------------------------: | :-------------------: |
+| 48*1 | FP16 | 1 | 128 | 128 | 0.96  | 8.47  | 8.47 |
+|  |  |  | 1200 |  | 10.58  | 8.11  | 8.11 |
+| 48*1 | INT8 | 1 | 128 | 128 | 0.83  | 15.82  | 15.82 |
+|  |  |  | 1200 |  | 8.57  | 15.24  | 15.24 |
+
+#### DashInfer
+
+| Physical core * NUMA | Precision | Batch size | Input length | Output length | First-token latency (s) | Throughput per batch (Tokens/s) | Throughput (Tokens/s) |
+| :------------------: | :-------: | :--------: | :----------: | :-----------: | :---------------------: | :-----------------------------: | :-------------------: |
+| 48*1 | BF16 | 1 | 128 | 128 | 0.21  | 16.37  | 16.37 |
+|  |  | 2 | 128 |  | 0.35  | 11.94  | 23.88 |
+|  |  | 4 | 128 |  | 0.58  | 11.62  | 46.50 |
+|  |  | 8 | 128 |  | 1.12  | 11.96  | 95.66 |
+|  |  | 1 | 1200 |  | 1.45  | 13.28  | 13.28 |
+|  |  | 2 | 1200 |  | 1.92  | 12.37  | 24.75 |
+|  |  | 4 | 1200 |  | 3.29  | 8.78  | 35.12 |
+|  |  | 8 | 1200 |  | 5.64  | 5.74  | 45.95 |
+| 48*2 | BF16 | 1 | 128 | 128 | 0.22  | 20.91  | 20.91 |
+|  |  | 2 | 128 |  | 0.41  | 20.13  | 40.26 |
+|  |  | 4 | 128 |  | 0.76  | 15.78  | 63.11 |
+|  |  | 8 | 128 |  | 1.34  | 12.01  | 96.05 |
+|  |  | 1 | 1200 |  | 1.18  | 19.31  | 19.31 |
+|  |  | 2 | 1200 |  | 1.64  | 15.31  | 30.62 |
+|  |  | 4 | 1200 |  | 2.75  | 10.92  | 43.67 |
+|  |  | 8 | 1200 |  | 4.85  | 7.30  | 58.40 |
+
 ### Llama-2-7b-chat
 
 #### llama.cpp

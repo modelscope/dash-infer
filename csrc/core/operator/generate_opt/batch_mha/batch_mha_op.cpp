@@ -7,11 +7,68 @@
 
 #include <core/kernel/kernel.h>
 #include <cpu/cpu_context.h>
+#include <glog/logging.h>
+#include <omp.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
+
+#include "allspark.pb.h"
+#include "allspark_check.h"
+#include "common.h"
+#include "cpu/cpu_common.h"
+#include "cpu/cpu_kernel.h"
+#include "env_config.h"
+#include "generate_context.h"
+#include "tensor/tensor.h"
 
 namespace allspark {
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+void cpu_ctx_single_famha(DataType dtype, void* out, const void* query,
+                          const void* key, const void* value, const float* mask,
+                          const void* position_embedding, void* k_cache,
+                          void* v_cache, int batch_size, int beam_size,
+                          int seq_len, int step, int cache_max_len,
+                          int hidden_size, int num_heads, int size_per_head,
+                          void* workspace, int src_blk, int tgt_blk,
+                          float alpha, const DeviceContext* ctx) {
+  DLOG(INFO) << "cpu_ctx_single_famha" << std::endl;
+  if (position_embedding) {
+    DLOG(WARNING) << "cpu_ctx_single_famha : can't do position embedding";
+  }
+
+  auto functor = [&]<typename T>() {
+    int o_stride = hidden_size;
+    int q_stride = hidden_size * 3;
+    // use k, v directly, not from KV Cache
+    int kv_stride = hidden_size * 3;
+
+    int total_token_size = 0;
+    int input_seq_lens[batch_size], past_seq_lens[batch_size];
+    for (int i = 0; i < batch_size; ++i) {
+      input_seq_lens[i] = seq_len;
+      past_seq_lens[i] = 0;  // since we only run in context phase
+      total_token_size += input_seq_lens[i];
+    }
+
+    cpu::SelfScaledDpAttention(
+        (T*)out, (const T*)query, (const T*)key, (const T*)value, num_heads,
+        num_heads, size_per_head, o_stride, q_stride, kv_stride, batch_size,
+        input_seq_lens, past_seq_lens, workspace, src_blk, tgt_blk, mask, alpha,
+        cpu::get_max_threads());
+
+    // copy current key/value to k_cache/v_cache
+    cpu::UpdateKVLauncher((T*)k_cache, (T*)v_cache, (const T*)key,
+                          (const T*)value, batch_size, step - 1, cache_max_len,
+                          hidden_size, seq_len, 3 * hidden_size);
+  };
+
+  DispatchCPU(dtype, functor);
+}
+#endif
+
 void cpu_dec_single_mha(DataType dtype, void* out, void* score,
                         const void* query, const void* key, const void* value,
                         const float* mask, const void* position_embedding,
@@ -117,7 +174,10 @@ AsStatus BatchMHAOp::Init(const OperatorProto& op_proto,
 
   switch (backend) {
     case DeviceType::CPU: {
-      kernel_launcher = cpu_dec_single_mha;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+      ctx_kernel_launcher = cpu_ctx_single_famha;
+#endif
+      dec_kernel_launcher = cpu_dec_single_mha;
       if (multi_nodes_) {
         const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
         num_heads_ /= cpu_ctx->GetNranks();
@@ -164,14 +224,71 @@ AsStatus BatchMHAOp::Reshape(RuntimeContext* runtime_ctx) {
       round32((int64_t)single_batch * ctx_->GetModelMaxLength() * num_heads_ *
               (ctx_->GetModelMaxLength()) * SizeofType(dtype_));
 
-  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
+  int min_blk = (int)std::pow(2, int(std::log2(seq_len_ / 2)));
+  src_blk_ = std::min(256, min_blk);
+  tgt_blk_ = std::min(512, seq_len_);
 
-  // not using flash attention, set fallback MHA workspace.
+  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
+  // fallback MHA workspace.
   int64_t ws_size =
       score_size_ + (int64_t)sizeof(void*) * round32(gemm_batch_) * 5;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  // if we are in runContext phase, it is possible to reduce memory alloc since
+  // flash attention will be adopted.
+  if (runtime_ctx->is_context && useFlashAttn()) {
+    // each omp thread will hold intermediate data
+    //   - Q_i shape: [src_blk * size_per_head]
+    //   - S_ij = Q_iK^T_j shape: [src_blk * tgt_blk]
+    //   - l_i, preSum shape: [src_blk, 1]
+    //   - l_i_new, sum shape: [src_blk, 1]
+    //   - m_i, preMax shape: [src_blk, 1]
+    //   - m_i_new, max shape: [src_blk, 1]
+    //   - O_i shape: [src_blk * head_dim]
+    int64_t ws_size_per_omp_thread =
+        (4 + tgt_blk_ + 2 * size_per_head_) * src_blk_;
+    ws_size =
+        cpu::get_max_threads() * SizeofType(dtype_) * ws_size_per_omp_thread;
+    // each omp thread will hold its own offset pointer to above data
+    ws_size += cpu::get_max_threads() * 7 * sizeof(void*);
+  }
+#endif
   tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
   return AsStatus::ALLSPARK_SUCCESS;
 }
+
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+AsStatus BatchMHAOp::runFlash(GenerateContext* gen_ctx) {
+  AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
+  AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
+  AsTensor* wss_tensor = tensor_map_->at("workspace").get();
+  void* k_cache_buf = gen_ctx->k_cache_list[layer_num_]->GetData();
+  void* v_cache_buf = gen_ctx->v_cache_list[layer_num_]->GetData();
+  int offset = hidden_size_ * SizeofType(dtype_);
+  void* out_ptr = (char*)out_tensor->GetDataPtr();
+  void* q_buf = (char*)in_tensor->GetDataPtr();
+  void* k_buf = (char*)q_buf + offset;
+  void* v_buf = (char*)k_buf + offset;
+  auto& mask_tensor = tensor_map_->at(in_names_[1]);
+  DLOG(INFO) << "mask tensor : " << mask_tensor->GetShape().ToString()
+             << ", stride " << mask_tensor->GetStrideInByte();
+  float* mask_buf = gen_ctx->step == 0
+                        ? (float*)(tensor_map_->at(in_names_[1])->GetDataPtr())
+                        : nullptr;
+  if (tensor_map_->at(in_names_[1])->GetShape().Count() == 0) {
+    mask_buf = nullptr;
+  }
+  void* position_embedding =
+      pos_embedding_ ? tensor_map_->at(in_names_[2])->GetDataPtr() : nullptr;
+  auto& workspace = tensor_map_->at("workspace");
+  ctx_kernel_launcher(dtype_, out_ptr, q_buf, k_buf, v_buf, mask_buf,
+                      position_embedding, k_cache_buf, v_cache_buf, 1,
+                      gen_ctx->num_beams, seq_len_, (gen_ctx->step + 1),
+                      ctx_->GetModelMaxLength(), hidden_size_, num_heads_,
+                      size_per_head_, workspace->GetDataPtr(), src_blk_,
+                      tgt_blk_, alpha_, ctx_);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
 
 AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
@@ -207,7 +324,7 @@ AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 
-  kernel_launcher(
+  dec_kernel_launcher(
       dtype_, out_ptr, score_buf, q_buf, k_buf, v_buf, mask_buf,
       position_embedding, k_cache_buf, v_cache_buf, q_array, k_array, v_array,
       score_array, out_array, 1, gen_ctx->num_beams, seq_len_,
@@ -225,8 +342,16 @@ AsStatus BatchMHAOp::runContext(RuntimeContext* runtime_ctx) {
   }
   GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   DLOG(INFO) << "BatchMHAOp::runContext [" << gen_ctx->request->request_id
-             << "][layer " << layer_num_ << "]";
-  runOneBatch(gen_ctx, 0);
+             << "][layer " << layer_num_;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  if (useFlashAttn()) {
+    runFlash(gen_ctx);
+  } else {
+#endif
+    runOneBatch(gen_ctx, 0);
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  }
+#endif
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

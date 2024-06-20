@@ -73,6 +73,7 @@ elif [ "${with_platform,,}" == "armclang" ]; then
       -DBUILD_PACKAGE=${build_package} \
       -DALLSPARK_CBLAS=BLIS \
       -DENABLE_AVX2=OFF \
+      -DENABLE_AVX512=OFF \
       -DENABLE_ARM_V84_V9=ON \
       -DENABLE_BF16=ON \
       -DENABLE_FP16=ON \
