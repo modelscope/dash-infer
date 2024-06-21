@@ -1,6 +1,6 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    basic_example_chatglm4.py
+# @file    basic_example_llama3.py
 #
 import os
 import copy
@@ -32,23 +32,34 @@ def download_model(model_id, revision, source="modelscope"):
 
 def create_test_prompt(default_gen_cfg=None):
     input_list = [
-        "浙江的省会在哪",
         "Where is the capital of Zhejiang?",
-        "将“温故而知新”翻译成英文，并解释其含义",
+        "How many days are in a leap year?",
+        "What is the largest planet in our solar system?",
     ]
 
+    start_text = "<|begin_of_text|>"
+    end_text = "<|eot_id|>"
+    start_header_text = "<|start_header_id|>"
+    end_header_text = "<|end_header_id|>"
+    system_msg = {"role": "system", "content": "You are a helpful assistant."}
     user_msg = {"role": "user", "content": ""}
     assistant_msg = {"role": "assistant", "content": ""}
 
     prompt_template = Template(
-        "[gMASK] <sop> " + "<|{{user_role}}|>\n" + "{{user_content}}" +
-        "<|{{assistant_role}}|>\n\n")
+        "{{start_text}}{{start_header_text}}" + "{{system_role}}" + "{{end_header_text}}" + "\n\n" +
+        "{{system_content}}" + "{{end_text}}" +
+        "{{start_header_text}}" + "{{user_role}}" + "{{end_header_text}}" + "\n\n" +
+        "{{user_content}}" + "{{end_text}}" +
+        "{{start_header_text}}" + "{{assistant_role}}" + "{{end_header_text}}" + "\n\n")
 
     gen_cfg_list = []
     prompt_list = []
     for i in range(len(input_list)):
         user_msg["content"] = input_list[i]
-        prompt = prompt_template.render(user_role=user_msg["role"], user_content=user_msg["content"],
+        prompt = prompt_template.render(start_text=start_text, end_text=end_text,
+                                        start_header_text=start_header_text, end_header_text=end_header_text,
+                                        system_role=system_msg["role"], system_content=system_msg["content"],
+                                        user_role=user_msg["role"], user_content=user_msg["content"],
                                         assistant_role=assistant_msg["role"])
         prompt_list.append(prompt)
         if default_gen_cfg != None:
@@ -100,7 +111,7 @@ if __name__ == '__main__':
     parser.add_argument('--quantize', action='store_true')
     args = parser.parse_args()
 
-    config_file = "../model_config/config_chatglm4_9b.json"
+    config_file = "../model_config/config_llama3_8b.json"
     config = ConfigManager.get_config_from_json(config_file)
     config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
@@ -116,18 +127,10 @@ if __name__ == '__main__':
     os.environ["AS_NUMA_OFFSET"] = str(config["device_ids"][0])
 
     ## download original model
-    ## download model from huggingface
-    # original_model = {
-    #     "source": "huggingface",
-    #     "model_id": "THUDM/glm-4-9b-chat",
-    #     "revision": "",
-    #     "model_path": ""
-    # }
-
     ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "ZhipuAI/glm-4-9b-chat",
+        "model_id": "modelscope/Meta-Llama-3-8B-Instruct",
         "revision": "master",
         "model_path": ""
     }

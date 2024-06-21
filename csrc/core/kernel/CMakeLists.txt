@@ -43,6 +43,12 @@ file(
 
 file(
   GLOB_RECURSE
+  src_avx512
+  cpu/mha.cpp
+)
+
+file(
+  GLOB_RECURSE
   src_arm
   cpu/gemm_lowp/arm/*
 )
@@ -52,6 +58,14 @@ if(ENABLE_AVX2)
     message("AVX2 flags: ${AVX2_FLAGS}, files: ${src_avx2}")
     set_source_files_properties(${src_avx2} PROPERTIES COMPILE_FLAGS "${AVX2_FLAGS}")
 endif(ENABLE_AVX2)
+
+if(ENABLE_AVX512)
+    set(AVX512_FLAGS "-mavx512f -mavx512bw -mavx512vl")
+    message("AVX512 flags: ${AVX512_FLAGS}, files: ${src_avx512}")
+    get_source_file_property(OTHER_FLAGS ${src_avx512} COMPILE_FLAGS)
+    message("APPEND flags: ${OTHER_FLAGS}, files: ${src_avx512}")
+    set_source_files_properties(${src_avx512} PROPERTIES COMPILE_FLAGS "${OTHER_FLAGS} ${AVX512_FLAGS}")
+endif(ENABLE_AVX512)
 
 if(NOT ENABLE_ARM_V84_V9)
     foreach(file ${src_arm})

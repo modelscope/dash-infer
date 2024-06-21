@@ -31,6 +31,7 @@ set(CONFIG_HOST_CPU_TYPE "X86" CACHE STRING "host cpu type, like X86, ARMV9, etc
 
 ## x86 related option.
 option(ENABLE_AVX2 "enable avx2" ON)
+option(ENABLE_AVX512 "enable avx512" ON)
 
 ## ARM related option.
 option(ENABLE_ARMCL "enable use of Arm Compute Library" OFF)
@@ -53,6 +54,10 @@ message(STATUS "CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS} ALLSPARK_CBLAS:${ALLSPARK_CBL
 
 if(ENABLE_AVX2)
     list(APPEND ALLSPARK_DEFINITION "-DENABLE_AVX2")
+endif()
+
+if(ENABLE_AVX512)
+    list(APPEND ALLSPARK_DEFINITION "-DENABLE_AVX512")
 endif()
 
 if(ENABLE_ARM_V84_V9)

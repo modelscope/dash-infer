@@ -1,14 +1,16 @@
 #
 # Copyright (c) Alibaba, Inc. and its affiliates.
-# @file    basic_example_chatglm4.py
+# @file    performance_test_llama3.py
 #
 import os
+import sys
 import copy
 import time
+import queue
 import random
 import argparse
 import subprocess
-from jinja2 import Template
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
 from dashinfer.helper import EngineHelper, ConfigManager
@@ -30,27 +32,11 @@ def download_model(model_id, revision, source="modelscope"):
     return model_dir
 
 
-def create_test_prompt(default_gen_cfg=None):
-    input_list = [
-        "浙江的省会在哪",
-        "Where is the capital of Zhejiang?",
-        "将“温故而知新”翻译成英文，并解释其含义",
-    ]
-
-    user_msg = {"role": "user", "content": ""}
-    assistant_msg = {"role": "assistant", "content": ""}
-
-    prompt_template = Template(
-        "[gMASK] <sop> " + "<|{{user_role}}|>\n" + "{{user_content}}" +
-        "<|{{assistant_role}}|>\n\n")
+def create_random_prompt(batch_size, input_len, default_gen_cfg=None):
+    prompt_list = np.random.randint(low=1, high=5000, size=(batch_size, input_len)).astype(np.int64).tolist()
 
     gen_cfg_list = []
-    prompt_list = []
-    for i in range(len(input_list)):
-        user_msg["content"] = input_list[i]
-        prompt = prompt_template.render(user_role=user_msg["role"], user_content=user_msg["content"],
-                                        assistant_role=assistant_msg["role"])
-        prompt_list.append(prompt)
+    for i in range(len(prompt_list)):
         if default_gen_cfg != None:
             gen_cfg = copy.deepcopy(default_gen_cfg)
             gen_cfg["seed"] = random.randint(0, 10000)
@@ -61,21 +47,10 @@ def create_test_prompt(default_gen_cfg=None):
 
 def process_request(request_list, engine_helper: EngineHelper):
 
-    def print_inference_result(request):
-        msg = "***********************************\n"
-        msg += f"* Answer (dashinfer) for Request {request.id}\n"
-        msg += "***********************************\n"
-        msg += f"** context_time: {request.context_time} s, generate_time: {request.generate_time} s\n\n"
-        msg += f"** encoded input, len: {request.in_tokens_len} **\n{request.in_tokens}\n\n"
-        msg += f"** encoded output, len: {request.out_tokens_len} **\n{request.out_tokens}\n\n"
-        msg += f"** text input **\n{request.in_text}\n\n"
-        msg += f"** text output **\n{request.out_text}\n\n"
-        print(msg)
-
     def done_callback(future):
         request = future.argument
         future.result()
-        print_inference_result(request)
+        engine_helper.print_inference_result(request)
 
     # create a threadpool
     executor = ThreadPoolExecutor(
@@ -97,11 +72,21 @@ def process_request(request_list, engine_helper: EngineHelper):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+
+    parser.add_argument('--config_file', type=str, default='config_llama3_8b.json')
+    parser.add_argument('--device_ids', nargs='+', type=int, default=[0])
+    parser.add_argument('--multinode_mode', action='store_true')
     parser.add_argument('--quantize', action='store_true')
+
     args = parser.parse_args()
 
-    config_file = "../model_config/config_chatglm4_9b.json"
+    config_file = "../model_config/" + args.config_file
+
     config = ConfigManager.get_config_from_json(config_file)
+    config["generation_config"]["early_stopping"] = False
+    config["generation_config"]["stop_words_ids"] = []
+    config["device_ids"] = args.device_ids
+    config["multinode_mode"] = args.multinode_mode
     config["convert_config"]["do_dynamic_quantize_convert"] = args.quantize
 
     cmd = f"pip show dashinfer | grep 'Location' | cut -d ' ' -f 2"
@@ -115,19 +100,17 @@ if __name__ == '__main__':
     os.environ["AS_NUMA_NUM"] = str(len(config["device_ids"]))
     os.environ["AS_NUMA_OFFSET"] = str(config["device_ids"][0])
 
+    '''
+    # Turn on the following options to get operator-level profiling results
+    config["engine_config"]["do_profiling"] = True
+    os.environ["AS_PROFILE"] = "ON"
+    '''
+
     ## download original model
     ## download model from huggingface
-    # original_model = {
-    #     "source": "huggingface",
-    #     "model_id": "THUDM/glm-4-9b-chat",
-    #     "revision": "",
-    #     "model_path": ""
-    # }
-
-    ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "ZhipuAI/glm-4-9b-chat",
+        "model_id": "modelscope/Meta-Llama-3-8B-Instruct",
         "revision": "master",
         "model_path": ""
     }
@@ -142,22 +125,33 @@ if __name__ == '__main__':
 
     ## convert huggingface model to dashinfer model
     ## only one conversion is required
-    engine_helper.convert_model(original_model["model_path"])
+    if engine_helper.check_model_exist() == False:
+        engine_helper.convert_model(original_model["model_path"])
 
-    ## inference
-    engine_helper.init_engine()
+    batch_size_list = [1, 2, 4, 8]
+    output_len_list = [128]
+    input_len_list = [128, 1200]
 
-    prompt_list, gen_cfg_list = create_test_prompt(
-        engine_helper.default_gen_cfg)
-    request_list = engine_helper.create_request(prompt_list, gen_cfg_list)
+    for output_len in output_len_list:
+        for input_len in input_len_list:
+            for batch_size in batch_size_list:
+                print(f"### batch_size: {batch_size}, output_len: {output_len}, input_len: {input_len}")
+                sys.stdout.flush()
 
-    global_start = time.time()
-    process_request(request_list, engine_helper)
-    global_end = time.time()
+                engine_helper.init_engine()
+                engine_helper.verbose = False
 
-    total_timecost = global_end - global_start
-    # engine_helper.print_inference_result_all(request_list)
-    engine_helper.print_profiling_data(request_list, total_timecost)
-    print(f"total timecost: {total_timecost} s")
+                engine_helper.default_gen_cfg["max_length"] = output_len + input_len
+                prompt_list, gen_cfg_list = create_random_prompt(
+                    batch_size, input_len, engine_helper.default_gen_cfg)
+                request_list = engine_helper.create_request(prompt_list, gen_cfg_list)
 
-    engine_helper.uninit_engine()
+                global_start = time.time()
+                process_request(request_list, engine_helper)
+                global_end = time.time()
+
+                total_timecost = global_end - global_start
+                engine_helper.print_profiling_data(request_list, total_timecost)
+                print(f"total timecost: {total_timecost} s")
+
+                engine_helper.uninit_engine()

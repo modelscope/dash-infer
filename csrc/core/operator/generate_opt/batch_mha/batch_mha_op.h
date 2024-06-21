@@ -6,6 +6,8 @@
 #pragma once
 #include <core/operator/operator.h>
 
+#include "env_config.h"
+
 namespace allspark {
 
 /* @brief: assumpt seq_len = 1
@@ -22,6 +24,8 @@ class BatchMHAOp : public AsOperator {
   explicit BatchMHAOp(const std::string& op_type = "")
       : AsOperator(op_type),
         score_size_(0),
+        src_blk_(0),
+        tgt_blk_(0),
         batch_size_(1),
         seq_len_(1),
         hidden_size_(1),
@@ -44,7 +48,12 @@ class BatchMHAOp : public AsOperator {
  protected:
   virtual AsStatus runContext(RuntimeContext* runtime_ctx);
   virtual AsStatus runDecoder(RuntimeContext* runtime_ctx);
-
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  bool useFlashAttn() const {
+    return seq_len_ > AttentionEnvConfig::GetFlashThresh();
+  }
+  AsStatus runFlash(GenerateContext* gen_ctx);
+#endif
   AsStatus runOneBatch(GenerateContext* gen_ctx, int current_batch);
 
   AsStatus lognFromAttributes(const OperatorProto& op) {
@@ -60,16 +69,27 @@ class BatchMHAOp : public AsOperator {
     return AsStatus::ALLSPARK_SUCCESS;
   }
 
-  void (*kernel_launcher)(DataType dtype, void* out, void* score,
-                          const void* query, const void* key, const void* value,
-                          const float* mask, const void* position_embedding,
-                          void* k_cache, void* v_cache, void** q_array,
-                          void** k_array, void** v_array, void** score_array,
-                          void** out_array, int batch_size, int beam_size,
-                          int seq_len, int step, int cache_max_len,
-                          int hidden_size, int num_heads, int size_per_head,
-                          int gemm_batch, float alpha, bool xlogn_enable,
-                          int xlogn_len, const DeviceContext* ctx) = nullptr;
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  void (*ctx_kernel_launcher)(DataType dtype, void* out, const void* query,
+                              const void* key, const void* value,
+                              const float* mask, const void* position_embedding,
+                              void* k_cache, void* v_cache, int batch_size,
+                              int beam_size, int seq_len, int step,
+                              int cache_max_len, int hidden_size, int num_heads,
+                              int size_per_head, void* workspace, int src_blk,
+                              int tgt_blk, float alpha,
+                              const DeviceContext* ctx) = nullptr;
+#endif
+
+  void (*dec_kernel_launcher)(
+      DataType dtype, void* out, void* score, const void* query,
+      const void* key, const void* value, const float* mask,
+      const void* position_embedding, void* k_cache, void* v_cache,
+      void** q_array, void** k_array, void** v_array, void** score_array,
+      void** out_array, int batch_size, int beam_size, int seq_len, int step,
+      int cache_max_len, int hidden_size, int num_heads, int size_per_head,
+      int gemm_batch, float alpha, bool xlogn_enable, int xlogn_len,
+      const DeviceContext* ctx) = nullptr;
 
   std::pair<bool, AsMHAPrefill> GetPrefillMode() {
     AsMHAPrefill prefill_mode = AsMHAPrefill(ctx_->GetPrefillMode());
@@ -88,6 +108,8 @@ class BatchMHAOp : public AsOperator {
   }
 
   int64_t score_size_;
+  int src_blk_;
+  int tgt_blk_;
   int batch_size_;
   int seq_len_;
   int hidden_size_;

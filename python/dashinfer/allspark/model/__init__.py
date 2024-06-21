@@ -3,6 +3,7 @@
 # @file    __init__.py
 #
 from .llama_v2 import *
+from .llama_v3 import *
 from .chatglm_v2 import *
 from .chatglm_v3 import *
 from .chatglm_v4 import *
@@ -12,6 +13,7 @@ from .qwen_v20 import *
 
 __all__ = [
     "LLaMA_v2",
+    "LLaMA_v3",
     "ChatGLM_v2",
     "ChatGLM_v3",
     "ChatGLM_v4",

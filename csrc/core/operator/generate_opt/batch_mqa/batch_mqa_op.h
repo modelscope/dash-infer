@@ -7,6 +7,8 @@
 
 #include <core/operator/operator.h>
 
+#include "env_config.h"
+
 namespace allspark {
 
 /* @brief: assumpt seq_len = 1
@@ -29,6 +31,8 @@ class BatchMQAOp : public AsOperator {
         size_per_head_(64),
         gemm_batch_(1),
         score_size_(0),
+        src_blk_(0),
+        tgt_blk_(0),
         alpha_(-1.0f),
         pos_embedding_(false),
         first_beam_(false) {}
@@ -38,6 +42,13 @@ class BatchMQAOp : public AsOperator {
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
+
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  bool UseFlashAttn() const {
+    return seq_len_ > AttentionEnvConfig::GetFlashThresh();
+  }
+  AsStatus RunFlash(GenerateContext* gen_ctx);
+#endif
   AsStatus RunOneBatch(GenerateContext* gen_ctx, int current_batch);
   AsStatus ResetCache() override;
 
@@ -51,6 +62,8 @@ class BatchMQAOp : public AsOperator {
   int gemm_batch_;
   int64_t cache_size_;
   int64_t score_size_;
+  int src_blk_;
+  int tgt_blk_;
   float alpha_;
   bool pos_embedding_;
   bool first_beam_;
@@ -59,16 +72,27 @@ class BatchMQAOp : public AsOperator {
   int kv_stride_ = 0;
   bool multi_nodes_;
   int layer_num_ = 0;
-  void (*kernel_launcher)(DataType dtype, void* out, void* score,
-                          const void* query, const void* key, const void* value,
-                          const float* mask, const void* position_embedding,
-                          void* k_cache, void* v_cache, void** q_array,
-                          void** k_array, void** v_array, void** score_array,
-                          void** out_array, int batch_size, int beam_size,
-                          int seq_len, int step, int cache_max_len,
-                          int hidden_size, int num_heads, int size_per_head,
-                          int group_num, int gemm_batch, float alpha,
-                          const DeviceContext* ctx) = nullptr;
+
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
+  void (*ctx_kernerl_launcher)(
+      DataType dtype, void* out, const void* query, const void* key,
+      const void* value, const float* mask, const void* position_embedding,
+      void* k_cache, void* v_cache, int batch_size, int beam_size, int seq_len,
+      int step, int cache_max_len, int hidden_size, int num_heads,
+      int size_per_head, int group_num, void* workspace, int src_blk,
+      int tgt_blk, float alpha, const DeviceContext* ctx) = nullptr;
+#endif
+  void (*dec_kernel_launcher)(DataType dtype, void* out, void* score,
+                              const void* query, const void* key,
+                              const void* value, const float* mask,
+                              const void* position_embedding, void* k_cache,
+                              void* v_cache, void** q_array, void** k_array,
+                              void** v_array, void** score_array,
+                              void** out_array, int batch_size, int beam_size,
+                              int seq_len, int step, int cache_max_len,
+                              int hidden_size, int num_heads, int size_per_head,
+                              int group_num, int gemm_batch, float alpha,
+                              const DeviceContext* ctx) = nullptr;
 };
 
 }  // namespace allspark

@@ -25,6 +25,16 @@ void EmbeddingT5KernelLauncher(T* out_tensor, const int64_t* word_ids,
                                const T* embedding_table, int batch_size,
                                int seq_len, int hidden_size, int vocab_size,
                                bool use_decoder);
+
+template <typename T>
+void SelfScaledDpAttention(T* output, const T* query, const T* key,
+                           const T* value, int q_num_heads, int kv_num_heads,
+                           int size_per_head, int o_stride, int q_stride,
+                           int kv_stride, int batch_size,
+                           const int* input_seq_lens, const int* past_seq_lens,
+                           void* workspace, int src_blk, int tgt_blk,
+                           const float* mask, float scale, int num_thread);
+
 template <typename T>
 void GetBatchArrayLauncher(T* q, T* k, T* v, T* score, T* out, T** q_array,
                            T** k_array, T** v_array, T** score_array,

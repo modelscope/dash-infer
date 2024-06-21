@@ -27,6 +27,7 @@ Written in C++ runtime, DashInfer aims to deliver production-level implementatio
 - **Support for Mainstream Open-Source LLMs**: DashInfer supports mainstream open-source LLMs, including Qwen, LLaMA, ChatGLM, etc., and supports loading models in the Huggingface format.
 - **Post Training Quantization (PTQ)**: Using DashInfer's InstantQuant (IQ), weight-only quantization acceleration can be achieved without fine-tuning, improving deployment efficiency. Accuracy evaluation shows that IQ has no impact on model accuracy. The current version supports weight-only 8-bit quantization on ARM CPUs.
 - **Optimized Computation Kernels**: With OneDNN and self-developed assembly kernels, DashInfer is able to maximize the performance of the hardware on both ARM and x86.
+- **Supports Flash Attention**: Significantly accelerates the attention computation for long sequences, drastically reducing the latency for the first-token.
 - **NUMA-Aware Design**: DashInfer supports tensor parallel inference across multiple NUMA nodes, fully leveraging the computing power of server CPUs. With numactl and a multi-process architecture, the NUMA affinity of threads is accurately controlled to maximize the performance of multi-node CPUs and avoid the performance degradation caused by cross-NUMA access. For more information on NUMA, see: [Optimizing Applications for NUMA - Intel](https://www.intel.com/content/dam/develop/external/us/en/documents/3-5-memmgt-optimizing-applications-for-numa-184398.pdf), [What is NUMA?](https://www.kernel.org/doc/html/v5.0/vm/numa.html).
 - **Context Length**: The current version supports up to 32k context length, with plans to extend to longer context lengths in the future.
 - **Multi-Language API Interfaces**: Both C++ and Python interfaces are supported. It is possible to extend C++ interface to Java, Rust and other programming languages, via standard cross-language interfaces.
@@ -88,6 +89,7 @@ During inference, the quantized weight is recovered as bfloat16 for matrix multi
 | ChatGLMModel | ChatGLM | ChatGLM_v3 | [THUDM/chatglm3-6b](https://huggingface.co/THUDM/chatglm3-6b),<br>[THUDM/chatglm3-6b-32k](https://huggingface.co/THUDM/chatglm3-6b-32k) | [ZhipuAI/chatglm3-6b](https://modelscope.cn/models/ZhipuAI/chatglm3-6b/summary),<br>[ZhipuAI/chatglm3-6b-32k](https://modelscope.cn/models/ZhipuAI/chatglm3-6b-32k/summary) | / |
 | ChatGLMModel | ChatGLM | ChatGLM_v4 | [THUDM/glm-4-9b-chat](https://huggingface.co/THUDM/glm-4-9b-chat) | [ZhipuAI/glm-4-9b-chat](https://modelscope.cn/models/ZhipuAI/glm-4-9b-chat/summary) | [dash-infer/glm-4-9b-chat-DI](https://modelscope.cn/models/dash-infer/glm-4-9b-chat-DI/summary) |
 | LlamaForCausalLM | LLaMA-2 | LLaMA_v2 | [meta-llama/Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf),<br>[meta-llama/Llama-2-13b-chat-hf](https://huggingface.co/meta-llama/Llama-2-13b-chat-hf) | [modelscope/Llama-2-7b-chat-ms](https://modelscope.cn/models/modelscope/Llama-2-7b-chat-ms/summary),<br>[modelscope/Llama-2-13b-chat-ms](https://modelscope.cn/models/modelscope/Llama-2-13b-chat-ms/summary) | / |
+| LlamaForCausalLM | LLaMA-3 | LLaMA_v3 | [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) | [modelscope/Meta-Llama-3-8B-Instruct](https://modelscope.cn/models/modelscope/Meta-Llama-3-8B-Instruct/summary) | / |
 
 # Software Architecture
 
@@ -187,7 +189,7 @@ This subsection lists the third-party dependencies for the different stages of D
 
 # Future Plans
 
-- [ ] Accelerate attention with Flash-Attention
+- [x] Accelerate attention with Flash-Attention
 - [x] Expand context length to over 32k
 - [ ] Support 4-bit quantization
 - [ ] Support quantized models fine-tuned with GPTQ

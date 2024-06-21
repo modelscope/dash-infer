@@ -59,4 +59,15 @@ class EnvVarConfig {
   }
 };
 
+class AttentionEnvConfig {
+ public:
+  static int GetFlashThresh() {
+    static int env_flash_thresh = -1;
+    if (env_flash_thresh == -1) {
+      env_flash_thresh = EnvVarConfig::GetInt("AS_FLASH_THRESH", 1024);
+    }
+    return env_flash_thresh;
+  }
+};
+
 }  // namespace allspark
