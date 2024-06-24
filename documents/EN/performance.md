@@ -40,6 +40,8 @@ Date:   Mon Mar 25 20:51:46 2024 -0400
 | 48*1 | INT8 | 1 | 128 | 128 | 0.83  | 15.82  | 15.82 |
 |  |  |  | 1200 |  | 8.57  | 15.24  | 15.24 |
 
+*[see the benchmark detail of llama.cpp](./llama.cpp_perf_test.md)*
+
 #### DashInfer
 
 | Physical core * NUMA | Precision | Batch size | Input length | Output length | First-token latency (s) | Throughput per batch (Tokens/s) | Throughput (Tokens/s) |
