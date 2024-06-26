@@ -28,6 +28,7 @@ using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
 
 enum class AsMHAPrefill {
   AsPrefillDefault = 0,
+  AsPrefillFlashV2 = 10,
 };
 
 enum class AsCacheMode {

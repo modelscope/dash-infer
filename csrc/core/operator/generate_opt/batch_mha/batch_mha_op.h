@@ -50,7 +50,8 @@ class BatchMHAOp : public AsOperator {
   virtual AsStatus runDecoder(RuntimeContext* runtime_ctx);
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   bool useFlashAttn() const {
-    return seq_len_ > AttentionEnvConfig::GetFlashThresh();
+    return ctx_->GetPrefillMode() == AsMHAPrefill::AsPrefillFlashV2 &&
+           seq_len_ > AttentionEnvConfig::GetFlashThresh();
   }
   AsStatus runFlash(GenerateContext* gen_ctx);
 #endif

@@ -44,7 +44,7 @@ file(
 file(
   GLOB_RECURSE
   src_avx512
-  cpu/mha.cpp
+  cpu/famha_x64_avx512.cpp
 )
 
 file(
@@ -60,10 +60,8 @@ if(ENABLE_AVX2)
 endif(ENABLE_AVX2)
 
 if(ENABLE_AVX512)
-    set(AVX512_FLAGS "-mavx512f -mavx512bw -mavx512vl")
+    set(AVX512_FLAGS "-mavx512f")
     message("AVX512 flags: ${AVX512_FLAGS}, files: ${src_avx512}")
-    get_source_file_property(OTHER_FLAGS ${src_avx512} COMPILE_FLAGS)
-    message("APPEND flags: ${OTHER_FLAGS}, files: ${src_avx512}")
     set_source_files_properties(${src_avx512} PROPERTIES COMPILE_FLAGS "${OTHER_FLAGS} ${AVX512_FLAGS}")
 endif(ENABLE_AVX512)
 

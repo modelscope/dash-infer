@@ -19,6 +19,7 @@
 #include "allspark_check.h"
 #include "common.h"
 #include "cpu/cpu_common.h"
+#include "cpu/cpu_info.h"
 #include "cpu/cpu_kernel.h"
 #include "env_config.h"
 #include "generate_context.h"
@@ -342,7 +343,8 @@ AsStatus BatchMHAOp::runContext(RuntimeContext* runtime_ctx) {
   }
   GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   DLOG(INFO) << "BatchMHAOp::runContext [" << gen_ctx->request->request_id
-             << "][layer " << layer_num_;
+             << "][layer " << layer_num_
+             << "], PrefillMode = " << int(ctx_->GetPrefillMode());
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   if (useFlashAttn()) {
     runFlash(gen_ctx);

@@ -45,7 +45,8 @@ class BatchMQAOp : public AsOperator {
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   bool UseFlashAttn() const {
-    return seq_len_ > AttentionEnvConfig::GetFlashThresh();
+    return ctx_->GetPrefillMode() == AsMHAPrefill::AsPrefillFlashV2 &&
+           seq_len_ > AttentionEnvConfig::GetFlashThresh();
   }
   AsStatus RunFlash(GenerateContext* gen_ctx);
 #endif
