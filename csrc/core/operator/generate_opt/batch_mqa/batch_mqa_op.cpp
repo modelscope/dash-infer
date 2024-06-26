@@ -7,6 +7,7 @@
 
 #include <core/kernel/kernel.h>
 #include <cpu/cpu_context.h>
+#include <cpu/cpu_info.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
@@ -343,7 +344,8 @@ AsStatus BatchMQAOp::RunContext(RuntimeContext* runtime_ctx) {
   }
   GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   DLOG(INFO) << "BatchMQAOp::RunContext [" << gen_ctx->request->request_id
-             << "][layer " << layer_num_;
+             << "][layer " << layer_num_
+             << "], PrefillMode = " << int(ctx_->GetPrefillMode());
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   if (UseFlashAttn()) {
     RunFlash(gen_ctx);

@@ -8,6 +8,7 @@
 #include <common/env_config.h>
 #include <core/model/model.h>
 #include <cpu/cpu_context.h>
+#include <cpu/cpu_info.h>
 #include <fcntl.h>
 #include <git_version.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -361,10 +362,13 @@ static void CheckAndOverridePrefillMode(AsModelConfig& model_config) {
         ParseDeviceType(model_config.compute_unit);
 
     if (device_type == DeviceType::CPU) {
-      if (model_config.prefill_mode != AsMHAPrefill::AsPrefillDefault) {
+      if (CPUInfo::SupportAVX512F()) {
+        LOG(INFO) << "Detect avx512f supported, switch Prefill mode to flash";
+        model_config.prefill_mode = AsMHAPrefill::AsPrefillFlashV2;
+      } else if (model_config.prefill_mode != AsMHAPrefill::AsPrefillDefault) {
         LOG(INFO) << "Warn: CPU only support Prefill model default";
+        model_config.prefill_mode = AsMHAPrefill::AsPrefillDefault;
       }
-      model_config.prefill_mode = AsMHAPrefill::AsPrefillDefault;
     }
   } catch (std::invalid_argument& e) {
     LOG(INFO) << "Prefll Auto Select got exception, ignore this auto set. "
@@ -2058,6 +2062,9 @@ std::string AsModelConfig::ToString() const {
   switch (prefill_mode) {
     case AsMHAPrefill::AsPrefillDefault:
       prefill_string = "AsPrefillDefault";
+      break;
+    case AsMHAPrefill::AsPrefillFlashV2:
+      prefill_string = "AsPrefillFlashV2";
       break;
     default:
       prefill_string = "AsPrefillUnknown";
