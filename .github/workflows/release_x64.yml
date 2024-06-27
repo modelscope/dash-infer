@@ -16,6 +16,7 @@ jobs:
       uses: actions/checkout@v2
       with:
         lfs: true
+        fetch-tags: true
 
     - name: Set global environment variable
       run: |
