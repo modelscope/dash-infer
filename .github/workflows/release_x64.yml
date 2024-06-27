@@ -7,9 +7,6 @@ jobs:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
       image: registry-1.docker.io/dashinfer/dev-manylinux-x86:v1
-    strategy:
-      matrix:
-        python-version: [3.8.x, 3.9.x, 3.10.x, 3.11.x]
 
     steps:
     - name: Check out code
@@ -18,31 +15,8 @@ jobs:
         lfs: true
         fetch-tags: true
 
-    - name: Set global environment variable
-      run: |
-        echo "AS_PLATFORM=x86" >> $GITHUB_ENV
-        echo "PLAT=manylinux2014_x86_64" >> $GITHUB_ENV
-        echo "AS_PYTHON_MANYLINUX=ON" >> $GITHUB_ENV
-
-    - name: Get version from tag
+    - name: Python manylinux build
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        echo "AS_RELEASE_VERSION=$VERSION_NUMBER" >> $GITHUB_ENV
-
-    - name: Prepare conda env
-      run: |
-        python_version=
-        conda create -n base_py python=${{ matrix.python-version }} -y
-        conda activate base_py
-        conda install pybind11 -y
-        python -m pip install -r python/dev-requirements.txt
-    
-    - name: Build wheel
-      run: |
-        python python/setup.py bdist_wheel
-        python -m pip wheel python --no-deps --wheel-dir python/wheelhouse
-    
-    - name: Repair wheels with auditwheel
-      run: |
-        auditwheel repair python/wheelhouse/*.whl --plat "$PLAT" -w python/wheelhouse
+        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh
