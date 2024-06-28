@@ -17,6 +17,10 @@ jobs:
         lfs: true
         fetch-tags: true
         
+    - name: Pull LFS
+      run: |
+        git lfs pull
+        
     - name: Build deb package
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
@@ -47,9 +51,13 @@ jobs:
         lfs: true
         fetch-tags: true
         
-    - name: Build rpm package
+    - name: Pull LFS
       run: |
         yum install git-lfs -y
+        git lfs pull
+        
+    - name: Build rpm package
+      run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         source activate ds_py
