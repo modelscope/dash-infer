@@ -7,6 +7,9 @@ jobs:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
       image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
     - name: Check out code
       uses: actions/checkout@v2
@@ -16,8 +19,6 @@ jobs:
     - name: Build deb package
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        . activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
         AS_PLATFORM="x86"\
         AS_BUILD_PACKAGE=ON \
@@ -33,10 +34,14 @@ jobs:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
       image: registry-1.docker.io/dashinfer/dev-centos7-x86:v1
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
     - name: Check out code
       uses: actions/checkout@v1
       with:
+        lfs: true
         fetch-tags: true
         
     - name: Build rpm package
