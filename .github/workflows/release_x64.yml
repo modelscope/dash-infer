@@ -1,22 +1,54 @@
-name: Build Wheels (x86)
+name: Build & Test Wheels (x86)
 
 on: [push]
 
 jobs:
-  build-wheels-x86:
+  Build:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
       image: registry-1.docker.io/dashinfer/dev-manylinux-x86:v1
-
     steps:
     - name: Check out code
       uses: actions/checkout@v2
       with:
         lfs: true
         fetch-tags: true
-
+        
     - name: Python manylinux build
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh
+
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-manylinux-wheels-x86
+        path: python/wheelhouse/*.manylinux2014_x86_64.whl
+        
+  Test:
+    runs-on: [self-hosted, Linux, X64, spr, sg]
+    container:
+      image: registry-1.docker.io/dashinfer/test-ubuntu-x86:v1
+    needs: Build
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+      with:
+        lfs: true
+        fetch-tags: true
+        
+    - name: Download wheels
+      uses: actions/download-artifact@v4
+      with:
+        name: python-manylinux-wheels-x86
+        path: python/wheelhouse
+        
+    - name: Python manylinux test
+      run: |
+        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
+    
+
+    
