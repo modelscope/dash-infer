@@ -52,7 +52,7 @@ jobs:
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86"\
+        AS_PLATFORM="x86" \
         AS_BUILD_PACKAGE=ON \
         bash build.sh
   
