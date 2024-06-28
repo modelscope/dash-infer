@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e -x
 
+ALL_VERSION="3.8 3.9 3.10 3.11"
+TEST_VERSION=${@:-$ALL_VERSION}
+
+echo " going to test with python version: ${TEST_VERSION}"
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 REPO_ROOT=$( dirname -- "$( dirname -- "${SCRIPT_DIR}" )" )
 
@@ -51,9 +56,8 @@ run_python_example() {
     # conda remove --name "$env_name" --all -y
 }
 
-run_python_example 3.8  2>&1 | tee whl_test_log_py38.txt
-run_python_example 3.9  2>&1 | tee whl_test_log_py39.txt
-run_python_example 3.10 2>&1 | tee whl_test_log_py310.txt
-run_python_example 3.11 2>&1 | tee whl_test_log_py311.txt
+for python_verison in $TEST_VERSION; do
+    run_python_example $python_version  2>&1 | tee whl_test_log_py${python_version//.}.txt
+done
 
 popd
