@@ -17,6 +17,7 @@ jobs:
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
         AS_PLATFORM="x86"\
         AS_BUILD_PACKAGE=ON \
@@ -42,6 +43,7 @@ jobs:
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
         AS_PLATFORM="x86"\
         AS_BUILD_PACKAGE=ON \
