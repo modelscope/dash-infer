@@ -56,7 +56,7 @@ run_python_example() {
     # conda remove --name "$env_name" --all -y
 }
 
-for python_verison in $TEST_VERSION; do
+for python_version in $TEST_VERSION; do
     run_python_example $python_version  2>&1 | tee whl_test_log_py${python_version//.}.txt
 done
 
