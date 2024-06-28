@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e -x
 
+ALL_VERSION="3.8 3.9 3.10 3.11"
+BUILD_VERSION=${@:-$ALL_VERSION}
+
+echo " going to build python wheels with version: ${BUILD_VERSION}"
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 REPO_ROOT=$( dirname -- "$( dirname -- "${SCRIPT_DIR}" )" )
 
@@ -64,10 +69,10 @@ build_wheel_for_python() {
 
 mkdir -p ${REPO_ROOT}/python/wheelhouse/
 
-build_wheel_for_python 3.8  2>&1 | tee whl_build_log_py38.txt
-build_wheel_for_python 3.9  2>&1 | tee whl_build_log_py39.txt
-build_wheel_for_python 3.10 2>&1 | tee whl_build_log_py310.txt
-build_wheel_for_python 3.11 2>&1 | tee whl_build_log_py311.txt
+for python_version in $BUILD_VERSION; do
+    build_wheel_for_python ${python_version}  2>&1 | tee whl_build_log_py${python_version//.}.txt
+done
+
 
 # Bundle external shared libraries into the wheels
 for whl in ${REPO_ROOT}/python/wheelhouse/*.whl; do
