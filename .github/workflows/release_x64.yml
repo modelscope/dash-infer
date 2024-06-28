@@ -32,7 +32,7 @@ jobs:
       image: registry-1.docker.io/dashinfer/test-ubuntu-x86:v1
       volumes:
         - /mnt/data0/models/modelscope:/root/.cache/modelscope
-      options: "--network=host --ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
+      options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
     needs: Build
     steps:
     - name: Check out code
