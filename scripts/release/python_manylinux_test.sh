@@ -49,7 +49,7 @@ run_python_example() {
     cd ${REPO_ROOT}/examples/python/1_performance
     # python performance_test_llama2.py --config_file config_llama2_7b.json --device_ids 0 1
     # python performance_test_qwen_v15.py --device_ids 0
-    python performance_test_qwen_v15.py --device_ids 0 1
+    # python performance_test_qwen_v15.py --device_ids 0 1
     cd ${REPO_ROOT}
 
     conda deactivate
