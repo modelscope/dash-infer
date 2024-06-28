@@ -6,7 +6,7 @@ jobs:
   build-deb:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
-      image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86
+      image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
     steps:
     - name: Check out code
       uses: actions/checkout@v2
@@ -32,7 +32,7 @@ jobs:
   build-rpm:
     runs-on: [self-hosted, Linux, X64, spr, sg]
     container:
-      image: registry-1.docker.io/dashinfer/dev-centos7-x86
+      image: registry-1.docker.io/dashinfer/dev-centos7-x86:v1
     steps:
     - name: Check out code
       uses: actions/checkout@v2
