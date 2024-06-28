@@ -3,39 +3,39 @@ name: Build & Test Wheels (x86)
 on: [push]
 
 jobs:
-  build-deb:
-    runs-on: [self-hosted, Linux, X64, spr, sg]
-    container:
-      image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-      with:
-        lfs: true
-        fetch-tags: true
+  # build-deb:
+  #   runs-on: [self-hosted, Linux, X64, spr, sg]
+  #   container:
+  #     image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
+  #   defaults:
+  #     run:
+  #       shell: bash -l {0}
+  #   steps:
+  #   - name: Check out code
+  #     uses: actions/checkout@v2
+  #     with:
+  #       lfs: true
+  #       fetch-tags: true
         
-    - name: Pull LFS
-      run: |
-        git lfs pull
+  #   - name: Pull LFS
+  #     run: |
+  #       git lfs pull
         
-    - name: Build deb package
-      run: |
-        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        source activate ds_py
-        AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86" \
-        AS_BUILD_PACKAGE=ON \
-        bash build.sh
+  #   - name: Build deb package
+  #     run: |
+  #       TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+  #       VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+  #       source activate ds_py
+  #       AS_RELEASE_VERSION=$VERSION_NUMBER \
+  #       AS_PLATFORM="x86" \
+  #       AS_BUILD_PACKAGE=ON \
+  #       bash build.sh
         
-    - name: Upload deb package
-      uses: actions/upload-artifact@v3
-      with:
-        name: ubuntu-deb
-        path: build/*.deb
+  #   - name: Upload deb package
+  #     uses: actions/upload-artifact@v3
+  #     with:
+  #       name: ubuntu-deb
+  #       path: build/*.deb
 
   build-rpm:
     runs-on: [self-hosted, Linux, X64, spr, sg]
@@ -59,6 +59,7 @@ jobs:
       run: |
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        source /opt/rh/devtoolset-7/enable
         source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
         AS_PLATFORM="x86" \
