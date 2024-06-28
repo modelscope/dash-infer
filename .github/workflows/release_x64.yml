@@ -31,7 +31,7 @@ jobs:
     container:
       image: registry-1.docker.io/dashinfer/test-ubuntu-x86:v1
       volumes:
-        - /mnt/data0/models/modelscope:$GITHUB_HOME/.cache/modelscope
+        - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
       options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
     needs: Build
     steps:
