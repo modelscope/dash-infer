@@ -167,7 +167,7 @@ setup(name="dashinfer",
       ext_modules=[CMakeExtension("_allspark")],
       cmdclass={"build_ext": CMakeBuild},
       setup_requires=["jinja2"],
-      install_requires=["protobuf==3.18"],
+      install_requires=["protobuf==3.18.3"],
       zip_safe=False,
       python_requires=">=3.8",
       extra_compile_args=["-O3"])

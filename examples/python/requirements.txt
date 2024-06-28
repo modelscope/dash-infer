@@ -4,6 +4,7 @@ huggingface_hub
 modelscope
 gradio
 tabulate
+py-cpuinfo
 
 # model requirements
 sentencepiece

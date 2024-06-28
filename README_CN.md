@@ -181,7 +181,7 @@ $$ x_{u8} = x_{fp32} / scale + zeropoint $$
 
 ## 模型推理阶段
 
-- [protobuf](https://protobuf.dev/)(3.18): For parsing model files.
+- [protobuf](https://protobuf.dev/)(3.18.3): For parsing model files.
 - [pybind11](https://github.com/pybind/pybind11)(2.8): For binding python interfaces.
 - [onednn](https://github.com/oneapi-src/oneDNN), [mkl](https://www.intel.com/content/www/us/en/docs/onemkl/get-started-guide/2023-0/overview.html): BLAS libraries, for accelerating GEMM calculations.
 - [openmp](https://www.openmp.org/): A standard parallel programming library.
