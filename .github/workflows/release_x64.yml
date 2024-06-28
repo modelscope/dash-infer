@@ -11,7 +11,6 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v2
       with:
-        lfs: true
         fetch-tags: true
         
     - name: Build deb package
@@ -35,9 +34,8 @@ jobs:
       image: registry-1.docker.io/dashinfer/dev-centos7-x86:v1
     steps:
     - name: Check out code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v1
       with:
-        lfs: true
         fetch-tags: true
         
     - name: Build rpm package
