@@ -40,10 +40,10 @@ jobs:
     strategy:
       matrix:
         os: [spr, yitian]
-        image: ["dev-centos7-x86:v1", "dev-manylinux-arm:v1"]
+        image: ["dev-centos7-x86:v1", "dev-alinux-arm:v1"]
         exclude:
           - os: spr
-            image: "dev-manylinux-arm:v1"
+            image: "dev-alinux-arm:v1"
           - os: yitian
             image: "dev-centos7-x86:v1"
     runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
