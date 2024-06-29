@@ -33,58 +33,25 @@ jobs:
   #   - name: Upload deb package
   #     uses: actions/upload-artifact@v3
   #     with:
-  #       name: ubuntu-deb
+  #       name: dashinfer-deb
   #       path: build/*.deb
 
-  build-rpm:
-    strategy:
-      matrix:
-        os: [spr, yitian]
-        image: ["dev-centos7-x86:v1", "dev-alinux-arm:v1"]
-        exclude:
-          - os: spr
-            image: "dev-alinux-arm:v1"
-          - os: yitian
-            image: "dev-centos7-x86:v1"
-    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
-    container:
-      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-      with:
-        lfs: true
-        fetch-tags: true
-        
-    - name: Pull LFS
-      run: |
-        git lfs pull
-        
-    - name: Build rpm package
-      run: |
-        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        source /opt/rh/devtoolset-7/enable
-        source activate ds_py
-        AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86" \
-        AS_BUILD_PACKAGE=ON \
-        bash build.sh
-  
-    - name: Upload rpm package
-      uses: actions/upload-artifact@v3
-      with:
-        name: centos-rpm
-        path: build/*.rpm
-      
-
-  # build-wheels:
-  #   runs-on: [self-hosted, Linux, X64, spr, sg]
+  # build-rpm:
+  #   strategy:
+  #     matrix:
+  #       os: [spr, yitian]
+  #       image: ["dev-centos7-x86:v1", "dev-alinux-arm:v1"]
+  #       exclude:
+  #         - os: spr
+  #           image: "dev-alinux-arm:v1"
+  #         - os: yitian
+  #           image: "dev-centos7-x86:v1"
+  #   runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
   #   container:
-  #     image: registry-1.docker.io/dashinfer/dev-manylinux-x86:v1
+  #     image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+  #   defaults:
+  #     run:
+  #       shell: bash -l {0}
   #   steps:
   #   - name: Check out code
   #     uses: actions/checkout@v2
@@ -92,41 +59,92 @@ jobs:
   #       lfs: true
   #       fetch-tags: true
         
-  #   - name: Build manylinux wheels
+  #   - name: Pull LFS
+  #     run: |
+  #       git lfs pull
+        
+  #   - name: Build rpm package
   #     run: |
   #       TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
   #       VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-  #       AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh
-
-  #   - name: Upload wheels
+  #       source /opt/rh/devtoolset-7/enable
+  #       source activate ds_py
+  #       AS_RELEASE_VERSION=$VERSION_NUMBER \
+  #       AS_PLATFORM="x86" \
+  #       AS_BUILD_PACKAGE=ON \
+  #       bash build.sh
+  
+  #   - name: Upload rpm package
   #     uses: actions/upload-artifact@v3
   #     with:
-  #       name: python-manylinux-wheels-x86
-  #       path: python/wheelhouse/*.manylinux2014_x86_64.whl
+  #       name: dashinfer-rpm
+  #       path: build/*.rpm
+      
+
+  build-wheels:
+    strategy:
+      matrix:
+        os: [spr, yitian]
+        image: ["dev-manylinux-x86:v1", "dev-manylinux-arm:v1"]
+        exclude:
+          - os: spr
+            image: "dev-manylinux-arm:v1"
+          - os: yitian
+            image: "dev-manylinux-x86:v1"
+    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
+    container:
+      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+      with:
+        lfs: true
+        fetch-tags: true
         
-  # test:
-  #   runs-on: [self-hosted, Linux, X64, spr, sg]
-  #   container:
-  #     image: registry-1.docker.io/dashinfer/test-ubuntu-x86:v1
-  #     volumes:
-  #       - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
-  #     options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
-  #   needs: build-wheels
-  #   steps:
-  #   - name: Check out code
-  #     uses: actions/checkout@v2
+    - name: Build manylinux wheels
+      run: |
+        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh 3.8
+
+    - name: Upload wheels
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-manylinux-wheels-x86
+        path: python/wheelhouse/*.manylinux2014_x86_64.whl
         
-  #   - name: Download wheels
-  #     uses: actions/download-artifact@v3
-  #     with:
-  #       name: python-manylinux-wheels-x86
-  #       path: python/wheelhouse
+  test:
+    strategy:
+      matrix:
+        os: [spr, yitian]
+        image: ["test-ubuntu-x86:v1", "test-centos-arm:v1"]
+        exclude:
+          - os: spr
+            image: "test-centos-arm:v1"
+          - os: yitian
+            image: "test-ubuntu-x86:v1"
+    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
+    container:
+      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+      volumes:
+        - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
+      options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
+    needs: build-wheels
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
         
-  #   - name: Test manylinux wheels
-  #     run: |
-  #       TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-  #       VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-  #       AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
+    - name: Download wheels
+      uses: actions/download-artifact@v3
+      with:
+        name: python-manylinux-wheels-x86
+        path: python/wheelhouse
+        
+    - name: Test manylinux wheels
+      run: |
+        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh 3.8
     
 
     
