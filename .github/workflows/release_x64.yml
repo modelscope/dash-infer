@@ -40,12 +40,12 @@ jobs:
     strategy:
       matrix:
         os: [spr, yitian]
-        image: ["dev-centoer7-x86:v1", "dev-manylinux-arm:v1"]
+        image: ["dev-centos7-x86:v1", "dev-manylinux-arm:v1"]
         exclude:
           - os: spr
             image: "dev-manylinux-arm:v1"
           - os: yitian
-            image: "dev-centoer7-x86:v1"
+            image: "dev-centos7-x86:v1"
     runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
