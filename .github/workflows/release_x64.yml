@@ -14,7 +14,6 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v2
       with:
-        lfs: true
         fetch-tags: true
         
     - name: Pull LFS
