@@ -16,8 +16,6 @@ jobs:
     steps:
     - name: Check out code
       uses: actions/checkout@v3
-      with:
-        fetch-tags: true
         
     - name: Pull LFS
       run: |
@@ -25,6 +23,7 @@ jobs:
         
     - name: Build deb package
       run: |
+        git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         source activate ds_py
@@ -60,7 +59,6 @@ jobs:
       uses: actions/checkout@v3
       with:
         lfs: true
-        fetch-tags: true
         
     - name: Pull LFS
       run: |
@@ -68,6 +66,7 @@ jobs:
         
     - name: Build rpm package
       run: |
+        git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         source /opt/rh/devtoolset-7/enable
@@ -102,10 +101,10 @@ jobs:
       uses: actions/checkout@v3
       with:
         lfs: true
-        fetch-tags: true
         
     - name: Build manylinux wheels
       run: |
+        git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh
