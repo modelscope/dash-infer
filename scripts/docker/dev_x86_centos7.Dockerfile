@@ -57,6 +57,6 @@ RUN conda install -y pybind11
 
 # engine requirements
 RUN conda install -y pytorch-cpu -c pytorch
-RUN pip3 install transformers==4.38.0 protobuf==3.18.0 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
+RUN pip3 install transformers==4.38.0 protobuf==3.18.3 conan==1.60.0 pytest tokenizers scons wheel pandas tabulate
 
 WORKDIR /root/

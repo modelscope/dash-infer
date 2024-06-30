@@ -242,6 +242,33 @@ class EngineHelper():
             return False
         return True
 
+    def _caniuse_bf16_gemm(self):
+        import cpuinfo
+        import platform
+        def get_architecture():
+            arch = platform.machine()
+            if arch.lower().startswith('arm') or arch.lower().startswith('aarch'):
+                return "ARM"
+            elif arch.lower().startswith('x86') or arch.lower().startswith('i686') or arch.lower().startswith('i386') or arch.lower().startswith('amd64'):
+                return "x86"
+            else:
+                return "Unknown"
+
+        def mayiuse_instruction_set(istrset):
+            info = cpuinfo.get_cpu_info()
+            flags = info.get('flags', [])
+            rt = istrset in flags
+            if rt == False:
+                raise ValueError(f"[Error] Current CPU does not support instruction set: {istrset}\n")
+
+        arch = get_architecture()
+        if arch == "ARM":
+            mayiuse_instruction_set("sve")
+        elif arch == "x86":
+            mayiuse_instruction_set("avx512_bf16")
+        else:
+            raise Exception("[Error] Unknown CPU platform\n")
+
     def init_engine(self):
 
         def get_physical_cores_per_numa_node():
@@ -274,7 +301,7 @@ class EngineHelper():
         begin = time.time()
 
         if self.check_model_exist() == False:
-            exit(-1)
+            sys.exit(-1)
 
         as_model_config = allspark.AsModelConfig(
             model_name=self.model_name,
@@ -299,6 +326,16 @@ class EngineHelper():
             as_model_config.num_threads = self.engine_config["num_threads"]
         else:
             as_model_config.num_threads = get_physical_cores_per_numa_node()
+
+        if self.engine_config["matmul_precision"] != "highest":
+            try:
+                self._caniuse_bf16_gemm()
+            except ValueError as e:
+                print(f"{str(e)} You need to set the `matmul_precision` field in the config_xxx.json file to `highest`")
+                exit(-1)
+            except Exception as e:
+                print(f"{str(e)}")
+                exit(-1)
 
         as_model_config.matmul_precision = self.engine_config[
             "matmul_precision"]
@@ -504,7 +541,7 @@ class EngineHelper():
                         request.out_text = ""
 
                     if (len(new_ids) > 0):
-                        output_ids.append(new_ids[0])
+                        output_ids.extend(new_ids)
 
                     request.out_tokens = output_ids
                     request.out_tokens_len = len(output_ids)

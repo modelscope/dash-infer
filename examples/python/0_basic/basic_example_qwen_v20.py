@@ -139,7 +139,7 @@ if __name__ == '__main__':
     ## download model from huggingface
     # original_model = {
     #     "source": "huggingface",
-    #     "model_id": "Qwen/Qwen2-1.5B",
+    #     "model_id": "Qwen/Qwen2-1.5B-Instruct",
     #     "revision": "",
     #     "model_path": ""
     # }
@@ -147,7 +147,7 @@ if __name__ == '__main__':
     ## download model from modelscope
     original_model = {
         "source": "modelscope",
-        "model_id": "qwen/Qwen2-1.5B",
+        "model_id": "qwen/Qwen2-1.5B-Instruct",
         "revision": "master",
         "model_path": ""
     }

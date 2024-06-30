@@ -1,5 +1,5 @@
 [requires]
-  protobuf/3.18.1
+  protobuf/3.18.3
   gtest/1.11.0
   glog/0.5.0
   libunwind/1.7.2
