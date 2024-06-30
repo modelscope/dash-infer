@@ -1,4 +1,4 @@
-name: Build & Test Wheels (x86)
+name: Release Packages
 
 on:
  create:
