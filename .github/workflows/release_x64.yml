@@ -110,8 +110,8 @@ jobs:
     - name: Upload wheels
       uses: actions/upload-artifact@v3
       with:
-        name: python-manylinux-wheels-x86
-        path: python/wheelhouse/*.manylinux2014_x86_64.whl
+        name: python-manylinux-wheels-${{ matrix.os }}
+        path: python/wheelhouse/*-manylinux*.whl
         
   test:
     strategy:
@@ -137,7 +137,7 @@ jobs:
     - name: Download wheels
       uses: actions/download-artifact@v3
       with:
-        name: python-manylinux-wheels-x86
+        name: python-manylinux-wheels-${{ matrix.os }}
         path: python/wheelhouse
         
     - name: Test manylinux wheels
