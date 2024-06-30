@@ -80,7 +80,7 @@ jobs:
     - name: Upload rpm package
       uses: actions/upload-artifact@v3
       with:
-        name: dashinfer-rpm
+        name: dashinfer-rpm-${{ matrix.os }}
         path: build/*.rpm
       
 
