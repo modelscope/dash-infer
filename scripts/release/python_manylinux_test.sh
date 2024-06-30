@@ -1,9 +1,16 @@
 #!/bin/bash
 set -e -x
 
-source activate test_py
+ALL_VERSION="3.8 3.9 3.10 3.11"
+TEST_VERSION=${@:-$ALL_VERSION}
 
-root_path=/root/workspace/DashInfer
+echo " going to test with python version: ${TEST_VERSION}"
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+REPO_ROOT=$( dirname -- "$( dirname -- "${SCRIPT_DIR}" )" )
+
+source activate test_py
+pushd $SCRIPT_DIR
 
 run_python_example() {
     local python_version=$1
@@ -27,29 +34,30 @@ run_python_example() {
         conda install -y pytorch-cpu -c pytorch
     fi
 
-    pip install -r ${root_path}/examples/python/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
-    pip install ${root_path}/python/wheelhouse/dashinfer-${AS_RELEASE_VERSION}-cp${python_version//.}-cp${python_version//.}-manylinux*.whl
+    pip install -r ${REPO_ROOT}/examples/python/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+    pip install ${REPO_ROOT}/python/wheelhouse/dashinfer-${AS_RELEASE_VERSION}-cp${python_version//.}-cp${python_version//.}-manylinux*.whl
 
-    cd ${root_path}/examples/python/0_basic
+    cd ${REPO_ROOT}/examples/python/0_basic
     # python basic_example_chatglm2.py
     # python basic_example_chatglm3.py
     # python basic_example_llama2.py
     python basic_example_qwen_v10.py
     python basic_example_qwen_v15.py
     # python basic_example_qwen_v20.py
-    cd ${root_path}
+    cd ${REPO_ROOT}
 
-    cd ${root_path}/examples/python/1_performance
+    cd ${REPO_ROOT}/examples/python/1_performance
     # python performance_test_llama2.py --config_file config_llama2_7b.json --device_ids 0 1
     # python performance_test_qwen_v15.py --device_ids 0
-    python performance_test_qwen_v15.py --device_ids 0 1
-    cd ${root_path}
+    python performance_test_qwen_v15.py
+    cd ${REPO_ROOT}
 
     conda deactivate
     # conda remove --name "$env_name" --all -y
 }
 
-run_python_example 3.8  2>&1 | tee whl_test_log_py38.txt
-run_python_example 3.9  2>&1 | tee whl_test_log_py39.txt
-run_python_example 3.10 2>&1 | tee whl_test_log_py310.txt
-run_python_example 3.11 2>&1 | tee whl_test_log_py311.txt
+for python_version in $TEST_VERSION; do
+    run_python_example $python_version  2>&1 | tee whl_test_log_py${python_version//.}.txt
+done
+
+popd

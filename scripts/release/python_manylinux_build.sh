@@ -1,9 +1,17 @@
 #!/bin/bash
 set -e -x
 
-source activate ds_py
+ALL_VERSION="3.8 3.9 3.10 3.11"
+BUILD_VERSION=${@:-$ALL_VERSION}
 
-repo_root=/root/workspace/DashInfer
+echo " going to build python wheels with version: ${BUILD_VERSION}"
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+REPO_ROOT=$( dirname -- "$( dirname -- "${SCRIPT_DIR}" )" )
+
+source activate ds_py
+pushd $SCRIPT_DIR
+
 
 # 捕获arch命令的输出
 architecture=$(arch)
@@ -31,7 +39,7 @@ function repair_wheel {
         echo "Skipping non-platform wheel $wheel"
     else
         # TODO: add lib path to build lib path
-        auditwheel repair "$wheel" --plat "$PLAT" -w ${repo_root}/python/wheelhouse/
+        auditwheel repair "$wheel" --plat "$PLAT" -w ${REPO_ROOT}/python/wheelhouse/
     fi
 }
 
@@ -49,9 +57,9 @@ build_wheel_for_python() {
     conda activate "$env_name"
     conda install pybind11 -y
 
-    pip install -r ${repo_root}/python/dev-requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
-    python ${repo_root}/python/setup.py bdist_wheel
-    pip wheel ${repo_root}/python --no-deps -w ${repo_root}/python/wheelhouse/ --log wheel_log.txt
+    pip install -r ${REPO_ROOT}/python/dev-requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+    python ${REPO_ROOT}/python/setup.py bdist_wheel
+    pip wheel ${REPO_ROOT}/python --no-deps -w ${REPO_ROOT}/python/wheelhouse/ --log wheel_log.txt
 
     conda deactivate
     # conda remove --name "$env_name" --all -y
@@ -59,16 +67,17 @@ build_wheel_for_python() {
 
 # rm -rf build
 
-mkdir -p ${repo_root}/python/wheelhouse/
+mkdir -p ${REPO_ROOT}/python/wheelhouse/
 
-build_wheel_for_python 3.8  2>&1 | tee whl_build_log_py38.txt
-build_wheel_for_python 3.9  2>&1 | tee whl_build_log_py39.txt
-build_wheel_for_python 3.10 2>&1 | tee whl_build_log_py310.txt
-build_wheel_for_python 3.11 2>&1 | tee whl_build_log_py311.txt
+for python_version in $BUILD_VERSION; do
+    build_wheel_for_python ${python_version}  2>&1 | tee whl_build_log_py${python_version//.}.txt
+done
+
 
 # Bundle external shared libraries into the wheels
-for whl in ${repo_root}/python/wheelhouse/*.whl; do
+for whl in ${REPO_ROOT}/python/wheelhouse/*.whl; do
     repair_wheel "$whl"
 done
 
 echo "Build finished, please check in wheelhouse/* for manylinux whl package"
+popd
