@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-deb:
-    runs-on: [self-hosted, Linux, X64, spr, sg]
+    runs-on: [self-hosted, Linux, X64]
     container:
       image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
     defaults:
@@ -41,14 +41,14 @@ jobs:
   build-rpm:
     strategy:
       matrix:
-        os: [spr, yitian]
+        arch: [X64, ARM64]
         image: ["dev-centos7-x86:v1", "dev-alinux-arm:v1"]
         exclude:
-          - os: spr
+          - arch: X64
             image: "dev-alinux-arm:v1"
-          - os: yitian
+          - arch: ARM64
             image: "dev-centos7-x86:v1"
-    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
+    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
     defaults:
@@ -79,21 +79,21 @@ jobs:
     - name: Upload rpm package
       uses: actions/upload-artifact@v3
       with:
-        name: dashinfer-rpm-${{ matrix.os }}
+        name: dashinfer-rpm-${{ matrix.arch }}
         path: build/*.rpm
       
 
   build-wheels:
     strategy:
       matrix:
-        os: [spr, yitian]
+        arch: [X64, ARM64]
         image: ["dev-manylinux-x86:v1", "dev-manylinux-arm:v1"]
         exclude:
-          - os: spr
+          - arch: X64
             image: "dev-manylinux-arm:v1"
-          - os: yitian
+          - arch: ARM64
             image: "dev-manylinux-x86:v1"
-    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
+    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
     steps:
@@ -112,20 +112,20 @@ jobs:
     - name: Upload wheels
       uses: actions/upload-artifact@v3
       with:
-        name: python-manylinux-wheels-${{ matrix.os }}
+        name: python-manylinux-wheels-${{ matrix.arch }}
         path: python/wheelhouse/*-manylinux*.whl
         
   test:
     strategy:
       matrix:
-        os: [spr, yitian]
+        arch: [X64, ARM64]
         image: ["test-ubuntu-x86:v1", "test-centos-arm:v1"]
         exclude:
-          - os: spr
+          - arch: X64
             image: "test-centos-arm:v1"
-          - os: yitian
+          - arch: ARM64
             image: "test-ubuntu-x86:v1"
-    runs-on: [self-hosted, Linux, "${{ matrix.os }}", sg]
+    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
       volumes:
@@ -139,7 +139,7 @@ jobs:
     - name: Download wheels
       uses: actions/download-artifact@v3
       with:
-        name: python-manylinux-wheels-${{ matrix.os }}
+        name: python-manylinux-wheels-${{ matrix.arch }}
         path: python/wheelhouse
         
     - name: Test manylinux wheels
