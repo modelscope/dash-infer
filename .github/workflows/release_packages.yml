@@ -1,9 +1,13 @@
 name: Release Packages
 
 on:
- create:
+ push:
    tags:
      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# Needed to create release and upload assets
+permissions:
+  contents: write
 
 jobs:
   build-deb:
@@ -147,6 +151,36 @@ jobs:
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
         AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
+
+  publish:
+    runs-on: [self-hosted, Linux]
+    needs: [build-deb, build-rpm, test]
+    strategy:
+      matrix:
+        arch: [X64, ARM64]
+    steps:
+    - name: Download deb packages
+      uses: actions/download-artifact@v3
+      with:
+        name: dashinfer-deb
+        path: release/
+      
+    - name: Download rpm packages
+      uses: actions/download-artifact@v3
+      with:
+        name: dashinfer-rpm-${{ matrix.arch }}
+        path: release/
+
+    - name: Download python wheels
+      uses: actions/download-artifact@v3
+      with:
+        name: python-manylinux-wheels-${{ matrix.arch }}
+        path: release/
+
+    - name: Release all packages
+      uses: softprops/action-gh-release@v2
+      with:
+        files: release/*
     
 
     
