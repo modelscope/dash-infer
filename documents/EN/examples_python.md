@@ -297,6 +297,66 @@ Running on local URL:  http://127.0.0.1:7860
 To create a public link, set `share=True` in `launch()`.
 ```
 
+# 4_fastchat
+[FastChat](https://github.com/lm-sys/FastChat) is an open-source platform designed for training, serving, and evaluating large language model chatbots. It facilitates integrating an inference engine backend into the platform in a worker-based manner, providing services compatible with the OpenAI API.
+
+In the [examples/python/4_fastchat/dashinfer_worker.py](../../examples/python/4_fastchat/dashinfer_worker.py) file, we supply a sample code demonstrating the implementation of a worker using FastChat and DashInfer. Users can readily substitute the default `fastchat.serve.model_worker` in the FastChat service component with `dashinfer_worker`, thereby achieving a solution that is not only compatible with the OpenAI API but also optimizes CPU usage for efficient inference.
+
+## Step 1: Install FastChat
+```shell
+pip install "fschat[model_worker]"
+```
+
+## Step 2: Start FastChat Services
+```shell
+python -m fastchat.serve.controller
+python -m fastchat.serve.openai_api_server --host localhost --port 8000
+```
+
+## Step 3: Launch dashinfer_worker
+```shell
+python dashinfer_worker.py --model-path qwen/Qwen-7B-Chat ../model_config/config_qwen_v10_7b.json
+```
+
+## Step 4: Send HTTP Request via cURL to Access OpenAI API-Compatible Endpoint
+```shell
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen-7B-Chat",
+    "messages": [{"role": "user", "content": "Hello! What is your name?"}]
+  }'
+```
+
+## Quick Start with Docker
+Furthermore, we provide a convenient Docker image, enabling rapid deployment of an HTTP service that integrates dashinfer_worker and is compatible with the OpenAI API. Execute the following command, ensuring to replace bracketed paths with actual paths:
+
+```shell
+docker run -d \
+    --network host \
+    -v <host_path_to_your_model>:<container_path_to_your_model> \
+    -v <host_path_to_dashinfer_json_config_file>:<container_path_to_dashinfer_json_config_file> \
+    dashinfer/fschat_ubuntu_x86:v1.2.1 \
+    <container_path_to_your_model> \
+    <container_path_to_dashinfer_json_config_file>
+```
+- `<host_path_to_your_model>`: The path on the host where ModelScope/HuggingFace models reside.
+- `<container_path_to_your_model>`: The path within the container for mounting ModelScope/HuggingFace models.
+- `<host_path_to_dashinfer_json_config_file>`: The location of the DashInfer JSON configuration file on the host.
+- `<container_path_to_dashinfer_json_config_file>`: The destination path in the container for the DashInfer JSON configuration file.
+- The `-m` flag denotes the path to ModelScope/HuggingFace within the container, which is determined by the host-to-container path binding specified in `-v`. If this refers to a standard ModelScope/HuggingFace path (e.g., `qwen/Qwen-7B-Chat`), there's no need to bind the model path from the host; the container will automatically download the model for you.
+
+Below is an example of launching a Qwen-7B-Chat model service, with the default host set to localhost and the port to 8000.
+```shell
+docker run -d \
+    --network host \
+    -v ~/.cache/modelscope/hub/qwen/Qwen-7B-Chat:/workspace/qwen/Qwen-7B-Chat  \
+    -v examples/python/model_config/config_qwen_v10_7b.json:/workspace/config_qwen_v10_7b.json \
+    dashinfer/fschat_ubuntu_x86:v1.2.1 \
+    /workspace/qwen/Qwen-7B-Chat \
+    /workspace/config_qwen_v10_7b.json
+```
+
 # Model Configuration Files
 
 The `<path_to_dashinfer>/examples/python/model_config` directory provides several configuration examples.

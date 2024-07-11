@@ -296,7 +296,67 @@ Running on local URL:  http://127.0.0.1:7860
 
 To create a public link, set `share=True` in `launch()`.
 ```
+# 4_fastchat
 
+[fastchat](https://github.com/lm-sys/FastChat)是一个开源的服务平台, 用于训练、服务和评估大语言模型聊天机器人。它提供以worker方式将一个推理引擎后端接入平台，提供兼容openai api的服务。
+在[examples/python/4_fastchat/dashinfer_worker.py](../../examples/python/4_fastchat/dashinfer_worker.py)中，我们提供了一个使用FastChat与DashInfer实现worker的示例代码。用户仅需简单地将FastChat服务组件中的默认`fastchat.serve.model_worker`替换为`dashinfer_worker`，即可实现一个既兼容OpenAI API又能高效利用CPU资源进行推理的解决方案。
+
+
+## Step 1: 安装fastchat
+```shell
+pip install "fschat[model_worker]"
+```
+## Step 2: 启动fastchat相关服务
+```shell
+python -m fastchat.serve.controller
+python -m fastchat.serve.openai_api_server --host localhost --port 8000
+```
+
+## Step 3: 启动dashinfer_worker
+```shell
+python dashinfer_worker.py --model-path qwen/Qwen-7B-Chat ../model_config/config_qwen_v10_7b.json
+```
+
+## Step 4: 使用cURL发送HTTP请求访问兼容openai api接口
+```shell
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen-7B-Chat",
+    "messages": [{"role": "user", "content": "Hello! What is your name?"}]
+  }'
+```
+## 使用Docker快速启动
+此外，我们还提供了便捷的Docker镜像，使您能够快速部署一个集成dashinfer_worker并兼容OpenAI API的HTTP服务，只需执行以下命令：
+
+启动Docker容器时，请确保替换尖括号内的路径为实际路径，并遵循以下命令格式：
+```shell
+docker run -d \
+    --network host \
+    -v <host_path_to_your_model>:<container_path_to_your_model> \
+    -v <host_path_to_dashinfer_json_config_file>:<container_path_to_dashinfer_json_config_file> \
+    dashinfer/fschat_ubuntu_x86:v1.2.1 \
+   -m <container_path_to_your_model> \
+    <container_path_to_dashinfer_json_config_file>
+```
+
+- <host_path_to_your_model>: host上存放ModelScope/HuggingFace模型的路径
+- <container_path_to_your_model>: 要绑定到container中存放ModelScope/HuggingFace模型的路径
+- <host_path_to_dashinfer_json_config_file>: host上DashInfer的json配置文件的路径
+- <container_path_to_dashinfer_json_config_file>: 要绑定到container中DashInfer json配置文件的路径
+- -m选项：表示container中ModelScope/HuggingFace的路径，取决于-v选项中host上路径绑定到container中的路径。若这里为ModelScope/HuggingFace中标准路径（例如：
+qwen/Qwen-7B-Chat），那么不需要将host上模型路径绑定到container中，容器会自动为你下载模型。
+
+下面是一个启动Qwen-7B-Chat模型服务的例子，默认host为localhost、端口为8000.
+```shell
+docker run -d \
+    --network host \
+    -v ~/.cache/modelscope/hub/qwen/Qwen-7B-Chat:/workspace/qwen/Qwen-7B-Chat  \
+    -v examples/python/model_config/config_qwen_v10_7b.json:/workspace/config_qwen_v10_7b.json \
+    dashinfer/fschat_ubuntu_x86:v1.2.1 \
+    -m /workspace/qwen/Qwen-7B-Chat \
+    /workspace/config_qwen_v10_7b.json
+```
 # 模型配置文件
 
 `<path_to_dashinfer>/examples/python/model_config`目录下提供了一些config示例。
