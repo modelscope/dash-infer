@@ -357,6 +357,8 @@ docker run -d \
     /workspace/config_qwen_v10_7b.json
 ```
 
+You can also use [openai_chat.py](../../examples/python/4_fastchat/openai_chat.py) to test the chat client using the OpenAI API.
+
 # Model Configuration Files
 
 The `<path_to_dashinfer>/examples/python/model_config` directory provides several configuration examples.
