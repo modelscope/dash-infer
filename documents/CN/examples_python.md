@@ -357,6 +357,9 @@ docker run -d \
     -m /workspace/qwen/Qwen-7B-Chat \
     /workspace/config_qwen_v10_7b.json
 ```
+
+你还可以使用[openai_chat.py](../../examples/python/4_fastchat/openai_chat.py)来测试使用openai api的聊天客户端。
+
 # 模型配置文件
 
 `<path_to_dashinfer>/examples/python/model_config`目录下提供了一些config示例。
