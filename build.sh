@@ -2,28 +2,11 @@ set -x
 
 clean="OFF"
 
-# 捕获arch命令的输出
-architecture=$(arch)
-
-# 使用if-else结构进行条件判断
-if [ "${architecture}" == "aarch64" ]; then
-    export AS_PLATFORM=armclang
-else
-    export AS_PLATFORM=x86
-fi
-
-if [ -z "$AS_PLATFORM" ];
-then
-	echo " please set AS_PLATFORM env, AS_PLATFORM can be x86 or armclang"
-	exit 1
-fi
-
 # with_platform, to support x86/arm build
-with_platform="${AS_PLATFORM}"
+with_platform="${AS_PLATFORM:-x86}"
 build_type="${AS_BUILD_TYPE:-Release}"
 build_package="${AS_BUILD_PACKAGE:-OFF}"
 enable_glibcxx11_abi="${AS_CXX11_ABI:-ON}" # default enable cxx11 ABI
-
 
 function clone_pull {
   GIT_URL=$1

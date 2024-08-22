@@ -25,6 +25,8 @@ class EngineBase:
             "Qwen_v10": Qwen_v10,
             "Qwen_v15": Qwen_v15,
             "Qwen_v20": Qwen_v20,
+            "Baichuan_v2": Baichuan_v2,
+            "Baichuan": Baichuan,
         }
 
         self.version = ""
