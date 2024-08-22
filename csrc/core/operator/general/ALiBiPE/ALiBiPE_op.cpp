@@ -11,15 +11,16 @@
 
 namespace allspark {
 AsStatus cpu_ALiBiPE(DataType dtype, void* out, int* batch_offset, int batch,
-                     int seq_len, int num_heads, int ori_num_heads, int step,
-                     const DeviceContext* ctx) {
+                     int seq_len, int num_heads, int ori_num_heads,
+                     const DeviceContext* ctx, bool is_context,
+                     std::vector<int>& step_list) {
   DLOG(INFO) << "cpu_ALiBiPE" << std::endl;
   const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx);
   auto functor = [&]<typename T>() {
     T* typed_out = static_cast<T*>(out);
     cpu::ALiBiPEKernelLauncher(typed_out, batch_offset, batch, seq_len,
-                               num_heads, ori_num_heads, step,
-                               cpu_ctx->GetRank());
+                               num_heads, ori_num_heads, cpu_ctx->GetRank(),
+                               is_context, step_list);
   };
   DispatchCPU(dtype, functor);
   return AsStatus::ALLSPARK_SUCCESS;
@@ -54,32 +55,56 @@ AsStatus ALiBiPEOp::Init(const OperatorProto& op_proto,
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus ALiBiPEOp::Reshape() {
+AsStatus ALiBiPEOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
-  batch_size_ = in_shape[0];
-  if (gen_ctx_->step == 0) {
+  if (runtime_ctx->is_context == true) {
+    batch_size_ = in_shape[0];
     seq_length_ = in_shape[1];
     Shape out_shape = Shape{batch_size_, seq_length_, num_heads_, seq_length_};
     AS_CHECK_STATUS(
         tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
-  } else {
-    seq_length_ = 1;
   }
-
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus ALiBiPEOp::Forward() {
+AsStatus ALiBiPEOp::runContext(RuntimeContext* runtime_ctx) {
   int* batch_offset = nullptr;
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
-  if (gen_ctx_->step != 0) {
-    Shape out_shape = Shape{batch_size_, 1, num_heads_, gen_ctx_->step + 1};
-    AS_CHECK_STATUS(
-        tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
-  }
+  std::vector<int> step_list;
   kernel_launcher(out_tensor->GetDataType(), out_tensor->GetDataPtr(),
                   batch_offset, batch_size_, seq_length_, num_heads_,
-                  ori_num_heads_, (gen_ctx_->step + 1), ctx_);
+                  ori_num_heads_, ctx_, runtime_ctx->is_context, step_list);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+AsStatus ALiBiPEOp::runDecode(RuntimeContext* runtime_ctx) {
+  int* batch_offset = nullptr;
+  AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
+  int batch_size = runtime_ctx->GetGenCtxListSize();
+  std::vector<int> step_list(batch_size);
+  int max_step = 1;
+  for (int i = 0; i < batch_size; i++) {
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+    if (gen_ctx->step + 1 > max_step) {
+      max_step = gen_ctx->step + 1;
+    }
+    step_list[i] = gen_ctx->step + 1;
+  }
+  Shape out_shape = Shape{batch_size, 1, num_heads_, max_step};
+  AS_CHECK_STATUS(
+      tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
+  kernel_launcher(out_tensor->GetDataType(), out_tensor->GetDataPtr(),
+                  batch_offset, batch_size, max_step, num_heads_,
+                  ori_num_heads_, ctx_, runtime_ctx->is_context, step_list);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+AsStatus ALiBiPEOp::Forward(RuntimeContext* runtime_ctx) {
+  if (runtime_ctx->is_context == true) {
+    runContext(runtime_ctx);
+  } else {
+    runDecode(runtime_ctx);
+  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

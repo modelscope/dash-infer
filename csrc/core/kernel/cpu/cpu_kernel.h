@@ -7,6 +7,7 @@
 #include <common.h>
 #include <stdint.h>
 
+#include <map>
 #include <vector>
 namespace allspark {
 namespace cpu {
@@ -90,7 +91,8 @@ void RelativePEKernel(T* out, const T* attention_bias, int batch_size,
 template <typename T>
 void ALiBiPEKernelLauncher(T* out, int* batch_offset, int batch_size,
                            int seq_length, int num_heads, int ori_num_heads,
-                           int step, int rank);
+                           int rank, bool is_context,
+                           std::vector<int>& step_list);
 template <typename T>
 void MHAKernel(T* out, const T* q, const T* k, const T* v, const float* mask,
                T* score, int beam_size, int batch_size, int num_heads,

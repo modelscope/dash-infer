@@ -1,5 +1,7 @@
 """
 A model worker that executes the model based on dash-infer.
+
+See documentations at docs/dashinfer_integration.md
 """
 
 import argparse

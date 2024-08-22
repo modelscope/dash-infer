@@ -310,8 +310,15 @@ AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
   if (tensor_map_->at(in_names_[1])->GetShape().Count() == 0) {
     mask_buf = nullptr;
   }
-  void* position_embedding =
-      pos_embedding_ ? tensor_map_->at(in_names_[2])->GetDataPtr() : nullptr;
+  void* position_embedding = nullptr;
+  if (pos_embedding_ == true) {
+    const Shape& embedding_shape = tensor_map_->at(in_names_[2])->GetShape();
+    // shape: [batch_size, 1, num_heads, step + 1]
+    // in context phase, 'current_batch' passed by caller will always be 0
+    position_embedding = (char*)tensor_map_->at(in_names_[2])->GetDataPtr() +
+                         current_batch * embedding_shape[2] *
+                             embedding_shape[3] * SizeofType(dtype_);
+  }
   char* score_buf = (char*)(tensor_map_->at("workspace")->GetDataPtr());
   void** q_array = (void**)(score_buf + score_size_);
   void** k_array = q_array + round32(gemm_batch_);
