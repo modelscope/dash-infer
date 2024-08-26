@@ -76,7 +76,7 @@ jobs:
         source /opt/rh/devtoolset-7/enable
         source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86" \
+        AS_PLATFORM=[[ "${{ matrix.arch }}" = "X64" ]] && "x86" || "armclang" \
         AS_BUILD_PACKAGE=ON \
         bash build.sh
   
@@ -103,6 +103,10 @@ jobs:
     steps:
     - name: Check out code
       uses: actions/checkout@v3
+      env:
+        # force use node16 instead of node20
+        # otherwise it may cause GLIBCXX_2.27 not found
+        ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       with:
         lfs: true
         
