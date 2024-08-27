@@ -55,6 +55,10 @@ jobs:
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+    env:
+      # force use node16 instead of node20
+      # otherwise it may cause GLIBCXX_2.27 not found
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     defaults:
       run:
         shell: bash -l {0}
@@ -76,7 +80,7 @@ jobs:
         source /opt/rh/devtoolset-7/enable
         source activate ds_py
         AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86" \
+        AS_PLATFORM=$( [[ "${{ matrix.arch }}" = "X64" ]] && echo "x86" || echo "armclang" ) \
         AS_BUILD_PACKAGE=ON \
         bash build.sh
   
@@ -100,6 +104,10 @@ jobs:
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+    env:
+      # force use node16 instead of node20
+      # otherwise it may cause GLIBCXX_2.27 not found
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     steps:
     - name: Check out code
       uses: actions/checkout@v3

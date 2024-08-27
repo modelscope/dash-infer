@@ -102,13 +102,13 @@ class CMakeBuild(build_ext):
             "cp -f {{cwd_parent}}/conan/conanprofile_armclang.aarch64 ~/.conan/profiles/cxx11abi\n" +
             "cp -r {{cwd_parent}}/conan/settings_arm.yml ~/.conan/settings.yml\n" +
             "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n" +
-            "conan install {{cwd_parent}}/conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil"
+            "conan install {{cwd_parent}}/conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil -b c-ares"
         ).render(libcxx_setting=libcxx_setting, cwd_parent=str(cwd.parent))
 
         conan_install_other = Template(
             "conan profile new cxx11abi --detect --force\n" +
             "conan profile update settings.compiler.libcxx={{libcxx_setting}} cxx11abi\n" +
-            "conan install {{cwd_parent}}/conan/conanfile.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil"
+            "conan install {{cwd_parent}}/conan/conanfile.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil -b c-ares"
         ).render(libcxx_setting=libcxx_setting, cwd_parent=str(cwd.parent))
 
         conan_install_cmd = conan_install_other

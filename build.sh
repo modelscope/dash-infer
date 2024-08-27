@@ -39,7 +39,7 @@ if [ ! -d "./build"  ]; then
       else
         conan profile update settings.compiler.libcxx=libstdc++ cxx11abi
       fi
-      conan install ../conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil
+      conan install ../conan/conanfile_arm.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil -b c-ares
     else
       conan profile new cxx11abi --detect --force
       if [ "$enable_glibcxx11_abi" == "ON" ]; then
@@ -47,7 +47,7 @@ if [ ! -d "./build"  ]; then
       else
         conan profile update settings.compiler.libcxx=libstdc++ cxx11abi
       fi
-      conan install ../conan/conanfile.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil
+      conan install ../conan/conanfile.txt -pr cxx11abi -b missing -b protobuf -b gtest -b openssl -b grpc -b glog -b abseil -b c-ares
     fi
     cd ../
 fi
