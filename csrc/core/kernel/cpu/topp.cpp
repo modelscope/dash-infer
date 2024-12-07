@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    topp.cpp
  */
+
 #include <algorithm>
 
 #include "cpu_common.h"  // NOLINT

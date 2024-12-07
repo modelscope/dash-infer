@@ -53,7 +53,7 @@ void AddScoreLauncher(T* next_score, const T* beam_score, int batch,
 template <typename T>
 void UpdateBeamScoreLauncher(T* beam_score, int64_t* beam_next_token,
                              int* beam_idx, const T* topk_score,
-                             const int64_t* topk_indice, int batch_size,
+                             const int* topk_indice, int batch_size,
                              int beam_size, int vocab_size, int eos,
                              int* eos_count, int* hyps_beam_idx,
                              T* hyps_beam_score, int64_t* hyps_id,
@@ -199,7 +199,7 @@ void UpdateBeamScoreLauncher(T* beam_score, int64_t* beam_next_token,
 
 template void UpdateBeamScoreLauncher<float>(
     float* beam_score, int64_t* beam_next_token, int* beam_idx,
-    const float* topk_score, const int64_t* topk_indice, int batch_size,
+    const float* topk_score, const int* topk_indice, int batch_size,
     int beam_size, int vocab_size, int eos, int* eos_count, int* hyps_beam_idx,
     float* hyps_beam_score, int64_t* hyps_id, int64_t* in_ids, int cur_len,
     int loop_len, float length_penalty);
@@ -410,6 +410,8 @@ void CopyMultiBeam<float>(void* A_, void* B_, int batch_size, int beam_size,
   float* B = static_cast<float*>(B_);
   for (int i = 0; i < batch_size; i++)
     for (int j = 0; j < beam_size; j++) {
+      // memcpy(B + (i * beam_size + j) * inner_dim, A + i * inner_dim,
+      //        inner_dim * sizeof(float));
       for (int k = 0; k < inner_dim; k++) {
         B[(i * beam_size + j) * inner_dim + k] = A[i * inner_dim + k];
       }
@@ -427,5 +429,8 @@ void CopyMultiBeam<int64_t>(void* A_, void* B_, int batch_size, int beam_size,
              inner_dim * sizeof(int64_t));
     }
 }
+// template void CopyMultiBeam<float>(float* A, float* B, int batch_size, int
+// beam_size,
+//                    int inner_dim);
 }  // namespace cpu
 }  // namespace allspark

@@ -1,0 +1,8 @@
+ruamel-yaml
+
+# if want to convert model, more package is required.
+transformers>=4.40.0  #qwen2_moe require 4.40 and more, by baichuan report tokenizer error.:w
+
+modelscope>=1.9.2
+
+safetensors

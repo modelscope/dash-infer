@@ -55,7 +55,7 @@ AsStatus GemmOpARM::InitV2(const OperatorProto& op_proto,
     weights_[0]->SetName(weight_bf16_packed->GetName());
     weights_[0]->SetDataType(DataType::BFLOAT16);
     weights_[0]->SetShape(std::move(weight_packed_shape));
-    TensorUtils::DeepCopyWhole(*weights_[0], *weight_bf16_packed);
+    TensorUtils::DeepCopyWholeAsync(*weights_[0], *weight_bf16_packed, ctx_);
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -88,6 +88,7 @@ AsStatus GemmOpARM::Forward() {
 
     hie::bfloat16* pack_weight_bf16_ptr =
         static_cast<hie::bfloat16*>(weights_[0]->GetDataPtr());
+
     cpu::gemm_kernel_arm(m_, n_, k_, lda_, (float*)in, pack_weight_bf16_ptr,
                          (float*)out, (float*)bias, activation_,
                          static_cast<void*>(ws_ptr));
@@ -106,6 +107,6 @@ void GemmOpARM::PackWeightBf16(const uint32_t N, const uint32_t K,
   cpu::gemm_pack_weight_FP32toBF16_arm(N, K, K_pack, b_fp32, b_bf16);
 }
 
-REGISTER_OP("Gemm", CPU, GemmOpARM)
+REGISTER_OP(Gemm, CPU, GemmOpARM)
 }  // namespace allspark
 #endif

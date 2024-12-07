@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    allspark_logging.cpp
  */
+
 #include "allspark_logging.h"
 
 #include <stdlib.h>
@@ -22,9 +23,9 @@ void as_init_log() {
     fLB::FLAGS_timestamp_in_logfile_name = true;
     fLB::FLAGS_alsologtostderr = false;
     fLI::FLAGS_stderrthreshold = google::ERROR;
-    fLI::FLAGS_logbuflevel = google::WARNING;
+    fLI::FLAGS_logbuflevel = 2;
     fLI::FLAGS_logbufsecs = 5;
-    fLI::FLAGS_max_log_size = 10;
+    fLI::FLAGS_max_log_size = 1024;
 
     const char* log_dir = std::getenv("HIE_LOG_DIR");
     if (not log_dir or std::string(log_dir) == "") {

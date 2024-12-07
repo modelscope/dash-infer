@@ -5,6 +5,10 @@
 
 #include <common/device_context.h>
 #include <cpu/cpu_context.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+
 using namespace allspark;
 
 std::shared_ptr<DeviceContext> DeviceContextFactory::CreateDeviceContext(
@@ -12,6 +16,8 @@ std::shared_ptr<DeviceContext> DeviceContextFactory::CreateDeviceContext(
   switch (device_type) {
     case DeviceType::CPU:
       return DeviceContextFactory::CreateCPUContext();
+    case DeviceType::CUDA:
+      return DeviceContextFactory::CreateCUDAContext();
     default:
       LOG(ERROR) << "DeviceType Error.";
       break;
@@ -21,4 +27,13 @@ std::shared_ptr<DeviceContext> DeviceContextFactory::CreateDeviceContext(
 
 std::shared_ptr<DeviceContext> DeviceContextFactory::CreateCPUContext() {
   return std::make_shared<CPUContext>();
+}
+
+std::shared_ptr<DeviceContext> DeviceContextFactory::CreateCUDAContext() {
+#ifdef ENABLE_CUDA
+  return std::make_shared<CUDAContext>();
+#else
+  LOG(ERROR) << "try to get cuda device context without compile support cuda.";
+  return nullptr;
+#endif
 }

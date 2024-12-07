@@ -1,0 +1,8 @@
+AS_VERS_3.0 {
+    global:
+        extern "C++" {
+            *;
+        };
+    local:
+        *protobuf*;
+};

@@ -36,13 +36,19 @@ class DeviceContext {
   virtual void SemPostInterProcess(){};
   virtual void SemWaitSendInterProcess(){};
   virtual bool SemWaitMsgSynInterProcess(int msg_size) { return false; };
+  virtual void SetSparsityMatmulMode(bool enable_sparsity_matmul){};
+  virtual bool GetSparsityMatmulMode() const { return false; };
   void SetKVcacheSize(int kvsize) { engine_kvcache_alloc_size = kvsize; }
   int GetKVcacheSize() const { return engine_kvcache_alloc_size; }
   void SetModelMaxLength(int max_length) { engine_max_length = max_length; }
   int GetModelMaxLength() const { return engine_max_length; }
   void SetModelMaxBatch(int max_batch) { engine_max_batch = max_batch; }
   int GetModelMaxBatch() const { return engine_max_batch; }
-  void SetDtype(DataType new_dtype) { dtype = new_dtype; }
+  void SetModelMaxPrefillLength(int max_length) {
+    engine_max_prefill_length = max_length;
+  }
+  int GetModelMaxPrefillLength() const { return engine_max_prefill_length; }
+  virtual void SetDtype(DataType new_dtype) { dtype = new_dtype; }
   DataType GetDtype() const { return dtype; }
   void SetDatatype(std::string str_dtype) {
     if (str_dtype == "float16") {
@@ -62,42 +68,124 @@ class DeviceContext {
   void SetDecoderLayer(int dec_layer) { dec_layer_ = dec_layer; }
   void SetSizePerHead(int size_per_head) { size_per_head_ = size_per_head; }
   void SetNumberGroups(int num_groups) { num_groups_ = num_groups; }
+  void SetUseTorchSample(bool use_torch_sample) {
+    use_torch_sample_ = use_torch_sample;
+  }
   void SetPrefillMode(AsMHAPrefill prefill_mode) {
     prefill_mode_ = prefill_mode;
   }
-
+  void SetEvictionStrategy(AsEvictionStrategy eviction_strategy) {
+    eviction_strategy_ = eviction_strategy;
+  }
+  void SetSchedulingStrategy(AsSchedulingStrategy scheduling_strategy) {
+    scheduling_strategy_ = scheduling_strategy;
+  }
+  void SetFallbackDecoderWeightOnly(bool decoder_weight_only) {
+    decoder_weight_only_ = decoder_weight_only;
+  }
+#if ENABLE_SPAN_ATTENTION
+  void SetCacheConfig(SpanCacheConfig::Ptr cache_config_) {
+    cache_config = cache_config_;
+  }
+  SpanCacheConfig::Ptr GetCacheConfig() const {
+    if (!cache_config) {
+      LOG(ERROR) << "DeviceContext: cache config uninitialized";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR)
+    }
+    return cache_config;
+  }
+  AsCacheMode GetCacheMode() const {
+    if (!cache_config) {
+      LOG(ERROR) << "DeviceContext: cache config uninitialized";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR)
+    }
+    return cache_config->mode;
+  }
+  int GetCacheSpanSize() const {
+    if (!cache_config) {
+      LOG(ERROR) << "DeviceContext: cache config uninitialized";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR)
+    }
+    return cache_config->span_size;
+  }
+  int GetCacheSpanNumInit() const {
+    if (!cache_config) {
+      LOG(ERROR) << "DeviceContext: cache config uninitialized";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR)
+    }
+    return cache_config->span_num_init;
+  }
+  int GetCacheSpanNumGrow() const {
+    if (!cache_config) {
+      LOG(ERROR) << "DeviceContext: cache config uninitialized";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR)
+    }
+    return cache_config->span_num_grow;
+  }
+#endif
   int GetNumberHeads() const { return num_heads_; }
   int GetDecoderLayer() const { return dec_layer_; }
   int GetSizePerHead() const { return size_per_head_; }
   int GetNumberGroups() const { return num_groups_; }
   int GetMaxTopLogprobs() const { return engine_max_top_logprobs; }
+  bool GetUseTorchSample() const { return use_torch_sample_; }
   AsMHAPrefill GetPrefillMode() const { return prefill_mode_; }
+  AsEvictionStrategy GetEvictionStrategy() const { return eviction_strategy_; }
+  AsSchedulingStrategy GetSchedulingStrategy() const {
+    return scheduling_strategy_;
+  }
+  // decoder fallback weight only which is used in A8W8
+  bool GetFallbackDecoderWeightOnly() const { return decoder_weight_only_; }
   void CopyFromOther(const DeviceContext* other_ctx) {
+#if ENABLE_SPAN_ATTENTION
+    if (GetDeviceType() == DeviceType::CUDA) {
+      SetCacheConfig(other_ctx->GetCacheConfig());
+    }
+#endif
     SetNumberHeads(other_ctx->GetNumberHeads());
     SetDecoderLayer(other_ctx->GetDecoderLayer());
     SetSizePerHead(other_ctx->GetSizePerHead());
     SetNumberGroups(other_ctx->GetNumberGroups());
+    SetUseTorchSample(other_ctx->GetUseTorchSample());
     SetKVcacheSize(other_ctx->GetKVcacheSize());
     SetModelMaxLength(other_ctx->GetModelMaxLength());
     SetModelMaxBatch(other_ctx->GetModelMaxBatch());
+    SetModelMaxPrefillLength(other_ctx->GetModelMaxPrefillLength());
     SetDtype(other_ctx->GetDtype());
     SetMatmulPrecision(other_ctx->GetMatmulPrecision());
     SetPrefillMode(other_ctx->GetPrefillMode());
+    SetEvictionStrategy(other_ctx->GetEvictionStrategy());
+    SetFallbackDecoderWeightOnly(other_ctx->GetFallbackDecoderWeightOnly());
+    SetSparsityMatmulMode(other_ctx->GetSparsityMatmulMode());
   }
 
  private:
+  SpanCacheConfig::Ptr cache_config;
+
   int engine_max_length = 0;
   int engine_max_batch = 0;
   const int engine_max_top_logprobs = 10;  // const
   int engine_kvcache_alloc_size = -1;
-
+  int engine_max_prefill_length = 1024;
   int num_heads_ = 0;
   int dec_layer_ = 0;
   int size_per_head_ = 0;
   int num_groups_ = 0;
-
+  bool use_torch_sample_ = false;
+  // fallback to A16Wx in decoder phase for A8WX or AF8Wx quantized gemm if
+  // decoder_weight_only_ is true.
+  bool decoder_weight_only_ = false;
   int precision_ = PrecisionLevel::HIGHEST;
+#ifdef ENABLE_CUDA
+  AsMHAPrefill prefill_mode_ = AsMHAPrefill::AsPrefillXformer;
+#else
   AsMHAPrefill prefill_mode_ = AsMHAPrefill::AsPrefillDefault;
+#endif
+  AsEvictionStrategy eviction_strategy_ = AsEvictionStrategy::MaxLength;
+  AsSchedulingStrategy scheduling_strategy_ =
+      AsSchedulingStrategy::ContextPriority;
+
+ protected:
   DataType dtype = DataType::DATATYPE_UNDEFINED;
 };
 
@@ -107,6 +195,7 @@ class DeviceContextFactory {
   static std::shared_ptr<DeviceContext> CreateDeviceContext(
       const DeviceType device_type);
   static std::shared_ptr<DeviceContext> CreateCPUContext();
+  static std::shared_ptr<DeviceContext> CreateCUDAContext();
 };
 
 }  // namespace allspark

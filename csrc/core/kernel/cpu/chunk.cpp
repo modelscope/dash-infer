@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    chunk.cpp
  */
+
 #include <math.h>
 
 #include "allspark.pb.h"
@@ -57,6 +58,11 @@ void ChunkBinary(T* out, T* in, int batch, int seq_len, int hidden_size,
         }
       });
       break;
+    case BinaryType::GEGLU:
+      // elementwise::Binary(GeGLUFunctor<T>(), count, out, in1, in2,
+      // stream);
+      break;
+
     default:
       return;
   }

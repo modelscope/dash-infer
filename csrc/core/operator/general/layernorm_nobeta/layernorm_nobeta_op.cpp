@@ -6,12 +6,40 @@
 #include "layernorm_nobeta_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+AsStatus gpu_layernorm(DataType dtype, void* out, const void* input,
+                       const void* bias, const void* gamma, int m, int n,
+                       float eps, const DeviceContext* ctx) {
+#ifdef CONFIG_DEBUG_OP
+  DLOG(INFO) << "gpu_layernorm" << std::endl;
+#endif
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    const T* typed_input = static_cast<const T*>(input);
+    const T* typed_bias = static_cast<const T*>(bias);
+    const T* typed_gamma = static_cast<const T*>(gamma);
+    cuda::LayerNormNoBetaKernelLauncher(typed_out, typed_input, typed_bias,
+                                        typed_gamma, m, n, eps,
+                                        gpu_ctx->GetStream());
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
 AsStatus cpu_layernorm(DataType dtype, void* out, const void* input,
                        const void* bias, const void* gamma, int m, int n,
                        float eps, const DeviceContext* ctx) {
+#ifdef CONFIG_DEBUG_OP
+  DLOG(INFO) << "cpu_layernorm" << std::endl;
+#endif
   auto functor = [&]<typename T>() {
     T* typed_out = static_cast<T*>(out);
     const T* typed_input = static_cast<const T*>(input);
@@ -46,6 +74,11 @@ AsStatus LayerNormNoBetaOp::Init(const OperatorProto& op_proto,
   eps_ = *(float*)(attr_map.at("eps").c_str());
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_layernorm;
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_layernorm;
       break;
@@ -75,5 +108,6 @@ AsStatus LayerNormNoBetaOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("LayerNormNoBeta", CPU, LayerNormNoBetaOp)
+REGISTER_OP(LayerNormNoBeta, CUDA, LayerNormNoBetaOp)
+REGISTER_OP(LayerNormNoBeta, CPU, LayerNormNoBetaOp)
 }  // namespace allspark

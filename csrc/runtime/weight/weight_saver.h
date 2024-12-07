@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    weight_saver.h
  */
+
 #pragma once
 
 #include <common/common.h>

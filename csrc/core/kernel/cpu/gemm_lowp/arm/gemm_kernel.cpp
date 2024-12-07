@@ -58,6 +58,7 @@ static void gemv_get_tile_n(int M, int N, int K_pack, int* tile_size,
   return;
 }
 
+#if TEST_TYPE_CVT_FP16
 static void gemv_thread_strategy(
     GemmParam<hie::bfloat16, uint8_t, float16_t>& p) {
   int M = p.M;
@@ -97,6 +98,46 @@ static void gemv_thread_strategy(
     }
   });
 }
+#else
+static void gemv_thread_strategy(GemmParam<hie::bfloat16, uint8_t, float>& p) {
+  int M = p.M;
+  int N = p.N;
+  int K_pack = p.K_pack;
+
+  int n_tile = 4, n_thread = (N + 3) / 4;
+  gemv_get_tile_n(M, N, K_pack, &n_tile, &n_thread);
+
+  int m_tile = 2;
+  if (M > 2) m_tile = 4;
+  if (M > 4) m_tile = 8;
+
+  parallel_for(n_thread, [&](int n) {
+    int nn_max = std::min(N, (n + 1) * n_tile);
+    for (int nn = n * n_tile; nn < nn_max; nn += 4) {
+      for (int m = 0; m < M; m += m_tile) {
+        int m_tile_real = m_tile;
+        if (m + m_tile > M) m_tile_real = M - m;
+
+        if (m_tile_real > 4) {
+          if ((nn + 4 > nn_max) || (m + m_tile > M)) {
+            thread_block_u8_m8_fp32_res(p, m, nn, 0, K_pack);
+          } else {
+            thread_block_u8_m8_fp32(p, m, nn, 0, K_pack);
+          }
+        } else if (m_tile_real > 2) {
+          if ((nn + 4 > nn_max) || (m + m_tile > M)) {
+            thread_block_u8_m4_fp32_res(p, m, nn, 0, K_pack);
+          } else {
+            thread_block_u8_m4_fp32(p, m, nn, 0, K_pack);
+          }
+        } else {
+          thread_block_u8_m2_fp32(p, m, nn, 0, K_pack, m + 1 >= M);
+        }
+      }
+    }
+  });
+}
+#endif
 
 void gemv_kernel_arm(int M, int N, int K, int lda, float* a_fp32, uint8_t* b_u8,
                      float* c_fp32, float* bias_fp32, void* wei_scale,
@@ -111,9 +152,15 @@ void gemv_kernel_arm(int M, int N, int K, int lda, float* a_fp32, uint8_t* b_u8,
 
   pack_input_arm(M, N, K, lda, K_pack, a_fp32, a_bf16);
 
+#if TEST_TYPE_CVT_FP16
   GemmParam<hie::bfloat16, uint8_t, float16_t> p(
       M, N, K_pack, a_bf16, b_u8, c_fp32, bias_fp32, (float16_t*)wei_scale,
       (float16_t*)wei_scaleXzp, GroupSize, with_bias, actType);
+#else
+  GemmParam<hie::bfloat16, uint8_t, float> p(
+      M, N, K_pack, a_bf16, b_u8, c_fp32, bias_fp32, (float*)wei_scale,
+      (float*)wei_scaleXzp, GroupSize, with_bias, actType);
+#endif
 
   gemv_thread_strategy(p);
 

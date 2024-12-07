@@ -1,0 +1,70 @@
+message("========== HIE-DNN ==========")
+
+set(HIEDNN_USE_FP16
+    ${ENABLE_FP16}
+    CACHE BOOL "HIE-DNN enables FP16")
+set(HIEDNN_USE_BF16
+    ${ENABLE_BF16}
+    CACHE BOOL "HIE-DNN enables BF16")
+set(HIEDNN_USE_CUDA
+    ${ENABLE_CUDA}
+    CACHE BOOL "HIE-DNN enables CUDA")
+set(HIEDNN_CUDA_DEVICE_ARCH
+    ${CMAKE_CUDA_ARCHITECTURES}
+    CACHE STRING "HIE-DNN CUDA archs")
+set(HIEDNN_UTEST
+    OFF
+    CACHE BOOL "HIE-DNN enables unit tests")
+set(HIEDNN_EXAMPLE
+    OFF
+    CACHE BOOL "HIE-DNN builds examples")
+
+message(STATUS "Build HIE-DNN with: USE_FP16=${HIEDNN_USE_FP16}")
+message(STATUS "Build HIE-DNN with: USE_BF16=${HIEDNN_USE_BF16}")
+message(STATUS "Build HIE-DNN with: USE_CUDA=${HIEDNN_USE_CUDA}")
+message(STATUS "Build HIE-DNN with: CUDA_DEVICE_ARCH=${HIEDNN_CUDA_DEVICE_ARCH}")
+
+set(HIEDNN_INSTALL ${INSTALL_LOCATION}/HIE-DNN/install)
+set(HIEDNN_LIBRARY_PATH ${HIEDNN_INSTALL}/lib64/libhiednn_static.a)
+message(STATUS "HIEDNN_INSTALL: ${HIEDNN_INSTALL}")
+message(STATUS "HIEDNN_LIBRARY_PATH: ${HIEDNN_LIBRARY_PATH}")
+
+set(HIEDNN_SOURCE_DIR ${PROJECT_SOURCE_DIR}/HIE-DNN)
+
+include(ExternalProject)
+
+ExternalProject_Add(
+    project_hiednn
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/HIE-DNN
+    SOURCE_DIR ${HIEDNN_SOURCE_DIR}
+    CMAKE_GENERATOR "Ninja"
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . -j32 -v
+    BUILD_BYPRODUCTS ${HIEDNN_LIBRARY_PATH}
+    CMAKE_CACHE_ARGS
+        -DCUDA_DEVICE_ARCH:STRING=${HIEDNN_CUDA_DEVICE_ARCH}
+    CMAKE_ARGS
+        -DUSE_FP16=${HIEDNN_USE_FP16}
+        -DUSE_BF16=${HIEDNN_USE_BF16}
+        -DUSE_CUDA=${HIEDNN_USE_CUDA}
+        -DUTEST=${HIEDNN_UTEST}
+        -DEXAMPLE=${HIEDNN_EXAMPLE}
+        -DCMAKE_INSTALL_PREFIX=${HIEDNN_INSTALL}
+)
+
+unset(HIEDNN_USE_FP16)
+unset(HIEDNN_USE_BF16)
+unset(HIEDNN_USE_CUDA)
+unset(HIEDNN_CUDA_DEVICE_ARCH)
+unset(HIEDNN_UTEST)
+unset(HIEDNN_EXAMPLE)
+
+file(MAKE_DIRECTORY ${HIEDNN_INSTALL}/include)
+add_library(hiednn::hiednn_static STATIC IMPORTED)
+add_dependencies(hiednn::hiednn_static project_hiednn)
+set_target_properties(hiednn::hiednn_static
+    PROPERTIES
+        IMPORTED_LOCATION ${HIEDNN_LIBRARY_PATH}
+        INTERFACE_INCLUDE_DIRECTORIES ${HIEDNN_INSTALL}/include
+)
+set(HIEDNN_LIBRARY hiednn::hiednn_static)
+message("=============================")

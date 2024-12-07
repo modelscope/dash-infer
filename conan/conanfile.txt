@@ -3,11 +3,7 @@
   gtest/1.11.0
   glog/0.5.0
   pybind11/2.8.1
-  openmpi/4.1.0
   zlib/1.2.13
-  grpc/1.50.1
-  openssl/1.0.2t
-  abseil/20230125.3
 [generators]
   cmake
   cmake_find_package
@@ -17,6 +13,6 @@
 [options]
   protobuf:with_zlib=False
   glog:with_gflags=False
-  libsystemd:with_xz=False       # remove xz_utils dep
+  gtest:build_gmock=False
   libunwind:minidebuginfo=False  # remove xz_utils dep
   libunwind:zlibdebuginfo=False  # remove zlib dep

@@ -44,6 +44,7 @@ if(ENABLE_ARMCL MATCHES "ON")
     set(ARMCL_LIBRARY ${ARMCL_LIBRARY_DIR}/libarm_compute.lib)
   else()
     set(ARMCL_LIBRARY ${ARMCL_LIBRARY_DIR}/libarm_compute-static.a)
+    # add_compile_options(-std=c++14)  # later: update with CXX_STD / C17 support.
   endif()
 
   if(${CMAKE_BUILD_TYPE} MATCHES "Release")

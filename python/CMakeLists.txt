@@ -1,29 +1,70 @@
-include_directories(
-    ${PROJECT_SOURCE_DIR}/csrc/interface
-    ${PROJECT_SOURCE_DIR}/csrc/utility
-    ${PROJECT_SOURCE_DIR}/csrc/service
-)
-add_definitions(-DUSE_MPI_SERVICE)
-
-find_package(Python REQUIRED COMPONENTS Interpreter Development )
-find_package(pybind11 REQUIRED CONFIG)
-
+if (ENABLE_CUDA)
+    include_directories(
+        ${PROJECT_SOURCE_DIR}/csrc/interface
+        ${PROJECT_SOURCE_DIR}/csrc/utility
+    )
+    add_definitions(-DENABLE_CUDA)
+else()
+    include_directories(
+        ${PROJECT_SOURCE_DIR}/csrc/interface
+        ${PROJECT_SOURCE_DIR}/csrc/utility
+        ${PROJECT_SOURCE_DIR}/csrc/service
+    )
+endif()
+if (ENABLE_JSON_MODE)
+  add_definitions(-DENABLE_JSON_MODE)
+endif()
+if (CONFIG_ACCELERATOR_TYPE STREQUAL "NONE")
+    add_definitions(-DUSE_MPI_SERVICE)
+endif()
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
+find_package(pybind11 REQUIRED)
 
+# include(pybind11Tools)
 pybind11_add_module(_allspark MODULE "allspark_binding.cpp")
+target_include_directories(_allspark
+  PRIVATE
+    ${CUDAToolkit_INCLUDE_DIR}
+    ${CMAKE_BINARY_DIR}/csrc)
+target_link_options(_allspark PRIVATE -Wl,--whole-archive $<TARGET_FILE:allspark_framework_static> -Wl,--no-whole-archive -rdynamic)
+target_link_libraries(_allspark PRIVATE
+   allspark_framework_static
+   CONAN_PKG::protobuf
+   CONAN_PKG::zlib)
+set_target_properties(_allspark PROPERTIES INSTALL_RPATH "$ORIGIN")
+set_target_properties(_allspark PROPERTIES CXX_STANDARD 17)
+if(UNIX AND NOT APPLE)
+  set(ALLSPARK_LINK_MAP ${PROJECT_SOURCE_DIR}/link_python.map)
+  set_target_properties(
+    _allspark PROPERTIES
+      LINK_DEPENDS ${ALLSPARK_LINK_MAP}
+      LINK_FLAGS   "-Wl,--version-script=${ALLSPARK_LINK_MAP}")
+endif()
 
-target_link_libraries(_allspark PRIVATE pybind11::headers allspark_framework allspark_client)
-set_target_properties(_allspark PROPERTIES
-                                INTERPROCEDURAL_OPTIMIZATION ON
-                                CXX_STANDARD 17
-                                VISIBILITY_INLINES_HIDDEN ON)
+###
 
-# generate python inferface.
-find_package(Protobuf REQUIRED)
-protobuf_generate_python(AS_MODEL_PYTHON  ${AS_MODEL_PROTO_FILE})
-# protobuf generate requires a target to trigger.
-add_custom_target(as_model_generate_python DEPENDS ${AS_MODEL_PYTHON})
-add_dependencies(_allspark as_model_generate_python)
-
-# install python allspark pb files.
-install(FILES ${AS_MODEL_PYTHON} DESTINATION ${PYTHON_LIB_DIRS}/model)
+if (ENABLE_MULTINUMA)
+    pybind11_add_module(_allspark_client MODULE "allspark_client_binding.cpp")
+    target_include_directories(_allspark_client
+      PRIVATE
+        ${CUDAToolkit_INCLUDE_DIR}
+        ${CMAKE_BINARY_DIR}/csrc)
+    target_link_options(_allspark_client PRIVATE "-rdynamic")
+    target_link_libraries(_allspark_client PRIVATE
+       -Wl,--whole-archive
+       allspark_client
+       -Wl,--no-whole-archive
+       CONAN_PKG::protobuf)
+    # target_link_libraries(_allspark_client PRIVATE allspark_client)
+    set_target_properties(_allspark_client PROPERTIES INSTALL_RPATH "$ORIGIN")
+    set_target_properties(_allspark_client PROPERTIES CXX_STANDARD 17)
+    if(UNIX AND NOT APPLE)
+      set(ALLSPARK_LINK_MAP ${PROJECT_SOURCE_DIR}/link_python.map)
+      set_target_properties(
+        _allspark_client PROPERTIES
+          LINK_DEPENDS ${ALLSPARK_LINK_MAP}
+          LINK_FLAGS   "-Wl,--version-script=${ALLSPARK_LINK_MAP}")
+    endif()
+endif()

@@ -1,6 +1,6 @@
 /*!
  * Copyright (c) Alibaba, Inc. and its affiliates.
- * @file    famha.cpp
+ * @file    famha_x64_avx512.cpp
  */
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
 #include <immintrin.h>

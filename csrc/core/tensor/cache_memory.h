@@ -2,10 +2,15 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    cache_memory.h
  */
+
 #pragma once
 #include "common/common.h"
 #include "common/device_context.h"
 #include "data.h"  // NOLINT
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#include <cuda_runtime.h>
+#endif
 namespace allspark {
 class CacheMemory {
  public:
@@ -33,6 +38,14 @@ class CacheMemory {
     std::shared_ptr<DenseData> tmp_data =
         std::make_shared<DenseData>("cache", size, device_type_);
     switch (device_type_) {
+#ifdef ENABLE_CUDA
+      case DeviceType::CUDA: {
+        cudaMemset(tmp_data->GetRawData(), 0, size);
+        cudaMemcpy(tmp_data->GetRawData(), data_->GetRawData(),
+                   data_->GetSize(), cudaMemcpyDeviceToDevice);
+        break;
+      }
+#endif
       case DeviceType::CPU: {
         memset(tmp_data->GetRawData(), 0, size);
         memcpy(tmp_data->GetRawData(), data_->GetRawData(), data_->GetSize());
@@ -53,6 +66,7 @@ class CacheMemory {
     data_.reset();
     zero_.reset();
     scale_.reset();
+    // TODO
   }
 
  private:

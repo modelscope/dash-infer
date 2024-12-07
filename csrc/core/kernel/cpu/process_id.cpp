@@ -41,6 +41,18 @@ template <typename T>
 void UpdateId(T* out, const T* in, const int* beam_idx, T* tmp_id,
               int batch_size, int beam_size, int* step_list, int max_length,
               int seq_len) {
+  // if (beam_idx != nullptr) {
+  //     CopyMatrix(batch_size * beam_size, step, out, max_length, tmp_id,
+  //     max_length); int N = batch_size * beam_size * step; parallel_for(N,
+  //     [&](int i) {
+  //         int batch = i / (beam_size * step);
+  //         int beam = i % (beam_size * step) / step;
+  //         int idx2 = i % step;
+  //         out[(batch * beam_size + beam)* max_length + idx2] = tmp_id[(batch
+  //         * beam_size + beam_idx[batch * beam_size + beam]) * max_length +
+  //         idx2];
+  //     });
+  // }
   int N = batch_size * seq_len;
   int length = seq_len;
   parallel_for(N, [&](int tid) {

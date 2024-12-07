@@ -90,6 +90,7 @@ enum AS_STATUS {
     ALLSPARK_ILLEGAL_REQUEST_ID = 10; //没有找到有效的request_id
     ALLSPARK_CACHE_MEMORY_OUT = 11;
     ALLSPARK_REQUEST_DENIED = 12;  // 停服务状态，拒绝服务
+    ALLSPARK_LORA_NOT_LOADED = 13;  // 用户指定的lora没加载
     ALLSPARK_STREAMING = 200;      // 流式返回
 }
 
@@ -149,6 +150,14 @@ enum RequestInferType {
 
 enum RequestMMType {
   TextInput = 0;
+  MultiMediaTypeRichText = 1;
+}
+
+enum VocabType {
+  VOCAB_TYPE_WPM = 0;
+  VOCAB_TYPE_SPM = 1;
+  VOCAB_TYPE_UGM = 2;
+  VOCAB_TYPE_BPE = 3;
 }
 
 message AsStatus {
@@ -161,6 +170,10 @@ message ModelName {
 
 message UUID {
   string uuid = 1;
+}
+
+message LoraNames {
+  repeated string names = 1;
 }
 
 message GenerateLen {
@@ -200,17 +213,29 @@ message ModelStructConfig {
   string weights_path = 3;
   string compute_unit = 4;
   string matmul_precision = 5;
+  bool   is_lora = 6;
+  int64  swap_threshold = 7;
   int32  engine_max_length = 8;
   int32  engine_max_batch = 9;
+  LoraNames lora_names = 10;
+  int32  cache_span_size = 11;
+  int32  cache_span_num_init = 12;
+  int32  cache_span_num_grow = 13;
   AsCacheMode cache_mode = 14;
-  AsMHAPrefill prefill_mode = 15;
-  bool text_graph = 16;
-  int32  num_threads = 17;
+  bool enable_prefix_cache = 15;
+  int32 prefix_cache_ttl = 16;
+  AsMHAPrefill prefill_mode = 17;
+  bool text_graph = 18;
+  int32  num_threads = 19;
 }
 
 message AsEngineStat {
   string model_name = 1;
+  int64  total_span = 2;
+  int64  used_span = 3;
+  int64  free_span = 4;
   int64  free_token = 5;
+  int64  span_size = 6;
   int32  pendding_request = 7;
   int32  running_request = 8;
   int64  total_device_memory_pool_size = 9;
@@ -219,11 +244,16 @@ message AsEngineStat {
   int64  total_prefill_token = 12;
   float  generate_token_persec = 13;
   float  process_token_persec = 14;
+  int64 prefix_cache_hit_token = 15;
+  int64 prefix_cache_miss_token = 16;
+  float prefix_cache_hit_rate = 17;
+  float prefix_cache_miss_rate = 18;
 }
 
 message StartRequestRequest {
   string model_name = 1;
   RequestInferType infer_type = 2;
+  RequestMMType mm_type = 3;
   TensorMap     inputs = 4;
   GenerateConfig config = 6;
 }
@@ -300,6 +330,10 @@ message GenerateConfig{
   repeated float top_p_arr = 26;
   repeated int64 seed_arr = 27;
   bool   probe_only = 28;
+  string lora_name = 29;
+  map<string, string> response_format = 30;
+  map<string, int32> vocab = 31;
+  VocabType vocab_type = 32;
 }
 
 message ModelInfo {

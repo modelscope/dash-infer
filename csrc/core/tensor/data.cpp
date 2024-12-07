@@ -6,6 +6,11 @@
 #include "data.h"  // NOLINT
 
 #include <cpu/cpu_allocator.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_allocator.h>
+#include <cuda/cuda_host_allocator.h>
+#endif
+#include <bfc_allocator.h>
 
 namespace allspark {
 
@@ -17,9 +22,27 @@ Data::Data(const std::string& name, DeviceType device_type, int32_t flags)
       flags_(flags) {
   switch (device_type) {
     case DeviceType::CPU: {
-      allocator_ = std::make_shared<CPUAllocator>();
+      if (flags & AsDataFlags::cuda_pinned_mem) {
+#if ENABLE_CUDA
+        allocator_ = std::make_shared<CUDAHostAllocator>();
+#else
+        LOG(WARNING) << "Try to use pinned memory without cuda support "
+                        "is impossible, default to CPUAllocator.";
+        allocator_ = std::make_shared<CPUAllocator>();
+#endif
+      } else {
+        allocator_ = std::make_shared<CPUAllocator>();
+      }
       break;
     }
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      allocator_ = GetBFCAllocator(device_type);
+      if (allocator_ == nullptr)  // fallback
+        allocator_ = std::make_shared<CUDAAllocator>();
+      break;
+    }
+#endif
     default: {
       LOG(ERROR) << "DeviceType::" << device_type
                  << " is not supported. Please check build option."
@@ -41,6 +64,7 @@ DenseData::DenseData(const std::string& name, int64_t nbytes,
   }
 }
 
+// daoxian added, 2023-3-1
 DenseData::DenseData(const std::string& name, int64_t nbytes,
                      DeviceType device_type, deleter_t deleter)
     : Data(name, device_type), nbytes_(nbytes), deleter_(deleter) {

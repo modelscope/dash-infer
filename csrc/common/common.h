@@ -19,6 +19,7 @@
 namespace allspark {
 
 #define PERSISTENT_TENSOR_PREFIX "PERSISTENT_TENSOR:"
+#define BFC_SPACE_NAME "__BFC_SPACE__:"
 
 // Disable the copy and assignment operator for a class.
 #ifndef DISABLE_COPY_AND_ASSIGN
@@ -75,6 +76,54 @@ inline size_t SizeofType(DataType data_type) {
   }
 }
 
+inline std::string DataTypeToString(DataType data_type) {
+  switch (data_type) {
+    case DataType::DATATYPE_UNDEFINED:
+      return "DataType::DATATYPE_UNDEFINED";
+    case DataType::FLOAT32:
+      return "DataType::FLOAT32";
+    case DataType::FLOAT16:
+      return "DataType::FLOAT16";
+    case DataType::INT8:
+      return "DataType::INT8";
+    case DataType::INT16:
+      return "DataType::INT16";
+    case DataType::INT32:
+      return "DataType::INT32";
+    case DataType::INT64:
+      return "DataType::INT64";
+    case DataType::STRING:
+      return "DataType::STRING";
+    case DataType::BOOL:
+      return "DataType::BOOL";
+    case DataType::BFLOAT16:
+      return "DataType::BFLOAT16";
+    case DataType::UINT8:
+      return "DataType::UINT8";
+    case DataType::POINTER:
+      return "DataType::POINTER";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+inline std::string DeviceTypeToString(DeviceType device_type) {
+  switch (device_type) {
+    case DeviceType::DEVICETYPE_UNDEFINED:
+      return "DEVICETYPE_UNDEFINED";
+    case DeviceType::CPU:
+      return "CPU";
+    case DeviceType::CUDA:
+      return "CUDA";
+    case DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES:
+      return "COMPILE_TIME_MAX_DEVICE_TYPES";
+    case DeviceType::CPU_PINNED:
+      return "CPU_PINNED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 inline bool DataModeIsSparse(DataMode mode) {
   if (mode == DataMode::CSC || mode == DataMode::ELL) return true;
   return false;
@@ -128,6 +177,9 @@ struct AsDevice {
 
 inline std::ostream& operator<<(std::ostream& os, DeviceType device_type) {
   switch (device_type) {
+    case allspark::DeviceType::CUDA:
+      return os << "CUDA";
+      break;
     case allspark::DeviceType::CPU:
       return os << "CPU";
       break;
@@ -151,7 +203,18 @@ inline std::ostream& operator<<(std::ostream& os, DeviceType device_type) {
 
 #else
 #endif
-
+struct BatchGencfg {
+  int batch_size = 0;
+  void* repetition_penalty_list = nullptr;
+  void* presence_penalty_list = nullptr;
+  void* frequency_penalty_list = nullptr;
+  void* no_repeat_ngram_size_list = nullptr;
+  void* min_length_list = nullptr;
+  void* eos_token_id_list = nullptr;
+  void* cur_len_list = nullptr;
+  void* input_len_list = nullptr;
+  void* suppress_repetition_in_generation_list = nullptr;
+};
 }  // namespace allspark
 
 namespace std {
@@ -161,4 +224,5 @@ struct hash<allspark::RankInfo> {
     return x.rank_size * 10000L + x.rank_id;
   }
 };
+
 }  // namespace std

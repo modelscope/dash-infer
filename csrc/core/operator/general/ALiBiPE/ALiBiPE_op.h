@@ -15,21 +15,19 @@ class ALiBiPEOp : public AsOperator {
       : AsOperator(op_type), batch_size_(1), seq_length_(1), num_heads_(1) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
-  AsStatus Reshape(RuntimeContext* runtime_ctx) override;
-  AsStatus Forward(RuntimeContext* runtime_ctx) override;
+  AsStatus Reshape() override;
+  AsStatus Forward() override;
 
  private:
-  AsStatus runContext(RuntimeContext* runtime_ctx);
-  AsStatus runDecode(RuntimeContext* runtime_ctx);
   AsStatus (*kernel_launcher)(DataType dtype, void* out, int* batch_offset,
                               int batch, int seq_len, int num_heads,
-                              int ori_num_heads, const DeviceContext* ctx,
-                              bool is_context,
-                              std::vector<int>& step_list) = nullptr;
+                              int ori_num_heads, int step,
+                              const DeviceContext* ctx) = nullptr;
   int batch_size_;
   int seq_length_;
   int num_heads_;
   int ori_num_heads_;
+  int max_seq_;
 };
 
 }  // namespace allspark

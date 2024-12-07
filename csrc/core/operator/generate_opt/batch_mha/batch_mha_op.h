@@ -4,7 +4,13 @@
  */
 
 #pragma once
+
 #include <core/operator/operator.h>
+#if 0  // def ENABLE_CUDA
+#include <core/kernel/cuda/flashv2/flashv2.h>
+#include <core/kernel/cuda/trivial_mha/trivial_mha.h>
+#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
+#endif  // ENABLE_CUDA
 
 #include "env_config.h"
 
@@ -13,7 +19,7 @@ namespace allspark {
 /* @brief: assumpt seq_len = 1
  * inputs:
       qkv_fuse: (batch * beam, 1, hidden_size)
-      mask: (batch * beam, 1, step)
+      mask: (batch * beam, 1, step) (只有第一次解码用得到这东西)
       beam_idx : [batch * beam]
  * outputs:
       attn_out: (batch * beam, 1, hidden_size)
@@ -70,6 +76,29 @@ class BatchMHAOp : public AsOperator {
     return AsStatus::ALLSPARK_SUCCESS;
   }
 
+#if 0  // def ENABLE_CUDA
+  cudaDataType_t toCudaType(DataType dtype_) {
+    switch (dtype_) {
+      case DataType::FLOAT16:
+        return cudaDataType_t::CUDA_R_16F;
+      case DataType::BFLOAT16:
+        return cudaDataType_t::CUDA_R_16BF;
+      default:
+        return cudaDataType_t::CUDA_R_32F;
+    }
+  }
+#endif
+
+  void (*kernel_launcher)(DataType dtype, void* out, void* score,
+                          const void* query, const void* key, const void* value,
+                          const float* mask, const void* position_embedding,
+                          void* k_cache, void* v_cache, void** q_array,
+                          void** k_array, void** v_array, void** score_array,
+                          void** out_array, int batch_size, int beam_size,
+                          int seq_len, int step, int cache_max_len,
+                          int hidden_size, int num_heads, int size_per_head,
+                          int gemm_batch, float alpha, bool xlogn_enable,
+                          int xlogn_len, const DeviceContext* ctx) = nullptr;
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   void (*ctx_kernel_launcher)(DataType dtype, void* out, const void* query,
                               const void* key, const void* value,
@@ -82,31 +111,15 @@ class BatchMHAOp : public AsOperator {
                               const DeviceContext* ctx) = nullptr;
 #endif
 
-  void (*dec_kernel_launcher)(
-      DataType dtype, void* out, void* score, const void* query,
-      const void* key, const void* value, const float* mask,
-      const void* position_embedding, void* k_cache, void* v_cache,
-      void** q_array, void** k_array, void** v_array, void** score_array,
-      void** out_array, int batch_size, int beam_size, int seq_len, int step,
-      int cache_max_len, int hidden_size, int num_heads, int size_per_head,
-      int gemm_batch, float alpha, bool xlogn_enable, int xlogn_len,
-      const DeviceContext* ctx) = nullptr;
-
-  std::pair<bool, AsMHAPrefill> GetPrefillMode() {
-    AsMHAPrefill prefill_mode = AsMHAPrefill(ctx_->GetPrefillMode());
-
-    std::string mha_dtype_indicator =
-        "decoder.layer.0.attention.output.dense.out";
-    auto tensor_map_iter = tensor_map_->find(mha_dtype_indicator);
-    bool dtype_indicator_exist = false;      // if false, cannot use flash.
-    DataType mha_dtype = DataType::FLOAT32;  // flash only support bf16 / half
-    if (tensor_map_iter != tensor_map_->end()) {
-      dtype_indicator_exist = true;
-      mha_dtype = tensor_map_->at(mha_dtype_indicator).get()->GetDataType();
-    }
-
-    return std::make_pair(true, prefill_mode);
-  }
+#if 0  // def ENABLE_CUDA
+  cudaDeviceProp dprop_;
+#ifdef XFORMER_FMHA
+  cuda::xformer_t xformer_params_;
+#endif  // XFORMER_FMHA
+#ifdef FLASH_ATTN_V2
+  cuda::flashv2_t flash_v2_params_;
+#endif  // FLASH_ATTN_V2
+#endif
 
   int64_t score_size_;
   int src_blk_;

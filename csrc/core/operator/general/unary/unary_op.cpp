@@ -6,8 +6,11 @@
 #include "unary_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 using dnnl::memory;
 
 namespace allspark {
@@ -40,6 +43,11 @@ AsStatus UnaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
       dnnl_op_ctx_->outs_.resize(1);
       break;
     }
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      break;
+    }
+#endif
     default:
       LOG(ERROR) << "Unary Operator does not support "
                  << DeviceType_Name(backend) << " device type" << std::endl;
@@ -68,6 +76,20 @@ AsStatus UnaryOp::Forward() {
   AsTensor* x_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* y_tensor = tensor_map_->at(out_names_[0]).get();
   switch (ctx_->GetDeviceType()) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      auto functor = [&]<typename T>() {
+        T* typed_out = static_cast<T*>(y_tensor->GetDataPtr());
+        const T* typed_in = static_cast<const T*>(x_tensor->GetDataPtr());
+        cuda::UnaryKernelLauncher(typed_out, typed_in,
+                                  x_tensor->GetShape().Count(), unary_type_,
+                                  gpu_ctx->GetStream());
+      };
+      DispatchCUDA(x_tensor->GetDataType(), functor);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       dnnl::memory& in_mem = *(dnnl_op_ctx_->ins_[0]);
       dnnl::memory& out_mem = *(dnnl_op_ctx_->outs_[0]);
@@ -85,5 +107,6 @@ AsStatus UnaryOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Unary", CPU, UnaryOp)
+REGISTER_OP(Unary, CUDA, UnaryOp)
+REGISTER_OP(Unary, CPU, UnaryOp)
 }  // namespace allspark

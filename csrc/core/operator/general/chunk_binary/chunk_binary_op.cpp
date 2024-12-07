@@ -6,23 +6,44 @@
 #include "chunk_binary_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 namespace allspark {
 
 void chunk_binary_launcher(DataType dtype, void* out, void* in, int batch_size,
                            int seq_len, int hidden_size, int chunk_split,
                            BinaryType type, const DeviceContext* ctx) {
-  DLOG(INFO) << "chunk_binary_launcher" << std::endl;
   DeviceType backend = ctx->GetDeviceType();
-  if (backend == DeviceType::CPU) {
-    auto functor = [&]<typename T>() {
-      cpu::ChunkBinary<T>((T*)out, (T*)in, batch_size, seq_len, hidden_size,
-                          chunk_split, type);
-    };
-    DispatchCPU(dtype, functor);
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+      cudaStream_t cu_stream = gpu_ctx->GetStream();
+      auto functor = [&]<typename T>() {
+        cuda::ChunkBinary<T>((T*)out, (T*)in, batch_size, seq_len, hidden_size,
+                             chunk_split, type, cu_stream);
+      };
+      DispatchCUDA(dtype, functor);
+      break;
+    }
+#endif
+    case DeviceType::CPU: {
+      auto functor = [&]<typename T>() {
+        cpu::ChunkBinary<T>((T*)out, (T*)in, batch_size, seq_len, hidden_size,
+                            chunk_split, type);
+      };
+      DispatchCPU(dtype, functor);
+      break;
+    }
+    default:
+      LOG(ERROR) << "ChunkBinary Operator does not support "
+                 << DeviceType_Name(backend) << " device type" << std::endl;
+      return;
   }
 }
 AsStatus ChunkBinaryOp::Init(const OperatorProto& op_proto,
@@ -38,7 +59,7 @@ AsStatus ChunkBinaryOp::Init(const OperatorProto& op_proto,
   if (attr_map.find("fixed_training_split") != attr_map.end()) {
     chunk_split_ = *(int*)(attr_map.at("fixed_training_split").c_str());
   } else {
-    chunk_split_ = 1;
+    chunk_split_ = 1;  // 实际训练用的卡数，如果不指定则为1。
   }
   if (attr_map.find("binary_type") == attr_map.end()) {
     LOG(ERROR) << "BinaryOp : can't find binary_type attribute." << std::endl;
@@ -67,5 +88,6 @@ AsStatus ChunkBinaryOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("ChunkBinary", CPU, ChunkBinaryOp)
+REGISTER_OP(ChunkBinary, CUDA, ChunkBinaryOp)
+REGISTER_OP(ChunkBinary, CPU, ChunkBinaryOp)
 }  // namespace allspark

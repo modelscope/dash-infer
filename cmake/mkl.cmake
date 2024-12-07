@@ -37,6 +37,5 @@ set(MKL_ROOT ${MKL_ROOT_DIR})
 set(MKL_INTERFACE lp64)
 set(MKL_LINK static)
 set(MKL_H ${MKL_ROOT}/include)
-set(MKL_MPI openmpi)
 
 find_package(MKL REQUIRED)
