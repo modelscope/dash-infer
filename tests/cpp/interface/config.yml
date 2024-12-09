@@ -1,0 +1,14 @@
+"interface-test":
+    model_path : "../../testcase/bert/bert.asgraph"
+    weights_path : "../../testcase/bert/bert.asparam"
+    # text_graph: True
+    # optional config
+    device_type : CPU
+    # num_threads : 8
+
+"multi-gpu-test":
+    model_path : "../operator/testcase/gemm/sgemm/Gemm_sgemm.asgraph"
+    weights_path : "../operator/testcase/gemm/sgemm/Gemm_sgemm.asparam"
+    text_graph: True
+    device_type : CUDA
+    device_ids : [0, 1]

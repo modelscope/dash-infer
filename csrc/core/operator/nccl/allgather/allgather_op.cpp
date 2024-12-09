@@ -5,20 +5,63 @@
 
 #include "allgather_op.h"  // NOLINT
 
+#include <check_cuda.h>
+#ifdef ENABLE_CUDA
+#include <check_cuda.h>
+#include <cuda/cuda_context.h>
+
+#include <cuda/nccl_utils.hpp>
+#endif
 #include <coodinator/worker_coodinator.h>
 #include <core/kernel/kernel.h>
 #include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
+#ifdef ENABLE_MULTINUMA
 #include "cpu/mpi_utils.hpp"
+#endif
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+void nccl_allgather_launcher(DataType dtype, void* out, void* in,
+                             void* tmp_data, int count, int batch_size,
+                             int hidden_size, int nranks,
+                             const DeviceContext* ctx) {
+#ifdef CONFIG_DEBUG_OP
+  DLOG(INFO) << "nccl_allgather_launcher" << std::endl;
+#endif
+  const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx);
+
+  if (nranks > 1) {
+    ncclDataType_t nccl_dtype = GetNcclType(dtype);
+    AS_CHECK_NCCL(ncclAllGather(in, tmp_data, count, nccl_dtype,
+                                cuda_ctx->GetNCCLComm(),
+                                cuda_ctx->GetStream()));
+    auto functor = [&]<typename T>() {
+      T* typed_in = static_cast<T*>(tmp_data);
+      T* typed_out = static_cast<T*>(out);
+      cuda::transpose_axis_01_kernelLauncher(typed_out, typed_in, nranks,
+                                             batch_size, hidden_size,
+                                             cuda_ctx->GetStream());
+    };
+    DispatchCUDA(dtype, functor);
+  } else {
+    AS_CHECK_CUDA(cudaMemcpyAsync(out, in, count * SizeofType(dtype),
+                                  cudaMemcpyDeviceToDevice,
+                                  cuda_ctx->GetStream()));
+  }
+}
+#endif
+
 void mpi_allgather_launcher(DataType dtype, void* out, void* in, void* tmp_data,
                             int count, int batch_size, int hidden_size,
                             int nranks, const DeviceContext* ctx) {
+#ifdef ENABLE_MULTINUMA
   DLOG(INFO) << "mpi_allgather_launcher" << std::endl;
-  if (nranks != 1) {
-    MPI_Datatype mpi_dtype = GetMpiType(dtype);
+  MPI_Datatype mpi_dtype = GetMpiType(dtype);
+
+  if (nranks > 1) {
     if (in == tmp_data) {
       // in place allgather
       MPI_Allgather(MPI_IN_PLACE, count, mpi_dtype, tmp_data, count, mpi_dtype,
@@ -34,10 +77,13 @@ void mpi_allgather_launcher(DataType dtype, void* out, void* in, void* tmp_data,
                                          batch_size, hidden_size);
     };
     DispatchCPU(dtype, functor);
-
   } else {
     memcpy(out, in, count * SizeofType(dtype));
   }
+#else
+  LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
+  AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+#endif
 }
 
 AsStatus AllGatherOp::Init(const OperatorProto& op_proto,
@@ -48,7 +94,17 @@ AsStatus AllGatherOp::Init(const OperatorProto& op_proto,
   DataType dtype = tensor_map_->at(in_names_[0])->GetDataType();
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      kernel_launcher = nccl_allgather_launcher;
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      nranks_ = gpu_ctx->GetNranks();
+      rank_id_ = gpu_ctx->GetRank();
+      break;
+    }
+#endif
     case DeviceType::CPU: {
+#ifdef ENABLE_MULTINUMA
       kernel_launcher = mpi_allgather_launcher;
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       nranks_ = cpu_ctx->GetNranks();
@@ -60,6 +116,10 @@ AsStatus AllGatherOp::Init(const OperatorProto& op_proto,
                    << std::endl;
         return AsStatus::ALLSPARK_RUNTIME_ERROR;
       }
+#else
+      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+#endif
       break;
     }
     default:
@@ -98,6 +158,7 @@ AsStatus AllGatherOp::Forward() {
                                      WorkerCoodinator::GetDefaultTimeout());
 
   int ret = coodinator.StateSyncWithTimeout();
+
   if (ret == 0) {
     kernel_launcher(dtype, out, in, tmp_data, count_, m_, n_, nranks_, ctx_);
     coodinator.ResetCounter();
@@ -108,5 +169,7 @@ AsStatus AllGatherOp::Forward() {
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 }
-REGISTER_OP("AllGather", CPU, AllGatherOp)
+
+REGISTER_OP(AllGather, CUDA, AllGatherOp)
+REGISTER_OP(AllGather, CPU, AllGatherOp)
 }  // namespace allspark

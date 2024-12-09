@@ -8,8 +8,13 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
+// #include "common.h"
+#ifdef ENABLE_CUDA
+#include <cuda/cudabfloat16_impl.hpp>
+#endif
 
 #define ROUND_MODE_TO_NEAREST_EVEN
 
@@ -68,6 +73,11 @@
 #define HIE_EMPTY_TENSOR_NAME ("HIE_EMPTY_TENSOR")
 
 namespace __hie_buildin {
+
+// #ifdef ENABLE_FP16
+// struct half;
+// #endif
+
 struct HIE_ALIGN(2) __Bf16Impl {
   std::uint16_t __x;
 
@@ -75,9 +85,15 @@ struct HIE_ALIGN(2) __Bf16Impl {
 
   static __Bf16Impl from_bits(uint16_t bits) { return __Bf16Impl(bits); }
 
+  // #ifdef ENABLE_FP16
+  //     static __Bf16Impl half2bfloat16(half v);
+  // #endif
+
   // from float to bf16, round to nearest even
   static __Bf16Impl float2bfloat16(float v) {
-    uint32_t bits = reinterpret_cast<uint32_t&>(v);
+    uint32_t bits;
+    // avoid using uninitialized val due to strict aliasing
+    std::memcpy(&bits, &v, sizeof(bits));
     if ((bits & 0x7fffffff) > 0x7f800000) {
       return __Bf16Impl::from_bits(0x7fffU);
     } else {
@@ -120,8 +136,10 @@ struct HIE_ALIGN(2) __Bf16Impl {
   // from bf16 to float
   static float bfloat162float(__Bf16Impl v) {
     std::uint32_t val = static_cast<uint32_t>(v.__x) << 16;
-    const float* vptr = reinterpret_cast<const float*>(&val);
-    return *vptr;
+    // avoid using uninitialized val due to strict aliasing
+    float flt;
+    std::memcpy(&flt, &val, sizeof(flt));
+    return flt;
   }
 
   static double bfloat162double(__Bf16Impl v) {

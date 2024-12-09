@@ -41,22 +41,6 @@ class TransMaskOp : public AsOperator {
   }
 
  private:
-  std::pair<bool, AsMHAPrefill> GetPrefillMode() {
-    AsMHAPrefill prefill_mode = AsMHAPrefill(ctx_->GetPrefillMode());
-
-    std::string mha_dtype_indicator =
-        "decoder.layer.0.attention.output.dense.out";
-    auto tensor_map_iter = tensor_map_->find(mha_dtype_indicator);
-    bool dtype_indicator_exist = false;      // if false, cannot use flash.
-    DataType mha_dtype = DataType::FLOAT32;  // flash only support bf16 / half
-    if (tensor_map_iter != tensor_map_->end()) {
-      dtype_indicator_exist = true;
-      mha_dtype = tensor_map_->at(mha_dtype_indicator).get()->GetDataType();
-    }
-
-    return std::make_pair(true, prefill_mode);
-  }
-
   AsStatus (*kernel_launcher)(DataType dtype, void* out, const int64_t* in,
                               int batch, int seq_len, bool seq_mask, bool blank,
                               const DeviceContext* ctx) = nullptr;
@@ -67,6 +51,11 @@ class TransMaskOp : public AsOperator {
   int seq_length_;
   bool seq_mask_;
   bool blank_;
+
+  // TODO: remove this ..
+#ifdef ENABLE_CUDA
+  cudaDeviceProp dprop_;
+#endif  // ENABLE_CUDA
 };
 
 }  // namespace allspark

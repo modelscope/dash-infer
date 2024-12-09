@@ -362,7 +362,7 @@ class AsParamGuard {
   bool check_normal(const BuildMetaProto& graph_meta) {
     return check_version_major(graph_meta) && check_version_minor(graph_meta) &&
            check_weight_hash(graph_meta) &&
-           check_torch_build_config(graph_meta, "multinode_mode");
+           check_torch_build_config(graph_meta, "multigpu_mode");
   }
 
   bool check_restrict(const BuildMetaProto& graph_meta) {
@@ -371,7 +371,8 @@ class AsParamGuard {
            check_version_git_commit(graph_meta) &&
            check_weight_hash(graph_meta) &&
            check_torch_build_config(graph_meta, "model_name") &&
-           check_torch_build_config(graph_meta, "multinode_mode");
+           check_torch_build_config(graph_meta, "multigpu_mode");
+    // && check_torch_build_config(graph_meta, "derive_type")
   }
 
   bool get_version(const BuildMetaProto& graph_meta, std::string& version_str) {

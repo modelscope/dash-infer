@@ -11,6 +11,12 @@
 #include <omp.h>
 #include <utility/datatype_dispatcher.h>
 
+#if 0  // def ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#include <cuda_runtime.h>
+#include <utility/check_cuda.h>
+#endif
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -26,6 +32,28 @@
 #include "tensor/tensor.h"
 
 namespace allspark {
+
+#if 0  // def ENABLE_CUDA
+void gpu_dec_single_mha(DataType dtype, void* out, void* score,
+                        const void* query, const void* key, const void* value,
+                        const float* mask, const void* position_embedding,
+                        void* k_cache, void* v_cache, void** q_array,
+                        void** k_array, void** v_array, void** score_array,
+                        void** out_array, int batch_size, int beam_size,
+                        int seq_len, int step, int cache_max_len,
+                        int hidden_size, int num_heads, int size_per_head,
+                        int gemm_batch, float alpha, bool xlogn_enable,
+                        int xlogn_len, const DeviceContext* ctx) {
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  allspark::cuda::gpu_dec_single_mha(
+      dtype, out, score, query, key, value, mask, position_embedding, k_cache,
+      v_cache, q_array, k_array, v_array, score_array, out_array, batch_size,
+      beam_size, seq_len, step, cache_max_len, hidden_size, num_heads,
+      size_per_head, gemm_batch, alpha, xlogn_enable, xlogn_len,
+      gpu_ctx->GetCublasHandle(), gpu_ctx->GetStream());
+}
+#endif
+
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
 void cpu_ctx_single_famha(DataType dtype, void* out, const void* query,
                           const void* key, const void* value, const float* mask,
@@ -120,7 +148,7 @@ int get_layer_num(std::string str) {
   while (std::getline(ss, temp, '.')) {
     bool flag = true;
     for (char c : temp) {
-      if (!std::isdigit(c)) {
+      if (!std::isdigit(c)) /* 如果不是数字，返回 false */ {
         flag = false;
         break;
       }
@@ -155,8 +183,8 @@ AsStatus BatchMHAOp::Init(const OperatorProto& op_proto,
   }
   num_heads_ = *(int*)(attr_map.at("num_heads").c_str());
 
-  if (attr_map.find("multinode") != attr_map.end()) {
-    multi_nodes_ = *(bool*)(attr_map.at("multinode").c_str());
+  if (attr_map.find("multigpu") != attr_map.end()) {
+    multi_nodes_ = *(bool*)(attr_map.at("multigpu").c_str());
   } else {
     multi_nodes_ = true;
   }
@@ -171,14 +199,28 @@ AsStatus BatchMHAOp::Init(const OperatorProto& op_proto,
   AS_CHECK_STATUS(lognFromAttributes(op_proto));
 
   causal_mask_ = true;
+
   DeviceType backend = ctx.GetDeviceType();
 
   switch (backend) {
+#if 0  // def ENABLE_CUDA
+    case DeviceType::CUDA: {
+      int device_id;
+      cudaGetDevice(&device_id);
+      cudaGetDeviceProperties(&dprop_, device_id);
+      kernel_launcher = gpu_dec_single_mha;
+      if (multi_nodes_) {
+        const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+        num_heads_ /= gpu_ctx->GetNranks();
+      }
+      break;
+    }
+#endif
     case DeviceType::CPU: {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
       ctx_kernel_launcher = cpu_ctx_single_famha;
 #endif
-      dec_kernel_launcher = cpu_dec_single_mha;
+      kernel_launcher = cpu_dec_single_mha;
       if (multi_nodes_) {
         const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
         num_heads_ /= cpu_ctx->GetNranks();
@@ -224,15 +266,71 @@ AsStatus BatchMHAOp::Reshape(RuntimeContext* runtime_ctx) {
   score_size_ =
       round32((int64_t)single_batch * ctx_->GetModelMaxLength() * num_heads_ *
               (ctx_->GetModelMaxLength()) * SizeofType(dtype_));
+  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
 
+  // flashv2 switch
+  std::pair<bool, AsMHAPrefill> prefill_mode_pair = GetPrefillMode();
+  if (!prefill_mode_pair.first) {
+    LOG(ERROR) << "BatchMHAOp get prefill mode error. " << std::endl;
+    return AsStatus::ALLSPARK_RUNTIME_ERROR;
+  }
+
+#if 0  // ENABLE_CUDA
+  if (runtime_ctx->is_context &&
+      prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillFlashV2) {
+#ifdef FLASH_ATTN_V2
+    allspark::cuda::flashv2_clear_param(flash_v2_params_);
+    // direct calculate flash-v2 using concat-qkv input.
+    allspark::cuda::flashv2_set_static_param(
+        flash_v2_params_, dprop_, toCudaType(dtype_), single_batch, seq_len_,
+        seq_len_, num_heads_, num_heads_, size_per_head_,
+        cuda::FlashQKVFormat::INTERLEAVED, causal_mask_);
+    size_t flash_workspace_size = allspark::cuda::flashv2_wss(flash_v2_params_);
+    tensor_map_->at("workspace")
+        ->SetShape(Shape({int64_t(flash_workspace_size)}));
+#else
+    LOG(ERROR) << "Flash-Attention is not compiled";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+#endif  // FLASH_ATTN_V2
+  } else if (runtime_ctx->is_context &&
+             prefill_mode_pair.second ==
+                 allspark::AsMHAPrefill::AsPrefillXformer) {
+    return AsStatus::ALLSPARK_RUNTIME_ERROR;
+    xformer_params_.causal = causal_mask_;
+    xformer_params_.batch = single_batch;
+    xformer_params_.nhead = num_heads_;
+    xformer_params_.phead = size_per_head_;
+    xformer_params_.seqlen_q = seq_len_;
+    xformer_params_.seqlen_k = seq_len_;
+    xformer_params_.sm_version = dprop_.major << 8 | dprop_.minor;
+    xformer_params_.dtype = dtype_;
+    xformer_params_.nhead_kv = num_heads_;
+    xformer_params_.qkv_format = cuda::XformerQKVFormat::INTERLEAVED;
+    size_t xformer_workspace_size =
+        allspark::cuda::xformer_prefill_attention_workspace_inbytes(
+            xformer_params_);
+    tensor_map_->at("workspace")
+        ->SetShape(Shape({int64_t(xformer_workspace_size)}));
+  } else
+#endif
+  {
+    // not using flash attention, set fallback MHA workspace.
+    int64_t ws_size =
+        score_size_ + (int64_t)sizeof(void*) * round32(gemm_batch_) * 5;
+    tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
+  }
+
+#if 0  // def ENABLE_CUDA
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+  cublasHandle_t cublas_handle = gpu_ctx->GetCublasHandle();
+  AS_CHECK_CUBLAS(cublasSetWorkspace(
+      cublas_handle, tensor_map_->at("cublas_workspace")->GetDataPtr(),
+      tensor_map_->at("cublas_workspace")->GetSizeInByte()));
+#endif
   int min_blk = (int)std::pow(2, int(std::log2(seq_len_ / 2)));
   src_blk_ = std::min(256, min_blk);
   tgt_blk_ = std::min(512, seq_len_);
 
-  tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
-  // fallback MHA workspace.
-  int64_t ws_size =
-      score_size_ + (int64_t)sizeof(void*) * round32(gemm_batch_) * 5;
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
   // if we are in runContext phase, it is possible to reduce memory alloc since
   // flash attention will be adopted.
@@ -247,13 +345,13 @@ AsStatus BatchMHAOp::Reshape(RuntimeContext* runtime_ctx) {
     //   - O_i shape: [src_blk * head_dim]
     int64_t ws_size_per_omp_thread =
         (4 + tgt_blk_ + 2 * size_per_head_) * src_blk_;
-    ws_size =
+    int64_t ws_size =
         cpu::get_max_threads() * SizeofType(dtype_) * ws_size_per_omp_thread;
     // each omp thread will hold its own offset pointer to above data
     ws_size += cpu::get_max_threads() * 7 * sizeof(void*);
+    tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
   }
 #endif
-  tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -310,15 +408,8 @@ AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
   if (tensor_map_->at(in_names_[1])->GetShape().Count() == 0) {
     mask_buf = nullptr;
   }
-  void* position_embedding = nullptr;
-  if (pos_embedding_ == true) {
-    const Shape& embedding_shape = tensor_map_->at(in_names_[2])->GetShape();
-    // shape: [batch_size, 1, num_heads, step + 1]
-    // in context phase, 'current_batch' passed by caller will always be 0
-    position_embedding = (char*)tensor_map_->at(in_names_[2])->GetDataPtr() +
-                         current_batch * embedding_shape[2] *
-                             embedding_shape[3] * SizeofType(dtype_);
-  }
+  void* position_embedding =
+      pos_embedding_ ? tensor_map_->at(in_names_[2])->GetDataPtr() : nullptr;
   char* score_buf = (char*)(tensor_map_->at("workspace")->GetDataPtr());
   void** q_array = (void**)(score_buf + score_size_);
   void** k_array = q_array + round32(gemm_batch_);
@@ -332,12 +423,60 @@ AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 
-  dec_kernel_launcher(
-      dtype_, out_ptr, score_buf, q_buf, k_buf, v_buf, mask_buf,
-      position_embedding, k_cache_buf, v_cache_buf, q_array, k_array, v_array,
-      score_array, out_array, 1, gen_ctx->num_beams, seq_len_,
-      (gen_ctx->step + 1), ctx_->GetModelMaxLength(), hidden_size_, num_heads_,
-      size_per_head_, gemm_batch_, alpha_, enable_logn_, xlogn_, ctx_);
+#if 0  // def ENABLE_CUDA
+  // flashv2 logic.
+  if (/*runtime_ctx->is_context &&*/
+      prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillFlashV2) {
+#ifdef FLASH_ATTN_V2
+    char* cptr = (char*)in_tensor->GetDataPtr();
+    char* qptr = cptr;
+    char* kptr = qptr + hidden_size_ * SizeofType(dtype_);
+    char* vptr = kptr + hidden_size_ * SizeofType(dtype_);
+    char* optr = (char*)out_tensor->GetDataPtr();
+    char* wptr = (char*)wss_tensor->GetDataPtr();
+    allspark::cuda::flashv2_set_runtime_param(flash_v2_params_, qptr, kptr,
+                                              vptr, optr, wptr, alpha_);
+    allspark::cuda::flashv2_dispatch(
+        flash_v2_params_, static_cast<const CUDAContext*>(ctx_)->GetStream());
+    DispatchCUDA(dtype_, [&]<typename T>() {
+      cuda::UpdateKVLauncher(
+          (T*)k_cache_buf, (T*)v_cache_buf, (const T*)k_buf, (const T*)v_buf, 1,
+          0, seq_len_, hidden_size_, seq_len_, 3 * hidden_size_,
+          static_cast<const CUDAContext*>(ctx_)->GetStream());
+    });
+#else
+    LOG(ERROR) << "Flash-Attention is not compiled" << std::endl;
+    return AsStatus::ALLSPARK_RUNTIME_ERROR;
+#endif  // FLASH_ATTN_V2
+  } else if (/*runtime_ctx->is_context &&*/
+             prefill_mode_pair.second ==
+             allspark::AsMHAPrefill::AsPrefillXformer) {
+    char* cptr = (char*)in_tensor->GetDataPtr();
+    char* qptr = cptr;
+    char* kptr = qptr + hidden_size_ * SizeofType(dtype_);
+    char* vptr = kptr + hidden_size_ * SizeofType(dtype_);
+    char* optr = (char*)out_tensor->GetDataPtr();
+    char* wptr = (char*)wss_tensor->GetDataPtr();
+    allspark::cuda::xformer_prefill_attention(
+        xformer_params_, qptr, kptr, vptr, optr, wptr, alpha_,
+        static_cast<const CUDAContext*>(ctx_)->GetStream());
+    DispatchCUDA(dtype_, [&]<typename T>() {
+      cuda::UpdateKVLauncher(
+          (T*)k_cache_buf, (T*)v_cache_buf, (const T*)k_buf, (const T*)v_buf, 1,
+          0, seq_len_, hidden_size_, seq_len_, 3 * hidden_size_,
+          static_cast<const CUDAContext*>(ctx_)->GetStream());
+    });
+  } else
+#endif
+  {
+    kernel_launcher(dtype_, out_ptr, score_buf, q_buf, k_buf, v_buf, mask_buf,
+                    position_embedding, k_cache_buf, v_cache_buf, q_array,
+                    k_array, v_array, score_array, out_array, 1,
+                    gen_ctx->num_beams, seq_len_, (gen_ctx->step + 1),
+                    ctx_->GetModelMaxLength(), hidden_size_, num_heads_,
+                    size_per_head_, gemm_batch_, alpha_, enable_logn_, xlogn_,
+                    ctx_);
+  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -378,6 +517,8 @@ AsStatus BatchMHAOp::runDecoder(RuntimeContext* runtime_ctx) {
 }
 
 AsStatus BatchMHAOp::Alloc(RuntimeContext* runtime_ctx) {
+  // contiguous cache
+  // 初始化cachememory，每次多申请kv_size个token长度的cache,默认kv_size就是engine_max_length
   if (runtime_ctx->is_context) {
     int64_t per_size =
         ctx_->GetKVcacheSize() * hidden_size_ * SizeofType(dtype_);
@@ -400,5 +541,7 @@ AsStatus BatchMHAOp::Forward(RuntimeContext* runtime_ctx) {
   return status;
 }
 
-REGISTER_OP("DecOptMHA", CPU, BatchMHAOp)
+// REGISTER_OP(DecOptMHA, CUDA, BatchMHAOp)
+REGISTER_OP(DecOptMHA, CPU, BatchMHAOp)
+
 }  // namespace allspark

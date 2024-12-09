@@ -7,7 +7,6 @@
 #include <common.h>
 #include <stdint.h>
 
-#include <map>
 #include <vector>
 namespace allspark {
 namespace cpu {
@@ -91,20 +90,19 @@ void RelativePEKernel(T* out, const T* attention_bias, int batch_size,
 template <typename T>
 void ALiBiPEKernelLauncher(T* out, int* batch_offset, int batch_size,
                            int seq_length, int num_heads, int ori_num_heads,
-                           int rank, bool is_context,
-                           std::vector<int>& step_list);
+                           int step, int rank);
 template <typename T>
 void MHAKernel(T* out, const T* q, const T* k, const T* v, const float* mask,
                T* score, int beam_size, int batch_size, int num_heads,
                int seq_length, int step, int hidden_size, int size_per_head,
                int q_stride, int kv_stride, int max_seq_len, float alpha);
 template <typename T>
-void TopKKernel(T* output, int64_t* output_indices, const T* input,
-                int batch_size, int length, int64_t k);
+void TopKKernel(T* output, int* output_indices, const T* input, int batch_size,
+                int length, int64_t k);
 template <typename T>
 void TopPKernel(T* input, int* k_arr, float* p_arr, int batch, int length);
 template <typename T>
-void SampleKernel(int64_t* out, void* state, T* in, const int64_t* indice,
+void SampleKernel(int64_t* out, void* state, T* in, const int* indice,
                   int batch_size, int* num_arr, int stride);
 void SampleKernelInitLauncher(void* state, unsigned long long seed,
                               int batch_size);
@@ -143,7 +141,7 @@ void AddScoreLauncher(T* next_score, const T* beam_score, int batch,
 template <typename T>
 void UpdateBeamScoreLauncher(T* beam_score, int64_t* beam_next_token,
                              int* beam_idx, const T* topk_score,
-                             const int64_t* topk_indice, int batch_size,
+                             const int* topk_indice, int batch_size,
                              int beam_size, int vocab_size, int eos,
                              int* eos_count, int* hyps_beam_idx,
                              T* hyps_beam_score, int64_t* hyps_id,

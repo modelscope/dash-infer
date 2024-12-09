@@ -13,6 +13,7 @@ namespace allspark {
 
 enum AsDataFlags {
   empty_flag = 0x0,
+  cuda_pinned_mem = (1 << 0),
 };
 
 /*!

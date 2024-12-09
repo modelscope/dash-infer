@@ -5,12 +5,16 @@
 
 #include "rotary_mulquery_op.h"  // NOLINT
 
-#include <common/float16.h>
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#else
+#include <common/float16.h>
+#endif
+#include <cpu/cpu_context.h>
 namespace allspark {
 
 template <typename T>
@@ -23,6 +27,14 @@ static void rotary_inv_freq_convert(AsTensor* inv_freq_tensor, T* data_ptr,
   if (device_type == DeviceType::CPU) {
     memcpy(inv_freq_0.data(), data_ptr, inv_size * sizeof(T));
   }
+#ifdef ENABLE_CUDA
+  else if (device_type == DeviceType::CUDA) {
+    cudaStream_t stream = static_cast<const CUDAContext*>(ctx)->GetStream();
+    cudaMemcpyAsync(inv_freq_0.data(), data_ptr, inv_size * sizeof(T),
+                    cudaMemcpyDeviceToHost, stream);
+    ctx->Synchronize();
+  }
+#endif
   for (int i = 0; i < inv_size; ++i) {
     inv_freq_tmp[i] = (float)(inv_freq_0[i]);
   }
@@ -40,7 +52,46 @@ void rotary_multiquery_launcher(DataType dtype, void* out, void* in,
                                 int rotary_type, int xlogn,
                                 const DeviceContext* ctx) {
   DeviceType backend = ctx->GetDeviceType();
-  if (backend == DeviceType::CPU) {
+  if (backend == DeviceType::CUDA) {
+#ifdef ENABLE_CUDA
+    const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+    cudaStream_t cu_stream = gpu_ctx->GetStream();
+    switch (rotary_type) {
+      case RotaryType::base: {
+        if ((hidden_size * SizeofType(dtype)) % 16 == 0) {
+          auto functor = [&]<typename T>() {
+            cuda::RotaryOptEmbedding<T>((T*)out, (T*)in, inv_freq, batch_offset,
+                                        batch_size, seq_len, num_heads,
+                                        size_per_head, step_list, qkv_stride,
+                                        xlogn, nullptr, 0, nullptr, cu_stream);
+          };
+          DispatchCUDA(dtype, functor);
+        } else {
+          LOG(ERROR) << "rotary_launcher (hidden_size * "
+                        "SizeofType(dtype)) % 16 != 0,abort()"
+                     << std::endl;
+          abort();
+        }
+        break;
+      }
+      case RotaryType::half_inner: {
+        auto functor = [&]<typename T>() {
+          cuda::RotaryEmbeddingHalfInner<T>((T*)out, (T*)in, (float*)inv_freq,
+                                            batch_offset, batch_size, seq_len,
+                                            num_heads, size_per_head, step_list,
+                                            qkv_stride, cu_stream);
+        };
+        DispatchCUDA(dtype, functor);
+        break;
+      }
+      default: {
+        LOG(ERROR) << "RotaryMulQueryOp (GPU): not support rotary_type"
+                   << std::endl;
+        break;
+      }
+    }
+#endif
+  } else if (backend == DeviceType::CPU) {
     switch (rotary_type) {
       case RotaryType::base: {
         auto functor = [&]<typename T>() {
@@ -177,6 +228,17 @@ AsStatus RotaryMulQueryOp::Init(const OperatorProto& op_proto,
   // backend switch
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      hidden_size_ /= gpu_ctx->GetNranks();
+      num_heads_ /= gpu_ctx->GetNranks();
+      if (group_num_ != 1) {
+        group_num_ /= gpu_ctx->GetNranks();
+      }
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       hidden_size_ /= cpu_ctx->GetNranks();
@@ -193,6 +255,12 @@ AsStatus RotaryMulQueryOp::Init(const OperatorProto& op_proto,
   }
   kv_stride_ = size_per_head_ * group_num_;
   int32_t flags = static_cast<int32_t>(AsTensorFlags::empty_flag);
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    flags |= static_cast<int32_t>(AsTensorFlags::cuda_pinned_mem);
+  }
+#endif
   run_step_host_ = std::make_unique<AsTensor>(
       "run_step", DeviceType::CPU, DataType::INT32, DataMode::DENSE,
       Shape{ctx_->GetModelMaxBatch()}, flags);
@@ -334,5 +402,6 @@ AsStatus RotaryMulQueryOp::Forward(RuntimeContext* runtime_ctx) {
   return status;
 }
 
-REGISTER_OP("RotaryMulQuery", CPU, RotaryMulQueryOp)
+REGISTER_OP(RotaryMulQuery, CUDA, RotaryMulQueryOp)
+REGISTER_OP(RotaryMulQuery, CPU, RotaryMulQueryOp)
 }  // namespace allspark

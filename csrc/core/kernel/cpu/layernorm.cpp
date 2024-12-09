@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    layernorm.cpp
  */
+
 #include <cmath>
 
 #include "cpu_common.h"
@@ -350,9 +351,14 @@ void layerNorm(int n, const float* input, float* array, const float* gamma,
     array[d] = (input[d] - mean) * gamma[d] * variance + beta[d];
   }
 }
-
 void layerNormNobeta(int n, const float* input, float* array,
                      const float* gamma, float eps) {
+  //     float32x4_t sum_v[4];
+  // #pragma unroll
+  //     for (int i = 0; i < 4; ++i) {
+  //         sum_v[i] = vdupq_n_f32(0.0f);
+  //     }
+
   float32x4_t square_sum_v[4];
 #pragma unroll
   for (int i = 0; i < 4; ++i) {
@@ -364,6 +370,7 @@ void layerNormNobeta(int n, const float* input, float* array,
     float32x4x4_t regs = vld1q_f32_x4(input + d);
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
+      // sum_v[i] = vaddq_f32(sum_v[i], regs.val[i]);
       square_sum_v[i] =
           vaddq_f32(square_sum_v[i], vmulq_f32(regs.val[i], regs.val[i]));
     }
@@ -376,6 +383,14 @@ void layerNormNobeta(int n, const float* input, float* array,
     square_sum += val * val;
   }
 
+  //     sum_v[0] = vaddq_f32(sum_v[0], sum_v[1]);
+  //     sum_v[2] = vaddq_f32(sum_v[2], sum_v[3]);
+  //     sum_v[0] = vaddq_f32(sum_v[0], sum_v[2]);
+  // #pragma unroll
+  //     for (int i = 0; i < 4; ++i) {
+  //         sum += sum_v[0][i];
+  //     }
+
   square_sum_v[0] = vaddq_f32(square_sum_v[0], square_sum_v[1]);
   square_sum_v[2] = vaddq_f32(square_sum_v[2], square_sum_v[3]);
   square_sum_v[0] = vaddq_f32(square_sum_v[0], square_sum_v[2]);
@@ -384,8 +399,11 @@ void layerNormNobeta(int n, const float* input, float* array,
     square_sum += square_sum_v[0][i];
   }
 
+  // float mean = sum / n;
   float variance = square_sum / n;
   variance = 1.0f / std::sqrt(variance + eps);
+  // variance = 1.0f / std::sqrt(variance - mean * mean + eps);
+  // float32x4_t mean_v = vdupq_n_f32(mean);
   float32x4_t variance_v = vdupq_n_f32(variance);
 
   // normalization
@@ -393,15 +411,19 @@ void layerNormNobeta(int n, const float* input, float* array,
   for (; d <= n - 16; d += 16) {
     float32x4x4_t input_v = vld1q_f32_x4(input + d);
     float32x4x4_t gamma_v = vld1q_f32_x4(gamma + d);
+    // float32x4x4_t beta_v = vld1q_f32_x4(beta + d);
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
+      // input_v.val[i] = vsubq_f32(input_v.val[i], mean_v);
       input_v.val[i] = vmulq_f32(input_v.val[i], gamma_v.val[i]);
       input_v.val[i] = vmulq_f32(input_v.val[i], variance_v);
+      // input_v.val[i] = vaddq_f32(input_v.val[i], beta_v.val[i]);
     }
     vst1q_f32_x4(array + d, input_v);
   }
   for (; d < n; ++d) {
     array[d] = input[d] * gamma[d] * variance;  // + beta[d];
+    // array[d] = (input[d] - mean) * gamma[d] * variance;  // + beta[d];
   }
 }
 void layerNorm_bias(int n, const float* input, float* array, const float* gamma,
@@ -482,6 +504,12 @@ void layerNorm_bias(int n, const float* input, float* array, const float* gamma,
 }
 void layerNormNobeta_bias(int n, const float* input, float* array,
                           const float* gamma, const float* bias, float eps) {
+  //     float32x4_t sum_v[4];
+  // #pragma unroll
+  //     for (int i = 0; i < 4; ++i) {
+  //         sum_v[i] = vdupq_n_f32(0.0f);
+  //     }
+
   float32x4_t square_sum_v[4];
 #pragma unroll
   for (int i = 0; i < 4; ++i) {
@@ -495,6 +523,7 @@ void layerNormNobeta_bias(int n, const float* input, float* array,
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
       regs.val[i] = vaddq_f32(regs.val[i], bias_v.val[i]);
+      // sum_v[i] = vaddq_f32(sum_v[i], regs.val[i]);
       square_sum_v[i] =
           vaddq_f32(square_sum_v[i], vmulq_f32(regs.val[i], regs.val[i]));
     }
@@ -507,6 +536,14 @@ void layerNormNobeta_bias(int n, const float* input, float* array,
     square_sum += val * val;
   }
 
+  //     sum_v[0] = vaddq_f32(sum_v[0], sum_v[1]);
+  //     sum_v[2] = vaddq_f32(sum_v[2], sum_v[3]);
+  //     sum_v[0] = vaddq_f32(sum_v[0], sum_v[2]);
+  // #pragma unroll
+  //     for (int i = 0; i < 4; ++i) {
+  //         sum += sum_v[0][i];
+  //     }
+
   square_sum_v[0] = vaddq_f32(square_sum_v[0], square_sum_v[1]);
   square_sum_v[2] = vaddq_f32(square_sum_v[2], square_sum_v[3]);
   square_sum_v[0] = vaddq_f32(square_sum_v[0], square_sum_v[2]);
@@ -515,8 +552,11 @@ void layerNormNobeta_bias(int n, const float* input, float* array,
     square_sum += square_sum_v[0][i];
   }
 
+  // float mean = sum / n;
   float variance = square_sum / n;
   variance = 1.0f / std::sqrt(variance + eps);
+  // variance = 1.0f / std::sqrt(variance - mean * mean + eps);
+  // float32x4_t mean_v = vdupq_n_f32(mean);
   float32x4_t variance_v = vdupq_n_f32(variance);
 
   // normalization
@@ -525,16 +565,21 @@ void layerNormNobeta_bias(int n, const float* input, float* array,
     float32x4x4_t input_v = vld1q_f32_x4(input + d);
     float32x4x4_t bias_v = vld1q_f32_x4(bias + d);
     float32x4x4_t gamma_v = vld1q_f32_x4(gamma + d);
+    // float32x4x4_t beta_v = vld1q_f32_x4(beta + d);
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
       input_v.val[i] = vaddq_f32(input_v.val[i], bias_v.val[i]);
+      // input_v.val[i] = vsubq_f32(input_v.val[i], mean_v);
       input_v.val[i] = vmulq_f32(input_v.val[i], gamma_v.val[i]);
       input_v.val[i] = vmulq_f32(input_v.val[i], variance_v);
+      // input_v.val[i] = vaddq_f32(input_v.val[i], beta_v.val[i]);
     }
     vst1q_f32_x4(array + d, input_v);
   }
   for (; d < n; ++d) {
     array[d] = (input[d] + bias[d]) * gamma[d] * variance;  // + beta[d];
+    // array[d] = (input[d] + bias[d] - mean) * gamma[d] * variance; // +
+    // beta[d];
   }
 }
 #endif
@@ -547,6 +592,8 @@ void LayerNormKernel<float>(float* data_out, const float* data_in,
     parallel_for(m, [&](int i) {
       int offset = i * n;
       layerNorm(n, data_in + offset, data_out + offset, gamma, beta, eps);
+      // vNorm(n, data_in + offset, data_out + offset, gamma, beta,
+      //         bias + offset, eps, bias != nullptr);
     });
   } else {
     parallel_for(m, [&](int i) {

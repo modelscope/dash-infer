@@ -23,7 +23,6 @@ AsStatus GemmA16W8Base::InitV2(const OperatorProto& op_proto,
                                const TensorMap& weights_map,
                                TensorMap& weights_buffer,
                                TensorMap* tensor_map) {
-  DLOG(INFO) << "GemmA16W8Base::InitV2()" << std::endl;
   AS_CHECK_STATUS(AsOperator::Init(op_proto, ctx, weights_map, tensor_map));
 
   // check weight
@@ -99,14 +98,14 @@ AsStatus GemmA16W8Base::InitV2(const OperatorProto& op_proto,
   // Quantize datatype, int8 or uint8
   qtype_ = weights_[0]->GetDataType();
   if (qtype_ != DataType::INT8 && qtype_ != DataType::UINT8) {
-    LOG(ERROR) << "GemmA16W8Base : Only support int8/uint8." << std::endl;
+    LOG(ERROR) << "GemmA16W8Base : Only support int8/uint8, got : " << qtype_
+               << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
 
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus GemmA16W8Base::Reshape(int yn) {
-  DLOG(INFO) << "GemmA16W8Base::Reshape()" << std::endl;
   const Shape& x_shape = tensor_map_->at(in_names_[0])->GetShape();
   int x_ndims = x_shape.Size();
   Shape y_shape;

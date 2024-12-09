@@ -211,6 +211,9 @@ class DLTensorManager {
     // set data
     char* data_ptr = reinterpret_cast<char*>(dl_managed_tensor->dl_tensor.data);
     int data_size = shape_count * dl_managed_tensor->dl_tensor.dtype.bits / 8;
+    // tensor.mutable_data()->resize(data_size);
+    // memcpy(reinterpret_cast<char*>(const_cast<char*>(tensor.mutable_data()->data())),
+    // data_ptr, data_size);
     tensor.set_data(reinterpret_cast<const char*>(data_ptr), data_size);
   }
 };
@@ -270,8 +273,13 @@ void makeInputCfgAsFromProto(
     const allspark::allspark_service::StartRequestRequest& start_param_proto) {
 #define PROTO_CONFIG(src_cfg, config_name, target_config) \
   target_config.config_name = src_cfg.config_name()
-
   auto& gen_cfg_proto = start_param_proto.config();
+  std::vector<std::vector<int>> bad_words_ids;
+  auto& bad_word_ids_proto = gen_cfg_proto.bad_words_ids();
+  for (const auto& array : bad_word_ids_proto.ids()) {
+    std::vector<int> array_vector(array.word().begin(), array.word().end());
+    bad_words_ids.push_back(std::move(array_vector));
+  }
 
   PROTO_CONFIG(gen_cfg_proto, num_beams, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, num_return_sequences, gen_cfg);
@@ -284,24 +292,27 @@ void makeInputCfgAsFromProto(
   PROTO_CONFIG(gen_cfg_proto, max_length, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, no_repeat_ngram_size, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, eos_token_id, gen_cfg);
-  PROTO_CONFIG(gen_cfg_proto, uuid, gen_cfg);
+
+  gen_cfg.user_request_id = gen_cfg_proto.uuid();
+
   PROTO_CONFIG(gen_cfg_proto, presence_penalty, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, suppress_repetition_in_generation, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, input_len, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, top_k, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, seed, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, top_p, gen_cfg);
-
-  // bad_words_ids
-  std::vector<std::vector<int>> bad_words_ids;
-  auto& bad_word_ids_proto = gen_cfg_proto.bad_words_ids();
-  for (const auto& array : bad_word_ids_proto.ids()) {
-    std::vector<int> array_vector(array.word().begin(), array.word().end());
-    bad_words_ids.push_back(std::move(array_vector));
+  PROTO_CONFIG(gen_cfg_proto, lora_name, gen_cfg);
+  for (auto& pair : gen_cfg_proto.response_format()) {
+    gen_cfg.response_format.insert({pair.first, pair.second});
   }
+  for (auto& pair : gen_cfg_proto.vocab()) {
+    gen_cfg.vocab.insert({pair.first, pair.second});
+  }
+  gen_cfg.vocab_type =
+      static_cast<allspark::VocabType>(gen_cfg_proto.vocab_type());
+
   gen_cfg.bad_words_ids = bad_words_ids;
 
-  // stop_words_ids
   auto& stop_word_ids_proto = gen_cfg_proto.stop_words_ids();
   for (const auto& array : stop_word_ids_proto.ids()) {
     std::vector<int64_t> array_vector(array.word().begin(), array.word().end());
@@ -330,13 +341,24 @@ void makeInputVecMapFromSharedVecMap(
 void makeModelStructConfigProtoFromAs(
     allspark_service::ModelStructConfig& model_struct_proto,
     const allspark::AsModelConfig& model_config) {
+  auto lora_names = model_struct_proto.lora_names();
+  for (auto& name : model_config.lora_names) {
+    lora_names.add_names(name);
+  }
   model_struct_proto.set_model_name(model_config.model_name);
   model_struct_proto.set_model_path(model_config.model_path);
   model_struct_proto.set_weights_path(model_config.weights_path);
   model_struct_proto.set_compute_unit(model_config.compute_unit);
   model_struct_proto.set_matmul_precision(model_config.matmul_precision);
+  model_struct_proto.set_is_lora(model_config.is_lora);
+  model_struct_proto.set_swap_threshold(model_config.swap_threshold);
   model_struct_proto.set_engine_max_length(model_config.engine_max_length);
   model_struct_proto.set_engine_max_batch(model_config.engine_max_batch);
+  model_struct_proto.set_cache_span_size(model_config.cache_span_size);
+  model_struct_proto.set_cache_span_num_init(model_config.cache_span_num_init);
+  model_struct_proto.set_cache_span_num_grow(model_config.cache_span_num_grow);
+  model_struct_proto.set_enable_prefix_cache(model_config.enable_prefix_cache);
+  model_struct_proto.set_prefix_cache_ttl(model_config.prefix_cache_ttl);
   model_struct_proto.set_cache_mode(
       static_cast<allspark::allspark_service::AsCacheMode>(
           model_config.cache_mode));
@@ -350,6 +372,10 @@ void makeModelStructConfigProtoFromAs(
 // make AS ModelStructConfig from ModelStructConfig proto
 allspark::AsModelConfig makeModelStructConfigAsFromProto(
     const allspark::allspark_service::ModelStructConfig& struct_config) {
+  std::vector<std::string> lora_name;
+  for (int i = 0; i < struct_config.lora_names().names_size(); i++) {
+    lora_name.push_back(struct_config.lora_names().names(i));
+  }
   allspark::AsModelConfigBuilder builder;
   auto as_model_config =
       builder.withModelName(struct_config.model_name())
@@ -358,9 +384,16 @@ allspark::AsModelConfig makeModelStructConfigAsFromProto(
           .withComputeUnit(struct_config.compute_unit())
           .withEngineMaxLength(struct_config.engine_max_length())
           .withEngineMaxBatch(struct_config.engine_max_batch())
+          .withSwapThreshold(struct_config.swap_threshold())
           .withTextGraph(struct_config.text_graph())
           .withNumThreads(struct_config.num_threads())
           .withMatmulPrecision(struct_config.matmul_precision())
+          .withLoraNames(lora_name)
+          .withCacheSpanSize(struct_config.cache_span_size())
+          .withCacheSpanNumInit(struct_config.cache_span_num_init())
+          .withCacheSpanNumGrow(struct_config.cache_span_num_grow())
+          .withEnablePrefixCache(struct_config.enable_prefix_cache())
+          .withPrefixCacheTTL(struct_config.prefix_cache_ttl())
           .withCacheMode(
               static_cast<allspark::AsCacheMode>(struct_config.cache_mode()))
           .withPrefillMode(
@@ -385,9 +418,17 @@ void makeTensorListMapProtoFromAs(allspark_service::TensorListMap& outs_proto,
 // make GenerateConfig proto from AS GenerateConfig
 void makeGenCfgProtoFromAs(allspark_service::GenerateConfig& gen_cfg_proto,
                            const allspark::GenerateConfig& gen_cfg) {
-#undef PROTO_CONFIG
 #define PROTO_CONFIG(target_cfg, config_name, src_cfg) \
   target_cfg.set_##config_name(src_cfg.config_name)
+  // bad word ids
+  auto bad_word_ids_proto = gen_cfg_proto.mutable_bad_words_ids();
+  for (auto& bad_word_vec : gen_cfg.bad_words_ids) {
+    auto array = bad_word_ids_proto->add_ids();
+    for (auto& word_id : bad_word_vec) {
+      array->add_word(word_id);
+    }
+  }
+  // others
   PROTO_CONFIG(gen_cfg_proto, num_beams, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, num_return_sequences, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, temperature, gen_cfg);
@@ -399,23 +440,25 @@ void makeGenCfgProtoFromAs(allspark_service::GenerateConfig& gen_cfg_proto,
   PROTO_CONFIG(gen_cfg_proto, max_length, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, no_repeat_ngram_size, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, eos_token_id, gen_cfg);
-  PROTO_CONFIG(gen_cfg_proto, uuid, gen_cfg);
+
+  gen_cfg_proto.set_uuid(gen_cfg.user_request_id);
+
+//  PROTO_CONFIG(gen_cfg_proto, uuid, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, presence_penalty, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, suppress_repetition_in_generation, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, input_len, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, top_k, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, seed, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, top_p, gen_cfg);
-
-  // bad_words_ids
-  auto bad_word_ids_proto = gen_cfg_proto.mutable_bad_words_ids();
-  for (auto& bad_word_vec : gen_cfg.bad_words_ids) {
-    auto array = bad_word_ids_proto->add_ids();
-    for (auto& word_id : bad_word_vec) {
-      array->add_word(word_id);
-    }
+  PROTO_CONFIG(gen_cfg_proto, lora_name, gen_cfg);
+  for (auto& pair : gen_cfg.response_format) {
+    gen_cfg_proto.mutable_response_format()->insert({pair.first, pair.second});
   }
-
+  for (auto& pair : gen_cfg.vocab) {
+    gen_cfg_proto.mutable_vocab()->insert({pair.first, pair.second});
+  }
+  gen_cfg_proto.set_vocab_type(
+      static_cast<allspark::allspark_service::VocabType>(gen_cfg.vocab_type));
   // stop_words_ids
   auto stop_words_ids_proto = gen_cfg_proto.mutable_stop_words_ids();
   for (auto& stop_word_vec : gen_cfg.stop_words_ids) {
@@ -475,7 +518,7 @@ void makeLauchServiceCmd(std::vector<std::string>& cmd, int node_nums,
     cmd.push_back("-m");
     cmd.push_back(std::to_string(numa_offset + i));
     cmd.push_back("-N");
-    cmd.push_back(std::to_string(numa_offset + i));
+    cmd.push_back(std::to_string(i));
     cmd.push_back(daemon_path + "/allspark_daemon");
     cmd.push_back(std::to_string(client_pid));
     cmd.push_back(std::to_string(i));
@@ -483,6 +526,21 @@ void makeLauchServiceCmd(std::vector<std::string>& cmd, int node_nums,
       cmd.push_back(":");
     }
   }
+}
+
+int GetEnvGenConfigGemmBf16() {
+  static int use_bf16_gemm = 0;
+  if (use_bf16_gemm != 0) return use_bf16_gemm;
+  char* env_str = getenv("AS_USE_BF16_GEMM");
+
+  if (env_str != nullptr) {
+    try {
+      use_bf16_gemm = atoi(env_str);
+    } catch (std::invalid_argument& e) {
+      LOG(ERROR) << " AS_USE_BF16_GEMM setting not a int " << env_str;
+    }
+  }
+  return use_bf16_gemm;
 }
 
 // make
@@ -536,6 +594,8 @@ void makeRequestParamsAsFromProto(
   makeInputCfgAsFromProto(req_as->config, req_proto);
   req_as->infer_type =
       static_cast<allspark::AsEngine::RequestInferType>(req_proto.infer_type());
+  req_as->mm_type =
+      static_cast<allspark::AsEngine::RequestMMType>(req_proto.mm_type());
   model_name = req_proto.model_name();
 }
 
@@ -547,6 +607,9 @@ void makeRequestParamsProtoFromAs(
   // set infer_type
   req_proto.set_infer_type(
       static_cast<allspark_service::RequestInferType>(req_as->infer_type));
+  // set mm_type
+  req_proto.set_mm_type(
+      static_cast<allspark_service::RequestMMType>(req_as->mm_type));
   // TensorMap
   allspark_service::TensorMap* tensor_map_proto = req_proto.mutable_inputs();
   makeTensorMapProtoFromAs(*tensor_map_proto, *req_as->inputs);
@@ -559,12 +622,14 @@ void makeRequestParamsProtoFromAs(
 void makeAsEngineStatAsFromProto(
     allspark::AsEngineStat& stat,
     allspark::allspark_service::AsEngineStat& stat_proto) {
-#undef PROTO_CONFIG
 #define PROTO_CONFIG(src_cfg, config_name, target_config) \
   target_config.config_name = src_cfg.config_name()
-
   PROTO_CONFIG(stat_proto, model_name, stat);
+  PROTO_CONFIG(stat_proto, total_span, stat);
+  PROTO_CONFIG(stat_proto, used_span, stat);
+  PROTO_CONFIG(stat_proto, free_span, stat);
   PROTO_CONFIG(stat_proto, free_token, stat);
+  PROTO_CONFIG(stat_proto, span_size, stat);
   PROTO_CONFIG(stat_proto, pendding_request, stat);
   PROTO_CONFIG(stat_proto, running_request, stat);
   PROTO_CONFIG(stat_proto, total_device_memory_pool_size, stat);
@@ -573,17 +638,23 @@ void makeAsEngineStatAsFromProto(
   PROTO_CONFIG(stat_proto, total_prefill_token, stat);
   PROTO_CONFIG(stat_proto, generate_token_persec, stat);
   PROTO_CONFIG(stat_proto, process_token_persec, stat);
+  PROTO_CONFIG(stat_proto, prefix_cache_hit_token, stat);
+  PROTO_CONFIG(stat_proto, prefix_cache_miss_token, stat);
+  PROTO_CONFIG(stat_proto, prefix_cache_hit_rate, stat);
+  PROTO_CONFIG(stat_proto, prefix_cache_miss_rate, stat);
 }
 
 void makeAsEngineStatProtoFromAs(
     allspark::allspark_service::AsEngineStat& stat_proto,
     allspark::AsEngineStat& stat) {
-#undef PROTO_CONFIG
 #define PROTO_CONFIG(target_cfg, config_name, src_cfg) \
   target_cfg.set_##config_name(src_cfg.config_name)
-
   PROTO_CONFIG(stat_proto, model_name, stat);
+  PROTO_CONFIG(stat_proto, total_span, stat);
+  PROTO_CONFIG(stat_proto, used_span, stat);
+  PROTO_CONFIG(stat_proto, free_span, stat);
   PROTO_CONFIG(stat_proto, free_token, stat);
+  PROTO_CONFIG(stat_proto, span_size, stat);
   PROTO_CONFIG(stat_proto, pendding_request, stat);
   PROTO_CONFIG(stat_proto, running_request, stat);
   PROTO_CONFIG(stat_proto, total_device_memory_pool_size, stat);

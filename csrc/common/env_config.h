@@ -70,4 +70,14 @@ class AttentionEnvConfig {
   }
 };
 
+class WeightManagerEnvConfig {
+ public:
+  static bool IsWeightLoadingFromMmapEnabled() {
+    std::string env_weight_load_from_mmap =
+        EnvVarConfig::GetString("AS_WEIGHT_LOAD_FROM_MMAP", "off");
+    return (env_weight_load_from_mmap == "on" ||
+            env_weight_load_from_mmap == "ON");
+  }
+};
+
 }  // namespace allspark

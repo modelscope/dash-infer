@@ -6,22 +6,48 @@
 #include "chunk_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 namespace allspark {
 
 void chunk_launcher(DataType dtype, void* out, void* in, int batch_size,
                     int seq_len, int hidden_size, int chunk_split,
                     const DeviceContext* ctx) {
+#ifdef CONFIG_DEBUG_OP
+  DLOG(INFO) << "chunk_launcher" << std::endl;
+#endif
+
   DeviceType backend = ctx->GetDeviceType();
-  if (backend == DeviceType::CPU) {
-    auto functor = [&]<typename T>() {
-      cpu::ChunkKernelLauncher<T>((T*)out, (T*)in, batch_size, seq_len,
-                                  hidden_size, chunk_split);
-    };
-    DispatchCPU(dtype, functor);
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+      cudaStream_t cu_stream = gpu_ctx->GetStream();
+      auto functor = [&]<typename T>() {
+        cuda::Chunk<T>((T*)out, (T*)in, batch_size, seq_len, hidden_size,
+                       chunk_split, cu_stream);
+      };
+      DispatchCUDA(dtype, functor);
+      break;
+    }
+#endif
+    case DeviceType::CPU: {
+      auto functor = [&]<typename T>() {
+        cpu::ChunkKernelLauncher<T>((T*)out, (T*)in, batch_size, seq_len,
+                                    hidden_size, chunk_split);
+      };
+      DispatchCPU(dtype, functor);
+      break;
+    }
+    default:
+      LOG(ERROR) << "Chunk Operator does not support "
+                 << DeviceType_Name(backend) << " device type" << std::endl;
+      return;
   }
 }
 AsStatus ChunkOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
@@ -35,7 +61,7 @@ AsStatus ChunkOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   if (attr_map.find("fixed_training_split") != attr_map.end()) {
     chunk_split_ = *(int*)(attr_map.at("fixed_training_split").c_str());
   } else {
-    chunk_split_ = 1;
+    chunk_split_ = 1;  // 实际训练用的卡数，如果不指定则为1。
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -58,5 +84,6 @@ AsStatus ChunkOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Chunk", CPU, ChunkOp)
+REGISTER_OP(Chunk, CUDA, ChunkOp)
+REGISTER_OP(Chunk, CPU, ChunkOp)
 }  // namespace allspark

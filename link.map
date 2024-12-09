@@ -1,4 +1,4 @@
-VERS_1.0 {
+AS_VERS_3.0 {
     global:
         extern "C++" {
             *allspark::*;

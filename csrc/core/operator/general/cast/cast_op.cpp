@@ -6,10 +6,29 @@
 #include "cast_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
+#ifdef ENABLE_CUDA
+
+AsStatus gpu_cast(DataType src_dtype, DataType dst_dtype, const void* in,
+                  void* out, int size, const DeviceContext* ctx) {
+  DLOG(INFO) << "gpu_cast" << std::endl;
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename SrcType, typename DstType>() {
+    const SrcType* typed_in = static_cast<const SrcType*>(in);
+    DstType* typed_out = static_cast<DstType*>(out);
+    cuda::CastKernelLauncher(typed_in, typed_out, size, gpu_ctx->GetStream());
+  };
+  DispatchCast(src_dtype, dst_dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
+
 AsStatus cpu_cast(DataType src_dtype, DataType dst_dtype, const void* in,
                   void* out, int size, const DeviceContext* ctx) {
   DLOG(INFO) << "cpu_cast" << std::endl;
@@ -31,6 +50,11 @@ AsStatus CastOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   tensor_map_->at(out_names_[0])->SetDataType(dst_datatype_);
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_cast;
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_cast;
       break;
@@ -55,5 +79,6 @@ AsStatus CastOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Cast", CPU, CastOp)
+REGISTER_OP(Cast, CUDA, CastOp)
+REGISTER_OP(Cast, CPU, CastOp)
 }  // namespace allspark

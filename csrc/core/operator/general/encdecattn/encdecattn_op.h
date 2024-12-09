@@ -9,7 +9,7 @@
 
 namespace allspark {
 
-/** @brief Cross Attention
+/** @brief Cross Attention，设计时需要考虑到beam search引起的broadcast的问题
  *    input :
  *       > query: [batch_size * beam_size, 1, hidden_size]
  *       > enc_kv: [batch_size, enc_seq_len, hidden_size * 2]

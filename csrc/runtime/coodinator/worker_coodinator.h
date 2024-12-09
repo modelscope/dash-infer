@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    worker_coodinator.h
  */
+
 #ifndef WORKER_COODINATOR_H
 #define WORKER_COODINATOR_H
 

@@ -12,7 +12,6 @@ REPO_ROOT=$( dirname -- "$( dirname -- "${SCRIPT_DIR}" )" )
 source activate ds_py
 pushd $SCRIPT_DIR
 
-
 # 捕获arch命令的输出
 architecture=$(arch)
 
@@ -57,7 +56,7 @@ build_wheel_for_python() {
     conda activate "$env_name"
     conda install pybind11 -y
 
-    pip install -r ${REPO_ROOT}/python/dev-requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+    pip install -r ${REPO_ROOT}/python/requirements_dev_cpu.txt -i https://mirrors.aliyun.com/pypi/simple/
     python ${REPO_ROOT}/python/setup.py bdist_wheel
     pip wheel ${REPO_ROOT}/python --no-deps -w ${REPO_ROOT}/python/wheelhouse/ --log wheel_log.txt
 

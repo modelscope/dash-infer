@@ -10,10 +10,12 @@
 #include <cstring>
 #include <fstream>
 
-#include "sparse_util.h"
-
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 
 #define ELL_MAXC 0.1
@@ -211,6 +213,11 @@ std::string save_allsparky(const std::string& bin_data,
       if (word_size == 4) {  // fp32
         nnz = get_nnz_ell(reinterpret_cast<const float*>(bin_data.data()), row,
                           col, VECT);
+        // if (nnz / col > row * ELL_MAXC) {
+        //     LOG(ERROR) << "not support ell ,nnz/col= " << nnz / col
+        //                << std::endl;
+        //     return "";
+        // }
         std::vector<char> row_idx(nnz * sizeof(unsigned short));
         std::vector<char> data(nnz * word_size);
         dense_to_ell_padding(reinterpret_cast<const float*>(bin_data.data()),
@@ -227,6 +234,11 @@ std::string save_allsparky(const std::string& bin_data,
       } else if (word_size == 2) {  // fp16
         nnz = get_nnz_ell(reinterpret_cast<const half*>(bin_data.data()), row,
                           col, VECT);
+        // if (nnz / col > row * ELL_MAXC) {
+        //     LOG(ERROR) << "not support ell ,nnz/col= " << nnz / col
+        //                << std::endl;
+        //     return "";
+        // }
         std::vector<char> row_idx(nnz * sizeof(unsigned short));
         std::vector<char> data(nnz * word_size);
         dense_to_ell_padding(reinterpret_cast<const half*>(bin_data.data()),
@@ -261,7 +273,7 @@ void save_allsparkz(std::map<std::string, std::string>& weights,
     std::string l_h;
     l_h.assign(local_header.begin(), local_header.end());
     fout2 << l_h << w.second;
-    w.second = "";
+    w.second = "";  // 转换完直接释放
   }
   std::vector<char> global_header;
   global_header += "AS";
@@ -272,7 +284,7 @@ void save_allsparkz(std::map<std::string, std::string>& weights,
 void save_allsparky_tofile(const std::string& weights_path,
                            const std::string& name, const std::string& bin_data,
                            TensorAttribute& tensor_info) {
-  std::ofstream fout2(weights_path, std::ios::app);
+  std::ofstream fout2(weights_path, std::ios::app);  // 续写文件
   std::vector<char> local_header;
   local_header += "AS";
   local_header += (uint16_t)0x01;
@@ -294,7 +306,7 @@ void save_allsparky_tofile(const std::string& weights_path,
 void save_allsparky_tofile(const std::string& weights_path,
                            const std::string& name, void* data_ptr,
                            int64_t nbytes, TensorAttribute& tensor_info) {
-  std::ofstream fout2(weights_path, std::ios::app);
+  std::ofstream fout2(weights_path, std::ios::app);  // 续写文件
   std::vector<char> local_header;
   local_header += "AS";
   local_header += (uint16_t)0x01;
@@ -317,7 +329,7 @@ void save_allsparky_tofile(const std::string& weights_path,
   }
 }
 void set_global_header(const std::string& weights_path) {
-  std::ofstream fout2(weights_path, std::ios::app);
+  std::ofstream fout2(weights_path, std::ios::app);  // 续写文件
   std::vector<char> global_header;
   global_header += "AS";
   global_header += (uint16_t)0;

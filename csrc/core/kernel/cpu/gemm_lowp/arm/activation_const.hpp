@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    activation_const.hpp
  */
+
 #pragma once
 
 // clang-format off

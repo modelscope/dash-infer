@@ -6,10 +6,14 @@
 #include "encdecattn_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <cmath>
+#ifdef ENABLE_CUDA
+#include <check_cuda.h>
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 namespace allspark {
 
 AsStatus EncdecAttentionOp::Init(const OperatorProto& op_proto,
@@ -33,11 +37,22 @@ AsStatus EncdecAttentionOp::Init(const OperatorProto& op_proto,
   num_heads_ = *(int*)(attr_map.at("num_heads").c_str());
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      num_heads_ /= gpu_ctx->GetNranks();
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       num_heads_ /= cpu_ctx->GetNranks();
       break;
     }
+    default:
+      LOG(ERROR) << "EncdecAttention Operator does not support "
+                 << DeviceType_Name(backend) << " device type" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -65,6 +80,16 @@ AsStatus EncdecAttentionOp::Reshape() {
       score_size_ + (int64_t)sizeof(void*) * round32(gemm_batch_) * 5;
   tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
   tensor_map_->at(out_names_[0])->SetShape(std::move(x_shape));
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+    cublasHandle_t cublas_handle = gpu_ctx->GetCublasHandle();
+    cublasSetWorkspace(cublas_handle,
+                       tensor_map_->at("cublas_workspace")->GetDataPtr(),
+                       tensor_map_->at("cublas_workspace")->GetSizeInByte());
+  }
+#endif
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus EncdecAttentionOp::Forward() {
@@ -84,6 +109,49 @@ AsStatus EncdecAttentionOp::Forward() {
   void** out_array = score_array + round32(gemm_batch_);
   DeviceType backend = ctx_->GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* cu_ctx = static_cast<const CUDAContext*>(ctx_);
+      cublasHandle_t cublas_handle = cu_ctx->GetCublasHandle();
+      cudaStream_t cu_stream = (cudaStream_t)(cu_ctx->GetStream());
+      if (cu_ctx->GetMatmulPrecision() == PrecisionLevel::HIGH &&
+          dtype_ == FLOAT32) {
+        cublasSetMathMode(cublas_handle, CUBLAS_TF32_TENSOR_OP_MATH);
+      }
+      float one = 1.0f, zero = 0.0f;
+      auto functor = [&]<typename T>() {
+        int q_stride = hidden_size_;
+        int kv_stride = 2 * hidden_size_;
+        int score_stride = enc_seq_len_ * num_heads_;
+        int out_stride = hidden_size_;
+        T* out = (T*)(tensor_map_->at(out_names_[0])->GetDataPtr());
+        T* score = (T*)score_buf;
+        T* query = (T*)q_buf;
+        T* key = (T*)k_buf;
+        T* value = (T*)v_buf;
+        cuda::GetBatchArrayLauncher(
+            query, key, value, score, out, (T**)q_array, (T**)k_array,
+            (T**)v_array, (T**)score_array, (T**)out_array, batch_size_,
+            beam_size_, num_heads_, size_per_head_, enc_seq_len_, q_stride,
+            kv_stride * enc_seq_len_, score_stride, out_stride, cu_stream);
+        // batch gemm 1
+        cuda::BatchGemmWraper<T>(score_array, q_array, k_array, 1, enc_seq_len_,
+                                 size_per_head_, false, true, alpha_, 0.0f,
+                                 q_stride, kv_stride, score_stride, gemm_batch_,
+                                 cublas_handle);
+        cuda::SoftmaxKernelLauncher((T*)score, mask_buf,
+                                    batch_size_ * beam_size_, beam_size_,
+                                    num_heads_, 1, enc_seq_len_, cu_stream);
+        // batch gemm 2
+        cuda::BatchGemmWraper<T>(out_array, score_array, v_array, 1,
+                                 size_per_head_, enc_seq_len_, false, false,
+                                 1.0f, 0.0f, score_stride, kv_stride,
+                                 out_stride, gemm_batch_, cublas_handle);
+      };
+      DispatchCUDA(dtype_, functor);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       auto functor = [&]<typename T>() {
         int q_stride = hidden_size_;
@@ -103,6 +171,11 @@ AsStatus EncdecAttentionOp::Forward() {
         cpu::BatchGemmWraper<T>(score_array, q_array, k_array, 1, enc_seq_len_,
                                 size_per_head_, false, true, alpha_, 0.0f,
                                 q_stride, kv_stride, score_stride, gemm_batch_);
+        // if (position_embedding) {
+        //     cpu::SimpleAdd((T*)score, (T*)score,
+        //     (T*)position_embedding,
+        //                    batch_size * num_heads * step);
+        // }
         cpu::BatchSoftmax<T>(score, mask_buf, batch_size_ * beam_size_,
                              beam_size_, num_heads_, 1, enc_seq_len_);
         cpu::BatchGemmWraper<T>(out_array, score_array, v_array, 1,
@@ -121,5 +194,6 @@ AsStatus EncdecAttentionOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("EncdecAttention", CPU, EncdecAttentionOp)
+REGISTER_OP(EncdecAttention, CUDA, EncdecAttentionOp)
+REGISTER_OP(EncdecAttention, CPU, EncdecAttentionOp)
 }  // namespace allspark

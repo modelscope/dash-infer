@@ -22,6 +22,7 @@ enum RotaryType : int {
   position_embedding_2D = 1,  // use for chatglm_v1
   rotary_pct = 2,             // use for dolly_v2
   half_inner = 3,             // use for chatglm_v2/3
+  mrope = 4,                  // use for qwen2_vl
 };
 class RotaryMulQueryOp : public AsOperator {
  public:
@@ -47,17 +48,11 @@ class RotaryMulQueryOp : public AsOperator {
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
   AsStatus RunRotary(int run_batch_size);
 
-  enum RotaryInvFreqType : int {
-    base = 0,
-    chatglm_v2 = 1,
-    chatglm_v3 = 2,
-  };
-
  private:
   std::vector<float> calculate_invfreq(float base, int query_length, int type) {
     std::vector<float> invfreq;
     switch (type) {
-      case RotaryInvFreqType::base: {
+      case RotaryInvFreqType::base_rotary: {
         auto alpha = [&](float query_length) -> float {
           float context_value =
               log2(query_length / float(ntk_model_embed_)) + 1;

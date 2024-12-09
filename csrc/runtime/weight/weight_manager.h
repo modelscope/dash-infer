@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    weight_manager.h
  */
+
 #pragma once
 
 // #include <core/model/model.h>
@@ -19,6 +20,18 @@ namespace allspark {
 
 class RankInfo;
 class TransformerProto;
+// class ModelWeightHandler;
+
+enum class SwapStatus {
+  SwapInit = 0,  // initial state.
+  SwapOut = 1,
+  SwapIn = 2,
+};
+
+class WeightSwapConfig {
+ public:
+  bool enable = false;
+};
 
 class ModelWeightHandler {
  public:
@@ -44,6 +57,16 @@ class ModelWeightHandler {
   std::weak_ptr<TransformerProto> model_ir_weak_;
 };
 
+enum class WeightEvent {
+  WeightOnLoad,
+  WeightOnSwapOut,
+  WeightOnSwapIn,
+  WeightOnFree,
+};
+
+using WeightEventCallback = std::function<void(
+    std::shared_ptr<ModelWeightHandler> weight_handler, WeightEvent event)>;
+
 struct ModelWeightAccessInfo {
   std::string name;
   TensorInfo info;
@@ -64,8 +87,9 @@ class WeightManager {
   // register the model information
   // check the model file exists
   // raise exception if there is some error.
-  std::shared_ptr<ModelWeightHandler> RegisterModel(
+  virtual std::shared_ptr<ModelWeightHandler> RegisterModel(
       AsModelConfig& confg, std::shared_ptr<TransformerProto> model_ir);
+  virtual int GetNumModels() = 0;
 
   // load the model by different worker, only load the worker's shard, will be
   // called different thread.
@@ -74,9 +98,54 @@ class WeightManager {
   // in this function it must make sure read file in single thread and can
   // split the weight in different thread. read file in sequence will save
   // disk io, but in this function it should split the weight concurrently.
-  AsStatus LoadWeightForModel(
+  virtual AsStatus LoadWeightForModel(
       const DeviceContext& target_device_ctx,
       std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info);
+
+  // weight buffer function:
+  // 1. clear already swap out weight buffer (swap out)
+  // 2. fill in tensor saved buffer( swap in  ), opt, this should be save
+  // splitted weights.
+  // 3. give weight map buffer to give op init. (model.cpp: 112) , (don't want
+  // to expose the weight map pointer, how it?)
+  // 4. save weight into an output string (this part can be move into
+  // manager.)
+
+  /**
+   * swap out device memory, save those tensor for that rank to cpu, first
+   * time call this function will allocate cpu tensor to save the device
+   * memory.
+   * This function must called after models's load and split for multiple
+   * devices.
+   *
+   * @param handler weight handler
+   */
+  virtual void SwapOutWeight(std::shared_ptr<ModelWeightHandler>& handler,
+                             RankInfo info);
+
+  /**
+   * swap in device memory, allocate device tensor and copy cpu tensor.
+   * because each rank have their
+   *
+   * @param handler weight handler.
+   */
+  virtual void SwapInWeight(std::shared_ptr<ModelWeightHandler>& handler,
+                            RankInfo info);
+
+  /**
+   * free cpu memory resource for swap function
+   * the cpu memory allocate in first swap out will be free after this
+   * function.
+   *
+   * @param handler weight handler
+   */
+  virtual void FreeSwapResource(std::shared_ptr<ModelWeightHandler>& handler);
+
+  virtual SwapStatus GetSwapStatus(
+      std::shared_ptr<ModelWeightHandler>& handler);
+
+  virtual void SetSwapConfig(std::shared_ptr<ModelWeightHandler>& handler,
+                             WeightSwapConfig swap_config);
 
   /**
    * Get the weight tensor, if will return the weight for this rank, it maybe
@@ -91,7 +160,7 @@ class WeightManager {
    *
    * @return shared ptr of tensor.
    */
-  std::shared_ptr<AsTensor> GetWeightTensor(
+  virtual std::shared_ptr<AsTensor> GetWeightTensor(
       std::shared_ptr<ModelWeightHandler>& handler, RankInfo& rank_info,
       const std::string& name);
 
@@ -104,26 +173,38 @@ class WeightManager {
    * @param handler weight handler.
    * @param out_allsparkz out string buffer.
    */
-  void SaveWeights(std::shared_ptr<ModelWeightHandler> handler,
-                   std::string* out_allsparkz);
+  virtual void SaveWeights(std::shared_ptr<ModelWeightHandler> handler,
+                           std::string* out_allsparkz);
 
-  void CheckModelConsistency(
+  /**
+   * free the weight memory belong to this model.
+   */
+  virtual void FreeWeight(std::shared_ptr<ModelWeightHandler> handler);
+
+  virtual void CheckModelConsistency(
       std::shared_ptr<ModelWeightHandler> weight_handler);
+
+  virtual void RegisterWeightEventListener(WeightEventCallback callback);
 
  protected:
   WeightManager();
 };
 
+// tmp moved here, for compiling of LoraManager
 class WeightManagerImpl : public WeightManager {
  public:
+  ~WeightManagerImpl();
   // register the model information
   // check the model file exists
   // raise exception if there is some error.
   std::shared_ptr<ModelWeightHandler> RegisterModel(
-      AsModelConfig& confg, std::shared_ptr<TransformerProto> model_ir);
+      AsModelConfig& confg,
+      std::shared_ptr<TransformerProto> model_ir) override;
+  int GetNumModels();
 
   // check the weight and param consistency
-  void CheckModelConsistency(std::shared_ptr<ModelWeightHandler> handler);
+  void CheckModelConsistency(
+      std::shared_ptr<ModelWeightHandler> handler) override;
 
   // load the model by different worker.
   // this function may call by different thread concurrently.
@@ -132,21 +213,42 @@ class WeightManagerImpl : public WeightManager {
   // disk io, but in this function it should split the weight concurrently.
   AsStatus LoadWeightForModel(
       const DeviceContext& target_device_ctx,
-      std::shared_ptr<ModelWeightHandler>& weight_handler, RankInfo& rank_info);
-
-  std::vector<ModelWeightAccessInfo> GetAccessOrderOfWeightFile(
-      std::shared_ptr<ModelWeightHandler> mhandle);
+      std::shared_ptr<ModelWeightHandler>& weight_handler,
+      RankInfo& rank_info) override;
 
   std::shared_ptr<AsTensor> GetWeightTensor(
       std::shared_ptr<ModelWeightHandler>& handler, RankInfo& rank_info,
-      const std::string& name);
+      const std::string& name) override;
 
   void SaveWeights(std::shared_ptr<ModelWeightHandler> handler,
-                   std::string* out_allsparkz);
+                   std::string* out_allsparkz) override;
 
   bool SeekToNextTensor(FILE* fp, TensorInfo& info);
 
+  void SwapOutWeight(std::shared_ptr<ModelWeightHandler>& handler,
+                     RankInfo info) override;
+
+  void SwapInWeight(std::shared_ptr<ModelWeightHandler>& handler,
+                    RankInfo info) override;
+
+  void FreeSwapResource(std::shared_ptr<ModelWeightHandler>& handler) override;
+
+  SwapStatus GetSwapStatus(
+      std::shared_ptr<ModelWeightHandler>& handler) override;
+
+  void SetSwapConfig(std::shared_ptr<ModelWeightHandler>& handler,
+                     WeightSwapConfig swap_config) override;
+
+  bool IsSwapEnable(std::shared_ptr<ModelWeightHandler>& handler);
+
+  void FreeWeight(std::shared_ptr<ModelWeightHandler> handler) override;
+
+  void RegisterWeightEventListener(WeightEventCallback callback) override;
+
  protected:
+  //    typedef std::unique_lock<std::shared_timed_mutex> rw_write_lock;
+  //    typedef std::shared_lock<std::shared_timed_mutex> rw_read_lock;
+
   typedef unique_lock_wrapper<std::shared_timed_mutex> rw_write_lock;
   typedef shared_lock_wrapper<std::shared_timed_mutex> rw_read_lock;
 
@@ -155,8 +257,29 @@ class WeightManagerImpl : public WeightManager {
   typedef std::map<std::shared_ptr<ModelWeightHandler>, weights_of_rank_t>
       weight_storage_t;
 
+  typedef std::map<RankInfo, SwapStatus> swap_status_of_weight_t;
+  typedef std::map<std::shared_ptr<ModelWeightHandler>, swap_status_of_weight_t>
+      swap_status_t;
+
+  typedef std::map<std::shared_ptr<ModelWeightHandler>, WeightSwapConfig>
+      swap_config_t;
+
   bool handler_is_avalibile(std::shared_ptr<ModelWeightHandler>& handler) {
     return weight_storage_.count(handler) > 0;
+  }
+
+  bool handler_swap_in_is_avalibile(
+      std::shared_ptr<ModelWeightHandler>& handler) {
+    return swap_weight_storage_.count(handler) > 0;
+  }
+
+  bool handler_is_swapout(std::shared_ptr<ModelWeightHandler>& handler,
+                          RankInfo rank_info) {
+    try {
+      return swap_status_.at(handler).at(rank_info) == SwapStatus::SwapOut;
+    } catch (std::out_of_range& e) {
+      return false;
+    }
   }
 
   bool weight_on_rank_is_avalibile(std::shared_ptr<ModelWeightHandler>& handler,
@@ -182,6 +305,15 @@ class WeightManagerImpl : public WeightManager {
       proto_store_;
 
   weight_storage_t weight_storage_;
+
+  weight_storage_t swap_weight_storage_;
+
+  std::vector<WeightEventCallback> weight_event_callback;
+
+  // weight swap status.
+  swap_status_t swap_status_;
+
+  swap_config_t swap_config_;
 };
 
 inline bool operator<(const ModelWeightHandler& lhs,
@@ -195,4 +327,5 @@ inline WeightManagerImpl* GetImpl(WeightManager* ptr) {
 inline const WeightManagerImpl* GetImpl(const WeightManager* ptr) {
   return (const WeightManagerImpl*)ptr;
 }
+
 }  // namespace allspark

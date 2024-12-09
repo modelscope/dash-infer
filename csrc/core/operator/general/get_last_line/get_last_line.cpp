@@ -6,8 +6,11 @@
 #include "get_last_line.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 using dnnl::memory;
 
 namespace allspark {
@@ -45,5 +48,6 @@ AsStatus GetLastLineOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("GetLastLine", CPU, GetLastLineOp)
+REGISTER_OP(GetLastLine, CUDA, GetLastLineOp)
+REGISTER_OP(GetLastLine, CPU, GetLastLineOp)
 }  // namespace allspark

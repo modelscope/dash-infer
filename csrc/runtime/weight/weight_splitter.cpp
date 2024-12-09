@@ -126,7 +126,246 @@ class WeightSplitterVerticalSplit : public WeightSplitter {
     }
   }
 };
+class WeightSplitterBatchVerticalSplit : public WeightSplitter {
+ public:
+  WeightSplitterBatchVerticalSplit(RankInfo rank_info)
+      : WeightSplitter(SplitMode::BATCH_VSPLIT, rank_info){};
 
+  bool IsSplittable(TensorInfo& info) {
+    // check the outer dim can div by nrank or not.
+    if (info.shape.Size() == 3) {  // it's the weight matrix.
+      if (info.shape[2] % rank_info_.rank_size != 0) {
+        LOG(ERROR) << " weight split: batchvsplit: rank: "
+                   << " tensor shape[2]: " << info.shape[2]
+                   << " cannot div by nrank: " << rank_info_.rank_size;
+        return false;
+      }
+    } else {
+      if (info.shape.Size() == 2) {  // it's the scale or zero matrix.
+        if (info.shape[1] % rank_info_.rank_size != 0) {
+          LOG(ERROR) << " weight split: batchvsplit: rank: "
+                     << " tensor shape[1]: " << info.shape[1]
+                     << " cannot div by nrank: " << rank_info_.rank_size;
+          return false;
+        }
+      }
+      LOG(ERROR) << " weight split: batchvsplit: try to div higger dim matrix "
+                 << info.shape.Size();
+      return false;
+    }
+
+    return true;
+  }
+
+  bool IsModelProcessable(SplitMode mode) {
+    return mode == SplitMode::BATCH_VSPLIT;
+  }
+
+  void SetShape(TensorInfo dst_tensor_info,
+                std::shared_ptr<AsTensor> dst_tensor) {
+    Shape new_shape(dst_tensor_info.shape);
+    if (new_shape.Size() == 3) {
+      new_shape[2] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    } else if (new_shape.Size() == 2) {
+      new_shape[1] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    }
+  }
+  void CopyWeight(TensorInfo dst_tensor_info,
+                  std::shared_ptr<AsTensor> dst_tensor,
+                  std::shared_ptr<AsTensor> opt_whole_tensor,
+                  const void* whole_weight_ptr, size_t len) {
+    // offset, not by bytes.
+    if (opt_whole_tensor) {
+      Shape new_shape(dst_tensor_info.shape);
+      if (new_shape.Size() == 3) {
+        int batch = new_shape[0];
+        int sub_matrix_width = new_shape[2];
+        int sub_matrix_height = new_shape[1];
+        for (int sub_gemm_idx = 0; sub_gemm_idx < batch; sub_gemm_idx++) {
+          size_t sub_matrix_width_after_div_rank =
+              sub_matrix_width / rank_info_.rank_size;
+          size_t base_src_idx =
+              sub_gemm_idx * sub_matrix_height * sub_matrix_width +
+              sub_matrix_width_after_div_rank * rank_info_.rank_id;
+          size_t base_dst_idx = sub_gemm_idx * sub_matrix_height *
+                                sub_matrix_width_after_div_rank;
+          AsTensor* dst = dst_tensor.get();
+          AsTensor* src = opt_whole_tensor.get();
+          size_t data_size = SizeofType(src->GetDataType());
+          void* src_ptr_with_offsets =
+              (char*)src->GetDataPtr() + base_src_idx * data_size;
+          void* dst_ptr_with_offsets =
+              (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+          TensorUtils::CopyMatrix2D(dst_ptr_with_offsets, src_ptr_with_offsets,
+                                    dst->GetDeviceType(), src->GetDeviceType(),
+                                    dst->GetStrideInByte(),
+                                    src->GetStrideInByte(), sub_matrix_height,
+                                    dst->GetStrideInByte());
+        }
+      } else if (new_shape.Size() == 2) {
+        int batch = new_shape[0];
+        int sub_matrix_width = new_shape[1];
+        int sub_matrix_height = 1;
+        for (int sub_gemm_idx = 0; sub_gemm_idx < batch; sub_gemm_idx++) {
+          size_t sub_matrix_width_after_div_rank =
+              sub_matrix_width / rank_info_.rank_size;
+          size_t base_src_idx =
+              sub_gemm_idx * sub_matrix_height * sub_matrix_width +
+              sub_matrix_width_after_div_rank * rank_info_.rank_id;
+          size_t base_dst_idx = sub_gemm_idx * sub_matrix_height *
+                                sub_matrix_width_after_div_rank;
+          AsTensor* dst = dst_tensor.get();
+          AsTensor* src = opt_whole_tensor.get();
+          size_t data_size = SizeofType(src->GetDataType());
+          void* src_ptr_with_offsets =
+              (char*)src->GetDataPtr() + base_src_idx * data_size;
+          void* dst_ptr_with_offsets =
+              (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+          TensorUtils::CopyMatrix2D(dst_ptr_with_offsets, src_ptr_with_offsets,
+                                    dst->GetDeviceType(), src->GetDeviceType(),
+                                    dst->GetStrideInByte(),
+                                    src->GetStrideInByte(), sub_matrix_height,
+                                    dst->GetStrideInByte());
+        }
+      }
+    } else {
+      assert(-1);
+      // TODO: impl later.
+    }
+  }
+};
+class WeightSplitterBatchKVerticalSplit : public WeightSplitter {
+ public:
+  WeightSplitterBatchKVerticalSplit(RankInfo rank_info)
+      : WeightSplitter(SplitMode::BATCH_VSPLIT, rank_info){};
+
+  bool IsSplittable(TensorInfo& info) {
+    // check the outer dim can div by nrank or not.
+    if (info.shape.Size() == 3) {  // it's the weight matrix.
+      if (info.shape[2] % rank_info_.rank_size != 0) {
+        LOG(ERROR) << " weight split: BATCH_KVSPLIT: rank: "
+                   << " tensor shape[2]: " << info.shape[2]
+                   << " cannot div by nrank: " << rank_info_.rank_size;
+        return false;
+      }
+    } else if (info.shape.Size() == 2) {  // it's the scale or zero matrix.
+      if (info.shape[1] % rank_info_.rank_size != 0) {
+        LOG(ERROR) << " weight split: BATCH_KVSPLIT: rank: "
+                   << " tensor shape[1]: " << info.shape[1]
+                   << " cannot div by nrank: " << rank_info_.rank_size;
+        return false;
+      }
+    } else {
+      LOG(ERROR)
+          << " weight split: BATCH_KVSPLIT: try to div higger dim matrix "
+          << info.shape.Size();
+      return false;
+    }
+
+    return true;
+  }
+
+  bool IsModelProcessable(SplitMode mode) {
+    return mode == SplitMode::BATCH_KVSPLIT;
+  }
+
+  void SetShape(TensorInfo dst_tensor_info,
+                std::shared_ptr<AsTensor> dst_tensor) {
+    Shape new_shape(dst_tensor_info.shape);
+    if (new_shape.Size() == 3) {
+      new_shape[2] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    } else if (new_shape.Size() == 2) {
+      new_shape[1] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    }
+  }
+  void CopyWeight(TensorInfo dst_tensor_info,
+                  std::shared_ptr<AsTensor> dst_tensor,
+                  std::shared_ptr<AsTensor> opt_whole_tensor,
+                  const void* whole_weight_ptr, size_t len) {
+    // offset, not by bytes.
+    if (opt_whole_tensor) {
+      Shape new_shape(dst_tensor_info.shape);
+      if (new_shape.Size() == 3) {
+        int batch = new_shape[0];
+        int batch_gemm_cnt = 2;
+        int sub_matrix_width = new_shape[2] / batch_gemm_cnt;
+        int sub_matrix_height = new_shape[1];
+        for (int batch_gemm_idx = 0; batch_gemm_idx < batch; batch_gemm_idx++) {
+          for (int sub_gemm_idx = 0; sub_gemm_idx < batch_gemm_cnt;
+               sub_gemm_idx++) {
+            size_t sub_matrix_width_after_div_rank =
+                sub_matrix_width / rank_info_.rank_size;
+            size_t base_src_idx =
+                batch_gemm_idx * sub_matrix_height * sub_matrix_width *
+                    batch_gemm_cnt +
+                sub_gemm_idx * sub_matrix_width +
+                sub_matrix_width_after_div_rank * rank_info_.rank_id;
+            size_t base_dst_idx =
+                batch_gemm_idx * sub_matrix_height *
+                    sub_matrix_width_after_div_rank * batch_gemm_cnt +
+                sub_gemm_idx * sub_matrix_width_after_div_rank;
+            AsTensor* dst = dst_tensor.get();
+            AsTensor* src = opt_whole_tensor.get();
+            size_t data_size = SizeofType(src->GetDataType());
+            void* src_ptr_with_offsets =
+                (char*)src->GetDataPtr() + base_src_idx * data_size;
+            void* dst_ptr_with_offsets =
+                (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+            TensorUtils::CopyMatrix2D(
+                dst_ptr_with_offsets, src_ptr_with_offsets,
+                dst->GetDeviceType(), src->GetDeviceType(),
+                dst->GetStrideInByte(), src->GetStrideInByte(),
+                sub_matrix_height, dst->GetStrideInByte() / batch_gemm_cnt);
+          }
+        }
+      } else if (new_shape.Size() == 2) {
+        int batch = new_shape[0];
+        int batch_gemm_cnt = 2;
+        int sub_matrix_width = new_shape[1] / batch_gemm_cnt;
+        int sub_matrix_height = 1;
+        for (int batch_gemm_idx = 0; batch_gemm_idx < batch; batch_gemm_idx++) {
+          for (int sub_gemm_idx = 0; sub_gemm_idx < batch_gemm_cnt;
+               sub_gemm_idx++) {
+            size_t sub_matrix_width_after_div_rank =
+                sub_matrix_width / rank_info_.rank_size;
+            size_t base_src_idx =
+                batch_gemm_idx * sub_matrix_height * sub_matrix_width *
+                    batch_gemm_cnt +
+                sub_gemm_idx * sub_matrix_width +
+                sub_matrix_width_after_div_rank * rank_info_.rank_id;
+            size_t base_dst_idx =
+                batch_gemm_idx * sub_matrix_height *
+                    sub_matrix_width_after_div_rank * batch_gemm_cnt +
+                sub_gemm_idx * sub_matrix_width_after_div_rank;
+            AsTensor* dst = dst_tensor.get();
+            AsTensor* src = opt_whole_tensor.get();
+            size_t data_size = SizeofType(src->GetDataType());
+            void* src_ptr_with_offsets =
+                (char*)src->GetDataPtr() + base_src_idx * data_size;
+            void* dst_ptr_with_offsets =
+                (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+            TensorUtils::CopyMatrix2D(
+                dst_ptr_with_offsets, src_ptr_with_offsets,
+                dst->GetDeviceType(), src->GetDeviceType(),
+                dst->GetStrideInByte(), src->GetStrideInByte(),
+                sub_matrix_height, dst->GetStrideInByte() / batch_gemm_cnt);
+          }
+        }
+      }
+    } else {
+      assert(-1);
+      // TODO: impl later.
+    }
+  }
+};
 class WeightSplitterHorizontalSplit : public WeightSplitter {
  public:
   WeightSplitterHorizontalSplit(RankInfo rank_info)
@@ -198,7 +437,79 @@ class WeightSplitterHorizontalSplit : public WeightSplitter {
 
   bool IsModelProcessable(SplitMode mode) { return mode == SplitMode::HSPLIT; }
 };
+class WeightSplitterBatchHorizontalSplit : public WeightSplitter {
+ public:
+  WeightSplitterBatchHorizontalSplit(RankInfo rank_info)
+      : WeightSplitter(SplitMode::BATCH_HSPLIT, rank_info){};
 
+  bool IsSplittable(TensorInfo& info) {
+    // check the outer dim can div by nrank or not.
+    if (info.shape.Size() == 3) {  // it's the weight matrix.
+      if (info.shape[1] % rank_info_.rank_size != 0) {
+        LOG(ERROR) << " weight split: batchhsplit: rank: "
+                   << " tensor shape[1]: " << info.shape[1]
+                   << " cannot div by nrank: " << rank_info_.rank_size;
+        return false;
+      }
+    } else {
+      LOG(ERROR) << " weight split: batchhsplit: try to div higger dim matrix "
+                 << info.shape.Size();
+      return false;
+    }
+
+    return true;
+  }
+
+  bool IsModelProcessable(SplitMode mode) {
+    return mode == SplitMode::BATCH_HSPLIT;
+  }
+
+  void SetShape(TensorInfo dst_tensor_info,
+                std::shared_ptr<AsTensor> dst_tensor) {
+    Shape new_shape(dst_tensor_info.shape);
+    if (new_shape.Size() == 3) {
+      new_shape[1] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    }
+  }
+  void CopyWeight(TensorInfo dst_tensor_info,
+                  std::shared_ptr<AsTensor> dst_tensor,
+                  std::shared_ptr<AsTensor> opt_whole_tensor,
+                  const void* whole_weight_ptr, size_t len) {
+    // offset, not by bytes.
+    if (opt_whole_tensor) {
+      Shape new_shape(dst_tensor_info.shape);
+      if (new_shape.Size() == 3) {
+        int batch = new_shape[0];
+        int sub_matrix_width = new_shape[2];
+        int sub_matrix_height = new_shape[1];
+
+        for (int sub_gemm_idx = 0; sub_gemm_idx < batch; sub_gemm_idx++) {
+          size_t dst_height = sub_matrix_height / rank_info_.rank_size;
+          size_t base_src_idx =
+              sub_gemm_idx * sub_matrix_height * sub_matrix_width +
+              rank_info_.rank_id * dst_height * sub_matrix_width;
+          size_t base_dst_idx = sub_gemm_idx * dst_height * sub_matrix_width;
+          AsTensor* dst = dst_tensor.get();
+          AsTensor* src = opt_whole_tensor.get();
+          size_t data_size = SizeofType(src->GetDataType());
+          void* src_ptr_with_offsets =
+              (char*)src->GetDataPtr() + base_src_idx * data_size;
+          void* dst_ptr_with_offsets =
+              (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+          TensorUtils::CopyMatrix2D(
+              dst_ptr_with_offsets, src_ptr_with_offsets, dst->GetDeviceType(),
+              src->GetDeviceType(), dst->GetStrideInByte(),
+              src->GetStrideInByte(), dst_height, dst->GetStrideInByte());
+        }
+      }
+    } else {
+      assert(-1);
+      // TODO: impl later.
+    }
+  }
+};
 // Batch Gemm version weight splitter, the main use case is qkv, and kv weight
 // split.
 template <int batch_gemm_cnt, SplitMode split_mode>
@@ -570,12 +881,21 @@ std::unique_ptr<WeightSplitter> WeightSplitterFactory::GetSplitterByMode(
     case SplitMode::MQA_VSPLIT:
       splitter.reset(new WeightSplitterVSplitMQA(rankInfo));
       break;
+    case SplitMode::BATCH_VSPLIT:
+      splitter.reset(new WeightSplitterBatchVerticalSplit(rankInfo));
+      break;
+    case SplitMode::BATCH_HSPLIT:
+      splitter.reset(new WeightSplitterBatchHorizontalSplit(rankInfo));
+      break;
+    case SplitMode::BATCH_KVSPLIT:
+      splitter.reset(new WeightSplitterBatchKVerticalSplit(rankInfo));
+      break;
     default:
       assert(-1);
       throw AsException("unsupported split mode.");
   }
 
-  return std::move(splitter);
+  return splitter;
 }
 
 }  // namespace allspark

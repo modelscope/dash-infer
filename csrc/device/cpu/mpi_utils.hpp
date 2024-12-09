@@ -2,6 +2,8 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    mpi_utils.hpp
  */
+
+#ifdef ENABLE_MULTINUMA
 #include <mpi.h>
 
 #include "cpu/cpu_common.h"
@@ -26,4 +28,5 @@ static MPI_Datatype GetMpiType(DataType dtype) {
     throw AsException("MPI_NOT_SUPPORT_TYPE_ERROR");
   }
 }
+#endif
 }  // namespace allspark

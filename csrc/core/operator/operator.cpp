@@ -4,9 +4,12 @@
  */
 
 #include "operator.h"  // NOLINT
-
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
 #include <common/engine_runtime.h>
 #include <cpu/cpu_context.h>
+#include <cpu/cpu_info.h>
 #include <weight/weight_manager.h>
 
 #include <fstream>
@@ -35,14 +38,33 @@ AsOperator::AsOperator(const std::string& op_type)
       ctx_(nullptr),
       gen_ctx_(nullptr) {}
 
+void AsOperator::Synchronize() { ctx_->Synchronize(); }
+
 void AsOperator::PrintInformation() {
   ctx_->Synchronize();
-  if (ctx_->GetDeviceType() == DeviceType::CPU) {
-    const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
-    if (cpu_ctx->GetRank() != 0) {
-      return;
+  DeviceType backend = ctx_->GetDeviceType();
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      if (gpu_ctx->GetRank() != 0) {
+        return;
+      }
+      break;
     }
+#endif
+    case DeviceType::CPU: {
+      const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
+      if (cpu_ctx->GetRank() != 0) {
+        return;
+      }
+      break;
+    }
+    default:
+      LOG(ERROR) << "Unsupported device type: " << int(backend);
+      break;
   }
+
   std::cout << string_format("{ op_name: %s, op_type: %s}", op_name_.c_str(),
                              op_type_.c_str())
             << std::endl;
@@ -64,12 +86,29 @@ void AsOperator::PrintInformation() {
 // NOTE: File will be overrided in next step.
 void AsOperator::SaveInformation() {
   ctx_->Synchronize();
-  if (ctx_->GetDeviceType() == DeviceType::CPU) {
-    const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
-    if (cpu_ctx->GetRank() != 0) {
-      return;
+  DeviceType backend = ctx_->GetDeviceType();
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      if (gpu_ctx->GetRank() != 0) {
+        return;
+      }
+      break;
     }
+#endif
+    case DeviceType::CPU: {
+      const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
+      if (cpu_ctx->GetRank() != 0) {
+        return;
+      }
+      break;
+    }
+    default:
+      LOG(ERROR) << "Unsupported device type: " << int(backend);
+      break;
   }
+
   std::ofstream OutFile(op_name_.c_str());
 
   OutFile << "op_inputs:" << std::endl;
@@ -152,6 +191,63 @@ void AsOperator::SaveTensorToBinary() {
   }
 }
 
+/* to save intermediate variable like quantized weight, quantized input.
+* * only support 2 dims tensor
+* # to load from binary file and return torch tensor
+* def load_data_f16(filename):
+    with open(filename, 'rb') as file:
+        rows = int.from_bytes(file.read(4), byteorder='little')
+        cols = int.from_bytes(file.read(4), byteorder='little')
+        print(f"rows:{rows} cols:{cols}")
+        data = np.fromfile(file, dtype=np.float16)
+
+    # Convert NumPy array to torch.tensor
+    tensor = torch.tensor(data, dtype=torch.float16)
+    tensor = tensor.reshape((rows, cols))
+    return tensor
+*/
+void AsOperator::SaveTmpData(const char* data, int rows, int cols,
+                             int type_size, const char* filename) {
+  ctx_->Synchronize();
+  std::vector<char> h_data(rows * cols * type_size);
+  DeviceType backend = ctx_->GetDeviceType();
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      if (gpu_ctx->GetRank() != 0) {
+        return;
+      }
+      cudaError_t err = cudaMemcpy(h_data.data(), data, rows * cols * type_size,
+                                   cudaMemcpyDeviceToHost);
+      if (err != cudaSuccess) {
+        std::cerr << "Error: " << cudaGetErrorString(err) << std::endl;
+        return;
+      }
+      break;
+    }
+#endif
+    case DeviceType::CPU: {
+      const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
+      if (cpu_ctx->GetRank() != 0) {
+        return;
+      }
+      memccpy(h_data.data(), data, rows * cols * type_size, 1);
+      break;
+    }
+    default:
+      LOG(ERROR) << "Unsupported device type: " << int(backend);
+      break;
+  }
+
+  std::ofstream file(filename, std::ios::binary);
+  file.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+  file.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+  file.write(reinterpret_cast<const char*>(h_data.data()),
+             rows * cols * type_size);
+  file.close();
+}
+
 AsStatus AsOperator::Init(const OperatorProto& op_proto,
                           const DeviceContext& ctx,
                           const TensorMap& weights_map, TensorMap* tensor_map) {
@@ -176,7 +272,15 @@ AsStatus AsOperator::Init(const OperatorProto& op_proto,
   }
   for (auto& t : op_proto.weights()) {
     const std::string& t_name = t.name();
-    if (weight_manager_) {
+    if (is_lora_op_) {
+      // only in order to make it can be run by GemmOpBase::Init && Reshape,
+      // which is called by GemmLora
+      weight_names_.emplace_back(t_name);
+      fake_weight_ = std::make_unique<AsTensor>(
+          t_name, DeviceType::CUDA, DataType::INT8, DataMode::DENSE,
+          Shape({1, 3}));  // 3 for qkv shape check
+      weights_.emplace_back(fake_weight_.get());
+    } else if (weight_manager_) {
       auto weight_tensor_p =
           weight_manager_->GetWeightTensor(weight_handler_, rank_info_, t_name);
       weights_.emplace_back(weight_tensor_p.get());
@@ -197,10 +301,12 @@ AsStatus AsOperator::CallInit(
     const OperatorProto& op_proto, const DeviceContext& ctx,
     std::shared_ptr<WeightManager> weight_manager,
     std::shared_ptr<ModelWeightHandler> model_weight_handler,
-    RankInfo& rankInfo, TensorMap* tensor_map, ModelProfiler* profiler) {
+    std::shared_ptr<LoraManager> lora_manager, RankInfo& rankInfo,
+    TensorMap* tensor_map, ModelProfiler* profiler) {
   profiler_ = profiler;
   weight_handler_ = model_weight_handler;
   weight_manager_ = weight_manager;
+  lora_manager_ = lora_manager;
   std::string op_type = op_proto.op_type();
   auto& attr_map = op_proto.attr();
   rank_info_ = rankInfo;
@@ -278,6 +384,89 @@ TensorMap AsOperator::GetWeights() {
 
 std::string AsOperator::GetOpType() { return op_type_; }
 
+std::pair<bool, AsMHAPrefill> AsOperator::GetPrefillMode() {
+  if (cached_prefill_mode_) {
+    return *cached_prefill_mode_;
+  }
+
+  AsMHAPrefill prefill_mode = AsMHAPrefill(ctx_->GetPrefillMode());
+
+  // A. dtype. check
+  // see:     m6_v3.py
+  // prefix = "decoder.layer.{}.".format(i)
+  // MultiHeadAttention(prefix + "attention",
+  //          [rotary_embedding.outputs[0], mask.outputs[0]],
+  //          mha_attribtues,)()
+  // see:     model_base.py
+  // class MultiHeadAttention(Operator):
+  //     def __init__(self, op_name, inputs, op_attr={}):
+  //         super().__init__("MultiHeadAttention", op_name, inputs, op_attr)
+  //         self.op.outputs.append(make_tensor(op_name + ".out"))
+  std::string mha_dtype_indicator =
+      "decoder.layer.0.attention.output.dense.out";
+  auto tensor_map_iter = tensor_map_->find(mha_dtype_indicator);
+  bool dtype_indicator_exist = false;      // if false, cannot use flash.
+  DataType mha_dtype = DataType::FLOAT32;  // flash only support bf16 / half
+  if (tensor_map_iter != tensor_map_->end()) {
+    dtype_indicator_exist = true;
+    mha_dtype = tensor_map_->at(mha_dtype_indicator).get()->GetDataType();
+  }
+
+  // C. cuda and sm-version
+  // use cpu flags by default
+  bool enable_cuda = false;
+  int sm_version = 0;
+  int cuda_version = 0;
+  bool not_support_flashv2 = !(CPUInfo::SupportAVX512F());
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    int device_id;
+    cudaDeviceProp dprop;
+    AS_CHECK_CUDA(cudaGetDevice(&device_id));
+    AS_CHECK_CUDA(cudaGetDeviceProperties(&dprop, device_id));
+
+    enable_cuda = true;
+    sm_version = dprop.major << 8 | dprop.minor;
+    cuda_version = CUDA_VERSION;
+    bool not_supported_dtype =
+        (dtype_indicator_exist && mha_dtype != DataType::BFLOAT16 &&
+         mha_dtype != DataType::FLOAT16);
+    not_support_flashv2 =
+        not_supported_dtype || (sm_version < 0x0800) || (cuda_version < 11080);
+  }
+#endif
+
+  // flashv2 check
+  if (prefill_mode == allspark::AsMHAPrefill::AsPrefillFlashV2 &&
+      ((!dtype_indicator_exist) || not_support_flashv2)) {
+    LOG(ERROR) << "GetPrefillMode() return false. "
+               << "incoming prefill mode = AsMHAPrefill::AsPrefillFlashV2. "
+               << std::endl;
+
+    cached_prefill_mode_ = std::make_shared<std::pair<bool, AsMHAPrefill>>(
+        std::make_pair(false, prefill_mode));
+    return *cached_prefill_mode_;
+  }
+
+  // xformer check
+  if (prefill_mode == allspark::AsMHAPrefill::AsPrefillXformer &&
+      ((!enable_cuda) ||
+       (enable_cuda && ctx_->GetDeviceType() != DeviceType::CUDA))) {
+    LOG(ERROR) << "GetPrefillMode() return false. "
+               << "incoming prefill mode = AsMHAPrefill::AsPrefillXformer. "
+               << std::endl;
+    cached_prefill_mode_ = std::make_shared<std::pair<bool, AsMHAPrefill>>(
+        std::make_pair(false, prefill_mode));
+    return *cached_prefill_mode_;
+  }
+
+  cached_prefill_mode_ = std::make_shared<std::pair<bool, AsMHAPrefill>>(
+      std::make_pair(true, prefill_mode));
+
+  return *cached_prefill_mode_;
+}
+
 AsStatus AsOperator::Alloc(RuntimeContext* runtime_ctx) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -297,15 +486,27 @@ AsStatus AsOperator::Forward(RuntimeContext* runtime_ctx) {
 }
 
 AsStatus AsOperator::CallForward(RuntimeContext* runtime_ctx) {
+#ifdef CONFIG_OP_DEBUG
+  LOG(INFO) << "AsOperator::CallForward(ctx) " << GetOpType() << " Start.";
+#endif
+  AsStatus ret;
   if (profiler_) {
     ProfilerAdder adder(*profiler_, "forward", GetOpType(), ctx_);
-    return Forward(runtime_ctx);
+    ret = Forward(runtime_ctx);
   } else {
-    return Forward(runtime_ctx);
+    ret = Forward(runtime_ctx);
   }
+
+#ifdef CONFIG_OP_DEBUG
+  ctx_->Synchronize();
+  LOG(INFO) << "AsOperator::CallForward(ctx) " << GetOpType() << " Finish.";
+#endif
+  return ret;
 }
 
 AsStatus AsOperator::CallReshape(RuntimeContext* runtime_ctx) {
+#ifdef CONFIG_OP_DEBUG
+#endif
   if (profiler_) {
     ProfilerAdder adder(*profiler_, "reshape", GetOpType(), ctx_);
     return Reshape(runtime_ctx);
@@ -315,12 +516,19 @@ AsStatus AsOperator::CallReshape(RuntimeContext* runtime_ctx) {
 }
 
 AsStatus AsOperator::CallAlloc(RuntimeContext* runtime_ctx) {
+#ifdef CONFIG_CONCURRENT_SPAN
+  std::string name = "Alloc:" + this->op_name_;
+  TracerLog trace(ctx_->GetDeviceType(), name.c_str(), 3);
+
+  return Alloc(runtime_ctx);
+#else
   if (profiler_) {
     ProfilerAdder adder(*profiler_, "alloc", GetOpType(), ctx_);
     return Alloc(runtime_ctx);
   } else {
     return Alloc(runtime_ctx);
   }
+#endif
 }
 
 }  // namespace allspark

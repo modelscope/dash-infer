@@ -27,6 +27,9 @@ enum SplitMode{
     HSPLIT_QUANTIZE = 5;
     GROUP_VSPLIT = 6;
     MQA_VSPLIT = 7;
+    BATCH_VSPLIT = 8;
+    BATCH_HSPLIT = 9;
+    BATCH_KVSPLIT = 10;
 }
 enum DataType {
     DATATYPE_UNDEFINED = 0;
@@ -40,6 +43,8 @@ enum DataType {
     BOOL = 8;
     BFLOAT16 = 9;
     UINT8 = 10;
+    FLOAT8E4M3 = 11;
+    FLOAT8E5M2 = 12;
     POINTER = 20;
 }
 
@@ -47,6 +52,7 @@ enum PrecisionLevel {
     HIGHEST = 0;
     HIGH = 1;
     MEDIUM_BF16 = 2;
+    MEDIUM_FP16 = 3;
 }
 
 enum BinaryType {
@@ -65,6 +71,14 @@ enum UnaryType {
     GELU_TANH = 3;
     RELU = 4;
     SILU = 5;
+    SIGMOID = 6;
+}
+
+enum RotaryInvFreqType {
+    base_rotary = 0;
+    chatglm_v2 = 1;
+    chatglm_v3 = 2;
+    yarn = 3;
 }
 
 message ConfigProto {
@@ -87,6 +101,9 @@ message ConfigProto {
     int32 multi_query_group_num = 16;
     int32 kv_channels = 17;
     int32 size_per_head = 18;
+    int32 hidden_size = 19;
+    int32 num_experts = 20;
+    int32 num_experts_per_tok = 21;
 }
 
 message BuildVersion {

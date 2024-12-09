@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    topk.cpp
  */
+
 #include <algorithm>
 
 #include "cpu_common.h"  // NOLINT
@@ -10,8 +11,8 @@ namespace allspark {
 namespace cpu {
 
 template <typename T>
-void TopKKernel(T* output, int64_t* output_indices, const T* input,
-                int batch_size, int length, int64_t k) {
+void TopKKernel(T* output, int* output_indices, const T* input, int batch_size,
+                int length, int64_t k) {
   parallel_for(batch_size, [&](int b) {
     std::vector<std::pair<T, int> > data_vec(length);
     parallel_for(length, [&](int i) {
@@ -29,7 +30,7 @@ void TopKKernel(T* output, int64_t* output_indices, const T* input,
     });
   });
 }
-template void TopKKernel<float>(float* output, int64_t* output_indices,
+template void TopKKernel<float>(float* output, int* output_indices,
                                 const float* input, int batch_size, int length,
                                 int64_t k);
 

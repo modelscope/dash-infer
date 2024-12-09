@@ -15,12 +15,12 @@ AsStatus BaichuanModel::Init(const TransformerProto& model_proto,
   for (auto& op : graph_ops_["decoder"]) {
     topo_ops_.emplace_back(op.get());
   }
-  if (model_proto.model_conf().is_generate())
-    for (auto& op : graph_ops_["gen_graph"]) {
-      topo_ops_.emplace_back(op.get());
-    }
+  for (auto& op : graph_ops_["gen_graph"]) {
+    topo_ops_.emplace_back(op.get());
+  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
+
+REGISTER_MODEL("Baichuan_v1", BaichuanModel_v1)
 REGISTER_MODEL("Baichuan_v2", BaichuanModel_v2)
-REGISTER_MODEL("Baichuan", BaichuanModel)
 }  // namespace allspark

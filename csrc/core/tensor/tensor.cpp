@@ -6,6 +6,7 @@
 #include "tensor.h"  // NOLINT
 
 #include <utility/cnpy.h>
+#include <utility/mem_registry.h>
 #include <weight/weight_loader.h>
 
 #include <algorithm>
@@ -15,20 +16,65 @@
 #include <utility>
 #include <vector>
 
+#ifdef ENABLE_CUDA
+#include <check_cuda.h>
+#include <cuda/cuda_context.h>
+#include <cuda_runtime.h>
+#ifdef ENABLE_FP8
+#include <cutlass/float8.h>
+#endif
+#endif
+
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 #ifdef ENABLE_BF16
 #include <common/hie_bfloat16.hpp>
 #endif
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+cudaMemcpyKind GetCudaMemcpyKind(DeviceType src_dev_type,
+                                 DeviceType dst_dev_type) {
+  if (src_dev_type == DeviceType::CPU && dst_dev_type == DeviceType::CPU)
+    return cudaMemcpyHostToHost;
+  if (src_dev_type == DeviceType::CPU && dst_dev_type == DeviceType::CUDA)
+    return cudaMemcpyHostToDevice;
+  if (src_dev_type == DeviceType::CUDA && dst_dev_type == DeviceType::CPU)
+    return cudaMemcpyDeviceToHost;
+  if (src_dev_type == DeviceType::CUDA && dst_dev_type == DeviceType::CUDA)
+    return cudaMemcpyDeviceToDevice;
+  return cudaMemcpyDefault;
+}
+#endif
+
 void CopyData(void* dst_data, DeviceType dst_device, const void* src_data,
               DeviceType src_device, int64_t nbytes,
               const DeviceContext* device_context) {
   if (nbytes == 0) {
     return;
   }
+#ifdef ENABLE_CUDA
+  if (src_device == DeviceType::CUDA || dst_device == DeviceType::CUDA) {
+    if (device_context == nullptr) {
+      AS_CHECK_CUDA(cudaMemcpy(dst_data, src_data, nbytes,
+                               GetCudaMemcpyKind(src_device, dst_device)));
+      return;
+    } else {
+      cudaStream_t stream =
+          static_cast<const CUDAContext*>(device_context)->GetStream();
+      AS_CHECK_CUDA(cudaMemcpyAsync(dst_data, src_data, nbytes,
+                                    GetCudaMemcpyKind(src_device, dst_device),
+                                    stream));
+      return;
+    }
+  }
+#endif
   if (src_device == DeviceType::CPU && dst_device == DeviceType::CPU) {
     memcpy(dst_data, src_data, nbytes);
   }
@@ -48,6 +94,11 @@ AsTensor::AsTensor(const std::string& name, const DeviceType backend,
     case DataMode::DENSE: {
       int64_t nbytes = shape_.Count() * SizeofType(dtype);
       int32_t data_flags = static_cast<int32_t>(AsDataFlags::empty_flag);
+      if (backend == DeviceType::CPU) {
+        if (flags & static_cast<int32_t>(AsTensorFlags::cuda_pinned_mem)) {
+          data_flags |= static_cast<int32_t>(AsDataFlags::cuda_pinned_mem);
+        }
+      }
       data_ = std::make_shared<DenseData>(name, nbytes, backend, data_flags);
       break;
     }
@@ -194,14 +245,22 @@ DLManagedTensor* AsTensor::ToDLPack(DeviceContext* device_ctx,
   if (do_duplicate) {
     resource->astensor_ptr = std::make_shared<AsTensor>(
         PERSISTENT_TENSOR_PREFIX + std::string(name_), *this);
+#ifdef ENABLE_CUDA
+    util::SetMemPersistent((uint64_t)resource->astensor_ptr->GetDataPtr(),
+                           true);
+#endif
   } else {
     resource->astensor_ptr = std::make_shared<AsTensor>(*this);
+#ifdef ENABLE_CUDA
+    util::SetMemPersistent((uint64_t)GetDataPtr(), true);
+#endif
   }
 
   resource->wrapper.manager_ctx = resource;
   // to be implicitly called by pytorch when as_out not used any more in
   // python
   resource->wrapper.deleter = [](DLManagedTensor* resource) {
+    printf(" dlpack release %p", resource);
     delete static_cast<TensorExchangeResource*>(resource->manager_ctx);
   };
   resource->wrapper.dl_tensor.data = resource->astensor_ptr->GetDataPtr();
@@ -213,6 +272,14 @@ DLManagedTensor* AsTensor::ToDLPack(DeviceContext* device_ctx,
       resource->wrapper.dl_tensor.device.device_type = kDLCPU;
       resource->wrapper.dl_tensor.device.device_id = 0;
       break;
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      resource->wrapper.dl_tensor.device.device_type = kDLGPU;
+      resource->wrapper.dl_tensor.device.device_id =
+          device_ctx ? dynamic_cast<CUDAContext*>(device_ctx)->GetDeviceId()
+                     : 0;
+      break;
+#endif
     default:
       LOG(ERROR) << "Unsupported DLDevice" << std::endl;
   }
@@ -321,7 +388,7 @@ void AsTensor::BuildFromDLTensor(const std::string& name,
   const DLTensor& dltensor = managed_dltensor->dl_tensor;
   DeviceType dltensor_device_type = DeviceType::CPU;
   dltensor_device_type =
-      DLDeviceTypeToAsDeviceType(dltensor.device.device_type);
+      TensorUtils::DLDeviceTypeToAsDeviceType(dltensor.device.device_type);
   dtype_ = DataType::DATATYPE_UNDEFINED;
   switch (dltensor.dtype.code) {
     case kDLFloat:
@@ -362,7 +429,7 @@ void AsTensor::BuildFromDLTensor(const std::string& name,
       dtype_ = DataType::DATATYPE_UNDEFINED;
   }
   shape_ = std::move(Shape(dltensor.ndim, dltensor.shape));
-  int nbytes = SizeofType(dtype_) * shape_.Count();
+  int64_t nbytes = SizeofType(dtype_) * shape_.Count();
   // we are not moving the ownership into engine, so we don't need to
   // delete the dltensor
   // NOTE: call the dltensor's deletor require a GIL
@@ -380,7 +447,7 @@ AsTensor::AsTensor(const std::string& name,
     exit(-1);
   } else {
     BuildFromDLTensor(name, managed_dltensor,
-                      DLDeviceTypeToAsDeviceType(
+                      TensorUtils::DLDeviceTypeToAsDeviceType(
                           managed_dltensor->dl_tensor.device.device_type));
   }
 }
@@ -398,19 +465,7 @@ AsTensor::AsTensor(const std::string& name,
   }
 }
 
-DeviceType DLDeviceTypeToAsDeviceType(const DLDeviceType dltensor_device_type) {
-  DeviceType as_tensor_device_type;
-  switch (dltensor_device_type) {
-    case kDLCPU:
-      as_tensor_device_type = CPU;
-      break;
-    default:
-      LOG(ERROR) << "Unsupported DLDevice" << dltensor_device_type << std::endl;
-      as_tensor_device_type = DEVICETYPE_UNDEFINED;
-  }
-  return as_tensor_device_type;
-}
-
+// copy CPU vector<vector> -> AsTensor<CUDA>, currently ONLY support INT64
 AsTensor::AsTensor(const std::string& name,
                    const std::vector<std::vector<int64_t>>& input,
                    const DeviceType as_backend)
@@ -418,13 +473,14 @@ AsTensor::AsTensor(const std::string& name,
       mode_(DataMode::DENSE),
       backend_(as_backend),
       dtype_(DataType::INT64) {
+  assert(as_backend == DeviceType::CUDA);
   if (input.empty()) {
     LOG(ERROR) << "Invalid vector<vector> : " << name << std::endl;
     exit(-1);
   } else {
     shape_ = std::move(Shape(
         {static_cast<long>(input.size()), static_cast<long>(input[0].size())}));
-    int nbytes = SizeofType(dtype_) * shape_.Count();
+    int64_t nbytes = SizeofType(dtype_) * shape_.Count();
     std::vector<int64_t> cpu_src_mem;
     for (auto v : input)
       std::copy(v.begin(), v.end(), std::back_inserter(cpu_src_mem));
@@ -443,7 +499,7 @@ AsTensor::AsTensor(
       backend_(as_backend),
       dtype_(DataType::FLOAT32) {
   shape_ = std::move(Shape(input.second));
-  int nbytes = SizeofType(dtype_) * shape_.Count();
+  int64_t nbytes = SizeofType(dtype_) * shape_.Count();
   data_ = std::make_shared<DenseData>(name, nbytes, backend_);
   this->CopyDataFrom(input.first.data(), nbytes, DeviceType::CPU);
 }
@@ -481,15 +537,30 @@ void AsTensor::CopyDataFrom(const void* src_data, const size_t src_bytes,
   if (nbytes > src_bytes) {
     // NOTE(liyifei): this should not be considered a bug, so I change it to
     // a debug warning. (20231103)
-    DLOG(WARNING) << "CopyDataFrom: this tensor is larger than src_data, "
+#if 0
+    DLOG(WARNING) << "CopyDataFrom: dst tensor is larger than src_data, "
                      "only src_bytes are copied, src_bytes: "
                   << src_bytes << " nbytes: " << nbytes;
+#endif
   }
   nbytes = src_bytes < nbytes ? src_bytes : nbytes;
 
   void* dst_data = GetDataPtr();
   if (src_device == DeviceType::CPU && backend_ == DeviceType::CPU) {
     memcpy(dst_data, src_data, nbytes);
+#ifdef ENABLE_CUDA
+  } else if (src_device == DeviceType::CUDA || backend_ == DeviceType::CUDA) {
+    if (device_ctx) {
+      cudaStream_t stream =
+          static_cast<const CUDAContext*>(device_ctx)->GetStream();
+      AS_CHECK_CUDA(cudaMemcpyAsync(dst_data, src_data, nbytes,
+                                    GetCudaMemcpyKind(src_device, backend_),
+                                    stream));
+    } else {
+      AS_CHECK_CUDA(cudaMemcpy(dst_data, src_data, nbytes,
+                               GetCudaMemcpyKind(src_device, backend_)));
+    }
+#endif
   } else {
     LOG(ERROR) << "Not support copy data between "
                << DeviceType_Name(src_device) << " and "
@@ -508,6 +579,19 @@ void AsTensor::CopyDataTo(void* dst_data, size_t dst_byte,
 
   if (dst_device == DeviceType::CPU && backend_ == DeviceType::CPU) {
     memcpy(dst_data, src_data, nbytes);
+#ifdef ENABLE_CUDA
+  } else if (dst_device == DeviceType::CUDA || backend_ == DeviceType::CUDA) {
+    if (device_ctx) {
+      cudaStream_t stream =
+          static_cast<const CUDAContext*>(device_ctx)->GetStream();
+      AS_CHECK_CUDA(cudaMemcpyAsync(dst_data, src_data, nbytes,
+                                    GetCudaMemcpyKind(backend_, dst_device),
+                                    stream));
+    } else {
+      AS_CHECK_CUDA(cudaMemcpy(dst_data, src_data, nbytes,
+                               GetCudaMemcpyKind(backend_, dst_device)));
+    }
+#endif
   } else {
     LOG(ERROR) << "Not support copy data between "
                << DeviceType_Name(dst_device) << " and "
@@ -528,18 +612,21 @@ void AsTensor::ShareData(AsTensor& rhs) {
   if (this->shape_ != rhs.shape_) {
     LOG(ERROR) << "not same shape: dst: " << this->shape_.ToString()
                << " src: " << rhs.shape_.ToString();
+    print_backtrace();
     throw std::invalid_argument("deep copy require same shape");
   }
 
   if (this->dtype_ != rhs.dtype_) {
     LOG(ERROR) << "not same data type: dst: " << (int)rhs.dtype_
                << " src: " << (int)this->dtype_;
+    print_backtrace();
     throw std::invalid_argument("deep copy require same data type");
   }
 
   if (this->backend_ != rhs.backend_) {
     LOG(ERROR) << "not same backend type: dst: " << (int)rhs.backend_
                << " src: " << (int)this->backend_;
+    print_backtrace();
     throw std::invalid_argument("deep copy require same device type");
   }
   this->data_ = rhs.data_;
@@ -590,11 +677,12 @@ static size_t SparseDataGetNNZ(const AsTensor& tensor) {
 
 size_t AsTensor::GetStrideInByte() const {
   // TODO: support alignment in tensor allocation.
-  if (this->shape_.Count() >= 2) {
-    return this->shape_[1] * SizeofType(this->dtype_);
-  } else {
-    return this->shape_[0] * SizeofType(this->dtype_);
-  }
+  // if (this->shape_.Count() >= 2) {
+  //   return this->shape_[1] * SizeofType(this->dtype_);
+  // } else {
+  //   return this->shape_[0] * SizeofType(this->dtype_);
+  // }
+  return this->shape_[-1] * SizeofType(this->dtype_);
 }
 
 size_t AsTensor::GetSizeInByte() const {
@@ -664,10 +752,12 @@ AsStatus AsTensor::SetDataType(DataType dtype) {
     LOG(ERROR) << "Warn: Tensor is set mutable, but user still try to "
                   "change the dtype. "
                << name_;
+    // abort();
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+// TODO: 这个函数应该有转换数据格式的功能: Dense -> CSC -> ELL等
 AsStatus AsTensor::SetDataMode(DataMode mode) {
   mode_ = mode;
   return AsStatus::ALLSPARK_SUCCESS;
@@ -680,6 +770,7 @@ AsStatus AsTensor::SetData(std::shared_ptr<Data> data) {
     LOG(ERROR) << "Warn: Tensor is set mutable, but user still try to "
                   "change the data. "
                << name_;
+    // abort();
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -704,6 +795,7 @@ std::string AsTensor::ToString() const {
 }
 
 std::string AsTensor::ToStringAll() const {
+  // TODO(chenchu.zs) : 添加简单的value format输出，取前三个和后三个即可
   if (mode_ == DataMode::DENSE) {
     return string_format(
         "{ name: %s, device: %s, dtype: %s, shape: %s, val: %s }",
@@ -730,6 +822,14 @@ std::string AsTensor::GetDataString() const {
     count = ((CSCData*)data_.get())->GetNNZ() * SizeofType(dtype_);
   }
   void* data_ptr = GetDataPtr();
+#ifdef ENABLE_CUDA
+  std::vector<char> buffer;
+  if (backend_ == DeviceType::CUDA) {
+    buffer.resize(count);
+    data_ptr = buffer.data();
+    this->CopyDataTo(data_ptr, count * sizeof(char), DeviceType::CPU);
+  }
+#endif
   int print_len = 8;
   switch (dtype_) {
     case DataType::FLOAT32: {
@@ -875,6 +975,47 @@ std::string AsTensor::GetDataString() const {
         ss << ", ... ";
         for (int i = print_len / 2 - 1; i >= 0; --i) {
           ss << "," << (int)ptr[count - 1 - i];
+        }
+      }
+      break;
+    }
+#ifdef ENABLE_FP8
+    case DataType::FLOAT8E4M3: {
+      count /= 1;
+      cutlass::float_e4m3_t* ptr =
+          static_cast<cutlass::float_e4m3_t*>(data_ptr);
+      ss << (float)ptr[0];
+      if (count <= print_len) {
+        for (int i = 1; i < count; ++i) {
+          ss << "," << (float)ptr[i];
+        }
+      } else {
+        for (int i = 1; i < print_len / 2; ++i) {
+          ss << "," << (float)ptr[i];
+        }
+        ss << ", ... ";
+        for (int i = print_len / 2 - 1; i >= 0; --i) {
+          ss << "," << (float)ptr[count - 1 - i];
+        }
+      }
+      break;
+    }
+#endif
+    case DataType::POINTER: {
+      count /= 8;
+      uint64_t* ptr = static_cast<uint64_t*>(data_ptr);
+      ss << std::hex << ptr[0];
+      if (count <= print_len) {
+        for (int i = 1; i < count; ++i) {
+          ss << "," << std::hex << ptr[i];
+        }
+      } else {
+        for (int i = 1; i < print_len / 2; ++i) {
+          ss << "," << std::hex << ptr[i];
+        }
+        ss << ", ... ";
+        for (int i = print_len / 2 - 1; i >= 0; --i) {
+          ss << "," << std::hex << ptr[count - 1 - i];
         }
       }
       break;
@@ -896,6 +1037,14 @@ std::string AsTensor::GetDataStringAll() const {
     count = ((CSCData*)data_.get())->GetNNZ() * SizeofType(dtype_);
   }
   void* data_ptr = GetDataPtr();
+#ifdef ENABLE_CUDA
+  std::vector<char> buffer;
+  if (backend_ == DeviceType::CUDA) {
+    buffer.resize(count);
+    data_ptr = buffer.data();
+    this->CopyDataTo(data_ptr, count * sizeof(char), DeviceType::CPU);
+  }
+#endif
   int print_len = 8;
   switch (dtype_) {
     case DataType::FLOAT32: {
@@ -909,8 +1058,8 @@ std::string AsTensor::GetDataStringAll() const {
       }
       break;
     }
-    case DataType::FLOAT16: {
 #ifdef ENABLE_FP16
+    case DataType::FLOAT16: {
       int print_len = 6;
       count /= 2;
       half* ptr = static_cast<half*>(data_ptr);
@@ -920,11 +1069,9 @@ std::string AsTensor::GetDataStringAll() const {
       for (int i = 1; i < count; ++i) {
         ss << "," << (float)ptr[i];
       }
-#else
-      LOG(INFO) << "Float16 support not compiled";
-#endif
       break;
     }
+#endif
     case DataType::BFLOAT16: {
 #ifdef ENABLE_BF16
       int print_len = 6;
@@ -984,6 +1131,27 @@ std::string AsTensor::GetDataStringAll() const {
       ss << (int)ptr[0];
       for (int i = 1; i < count; ++i) {
         ss << "," << (int)ptr[i];
+      }
+      break;
+    }
+#ifdef ENABLE_FP8
+    case DataType::FLOAT8E4M3: {
+      count /= 1;
+      cutlass::float_e4m3_t* ptr =
+          static_cast<cutlass::float_e4m3_t*>(data_ptr);
+      ss << (float)ptr[0];
+      for (int i = 1; i < count; ++i) {
+        ss << "," << (float)ptr[i];
+      }
+      break;
+    }
+#endif
+    case DataType::POINTER: {
+      count /= 8;
+      uint64_t* ptr = static_cast<uint64_t*>(data_ptr);
+      ss << std::hex << ptr[0];
+      for (int i = 1; i < count; ++i) {
+        ss << "," << std::hex << ptr[i];
       }
       break;
     }
@@ -1013,6 +1181,14 @@ std::string AsTensor::GetMD5Sum() {
   // copy to host if it's a device memory.
 
   int64_t count = shape_.Count() * SizeofType(dtype_);
+#ifdef ENABLE_CUDA
+  std::vector<char> buffer;
+  if (backend_ == DeviceType::CUDA) {
+    buffer.resize(count);
+    host_ptr = buffer.data();
+    this->CopyDataTo(host_ptr, count * sizeof(char), DeviceType::CPU);
+  }
+#endif
   if (backend_ == DeviceType::CPU) {
     host_ptr = GetDataPtr();
   }

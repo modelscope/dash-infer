@@ -19,12 +19,15 @@ class BaichuanModel : public AsModel {
                 const DeviceContext& ctx) override;
 };
 
+class BaichuanModel_v1 : public BaichuanModel {
+ public:
+  explicit BaichuanModel_v1(const std::string& model_type = "")
+      : BaichuanModel(model_type){};
+};
+
 class BaichuanModel_v2 : public BaichuanModel {
  public:
   explicit BaichuanModel_v2(const std::string& model_type = "")
       : BaichuanModel(model_type){};
 };
-
-
-
 }  // namespace allspark

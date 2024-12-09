@@ -1,0 +1,41 @@
+message("========== CUTLASS ==========")
+set(CUTLASS_ENABLE_TESTS OFF CACHE BOOL "Enable CUTLASS Tests")
+set(CUTLASS_ENABLE_TOOLS OFF CACHE BOOL "Enable CUTLASS Tools")
+set(CUTLASS_ENABLE_EXAMPLES OFF CACHE BOOL "Enable CUTLASS Examples")
+set(CUTLASS_NVCC_ARCHS ${CMAKE_CUDA_ARCHITECTURES} CACHE STRING "The SM architectures requested.")
+
+set(CUTLASS_INSTALL ${INSTALL_LOCATION}/cutlass/install)
+message(STATUS "CUTLASS_INSTALL: ${CUTLASS_INSTALL}")
+
+message(STATUS "Use cutlass from submodule")
+set(CUTLASS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass)
+
+include(ExternalProject)
+
+ExternalProject_Add(
+  project_cutlass
+  PREFIX ${CMAKE_CURRENT_BINARY_DIR}/cutlass
+  SOURCE_DIR ${CUTLASS_SOURCE_DIR}
+  CMAKE_GENERATOR "Ninja"
+  BUILD_COMMAND ${CMAKE_COMMAND} --build . -j32 -v
+  CMAKE_ARGS
+      -DCUTLASS_ENABLE_TESTS=${CUTLASS_ENABLE_TESTS}
+      -DCUTLASS_ENABLE_TOOLS=${CUTLASS_ENABLE_TOOLS}
+      -DCUTLASS_ENABLE_EXAMPLES=${CUTLASS_ENABLE_EXAMPLES}
+      -DCUTLASS_NVCC_ARCHS=${CUTLASS_NVCC_ARCHS}
+      -DCMAKE_INSTALL_PREFIX=${CUTLASS_INSTALL}
+)
+
+unset(CUTLASS_ENABLE_TESTS)
+unset(CUTLASS_ENABLE_TOOLS)
+unset(CUTLASS_ENABLE_EXAMPLES)
+unset(CUTLASS_NVCC_ARCHS)
+
+# ExternalProject_Get_Property(project_cutlass BINARY_DIR)
+ExternalProject_Get_Property(project_cutlass SOURCE_DIR)
+ExternalProject_Get_Property(project_cutlass INSTALL_DIR)
+set(CUTLASS_INCLUDE_DIR ${SOURCE_DIR}/include)
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${CUTLASS_INSTALL}")
+message(STATUS "CUTLASS_INCLUDE_DIR: ${CUTLASS_INCLUDE_DIR}")
+message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+message("===========================")

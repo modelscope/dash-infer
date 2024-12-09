@@ -218,8 +218,6 @@ cnpy::NpyArray load_the_npz_array(FILE* fp, uint32_t compr_bytes, uint32_t uncom
     d_stream.next_in = &buffer_compr[0];
     d_stream.avail_out = uncompr_bytes;
     d_stream.next_out = &buffer_uncompr[0];
-    d_stream.total_in = 0;
-    d_stream.total_out = 0;
 
     err = inflate(&d_stream, Z_FINISH);
     err = inflateEnd(&d_stream);

@@ -4,11 +4,18 @@
  */
 
 #include "allreduce_op.h"  // NOLINT
+#ifdef ENABLE_CUDA
+#include <check_cuda.h>
+#include <cuda/cuda_context.h>
 
+#include <cuda/nccl_utils.hpp>
+#endif
 #include <coodinator/worker_coodinator.h>
 #include <cpu/cpu_context.h>
 
+#ifdef ENABLE_MULTINUMA
 #include "cpu/mpi_utils.hpp"
+#endif
 
 namespace allspark {
 
@@ -20,7 +27,17 @@ AsStatus AllReduceOp::Init(const OperatorProto& op_proto,
   DataType dtype = tensor_map_->at(in_names_[0])->GetDataType();
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      nranks_ = gpu_ctx->GetNranks();
+      rank_id_ = gpu_ctx->GetRank();
+      nccl_dtype_ = GetNcclType(dtype);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
+#ifdef ENABLE_MULTINUMA
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       nranks_ = cpu_ctx->GetNranks();
       rank_id_ = cpu_ctx->GetRank();
@@ -32,6 +49,10 @@ AsStatus AllReduceOp::Init(const OperatorProto& op_proto,
         return AsStatus::ALLSPARK_RUNTIME_ERROR;
       }
       mpi_dtype_ = GetMpiType(dtype);
+#else
+      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+#endif
       break;
     }
     default:
@@ -54,6 +75,10 @@ AsStatus AllReduceOp::Forward() {
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
   DeviceType backend = ctx_->GetDeviceType();
 
+  if (nranks_ == 1) {
+    return AsStatus::ALLSPARK_SUCCESS;
+  }
+
   auto coodinator = WorkerCoodinator(nranks_, rank_id_,
                                      WorkerCoodinator::GetDefaultTimeout());
 
@@ -64,12 +89,19 @@ AsStatus AllReduceOp::Forward() {
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 
-  if (nranks_ == 1) {
-    return AsStatus::ALLSPARK_SUCCESS;
-  }
-
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
+      // add sync test, if there is some cuda error, abort here.
+      AS_CHECK_NCCL(ncclAllReduce(in, out, count_, nccl_dtype_, ncclSum,
+                                  cuda_ctx->GetNCCLComm(),
+                                  cuda_ctx->GetStream()));
+      break;
+    }
+#endif
     case DeviceType::CPU:
+#ifdef ENABLE_MULTINUMA
       if (in == out) {
         // in place all reduce
         MPI_Allreduce(MPI_IN_PLACE, out, count_, mpi_dtype_, MPI_SUM,
@@ -77,6 +109,10 @@ AsStatus AllReduceOp::Forward() {
       } else {
         MPI_Allreduce(in, out, count_, mpi_dtype_, MPI_SUM, MPI_COMM_WORLD);
       }
+#else
+      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+#endif
       break;
     default:
       LOG(ERROR) << "AllReduce Operator does not support "
@@ -89,5 +125,6 @@ AsStatus AllReduceOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("AllReduce", CPU, AllReduceOp)
+REGISTER_OP(AllReduce, CUDA, AllReduceOp)
+REGISTER_OP(AllReduce, CPU, AllReduceOp)
 }  // namespace allspark

@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    sample.cpp
  */
+
 #include <cfloat>
 #include <random>
 
@@ -15,14 +16,28 @@ void SampleKernelInitLauncher(void* states, unsigned long long seed,
   assert(batch_size == 1);
   for (int i = 0; i < batch_size; i++) {
     ((std::mt19937*)states)[i] = std::mt19937(seed);
+    // ((std::mt19937*)states)[i] = std::mt19937(5489u); // default seed
   }
 }
 
 template <typename T>
 T exponential_func(T val) {
   const float lambda = 1.0;
+#if 1
   auto f_val = static_cast<float>(val);
   return static_cast<T>(-1.0) / lambda * std::log1p(-f_val);
+#elif 0
+  auto log = val >= static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2
+                 ? -std::numeric_limits<T>::epsilon() / 2
+                 : std::log(val);
+  return static_cast<T>(-1.0) / lambda * log;
+#else
+  auto f_val = static_cast<float>(val);
+  auto log = f_val >= 1.0 - FLT_EPSILON / 2 ? -FLT_EPSILON / 2 : logf(f_val);
+
+  auto q = -1.0 / lambda * log;
+  return static_cast<T>(q);
+#endif
 }
 
 template <typename T>
@@ -36,8 +51,8 @@ T multinomial_distri(T in, std::mt19937& rng) {
 }
 
 template <typename T>
-void sample_kernel(int64_t* out, T* in, const int64_t* indice,
-                   std::mt19937& state, int num) {
+void sample_kernel(int64_t* out, T* in, const int* indice, std::mt19937& state,
+                   int num) {
   for (int i = 0; i < num; i++) {
     in[i] = multinomial_distri(in[i], state);
   }
@@ -53,7 +68,7 @@ void sample_kernel(int64_t* out, T* in, const int64_t* indice,
 }
 
 template <typename T>
-void SampleKernel(int64_t* out, void* states, T* in, const int64_t* indice,
+void SampleKernel(int64_t* out, void* states, T* in, const int* indice,
                   int batch_size, int* num_arr, int stride) {
   assert(batch_size == 1);
   parallel_for(batch_size, [&](int b) {
@@ -62,7 +77,7 @@ void SampleKernel(int64_t* out, void* states, T* in, const int64_t* indice,
   });
 }
 template void SampleKernel<float>(int64_t* out, void* states, float* in,
-                                  const int64_t* indice, int batch_size,
+                                  const int* indice, int batch_size,
                                   int* num_arr, int stride);
 
 }  // namespace cpu

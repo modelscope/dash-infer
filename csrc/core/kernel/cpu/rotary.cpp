@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    rotary.cpp
  */
+
 #include "cpu_common.h"
 #include "cpu_kernel.h"
 #if defined(__x86_64__) || defined(_M_X64)

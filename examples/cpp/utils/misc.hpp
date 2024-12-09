@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+static bool begins_with(const std::string& str, const std::string& prefix) {
+  return str.find(prefix) == 0;
+}
+
 static bool file_exists(const std::string& path) {
   std::ifstream file(path.c_str());
   return file.good();
@@ -20,8 +24,8 @@ static bool file_exists(const std::string& path) {
 
 static bool check_model_file_exists(const std::string& model_path,
                                     const std::string& tiktoken_file) {
-  std::string dimodel_file = model_path + ".dimodel";
-  std::string ditensors_file = model_path + ".ditensors";
+  std::string dimodel_file = model_path + ".asgraph";
+  std::string ditensors_file = model_path + ".asparam";
 
   std::cout << "Model Path: " << model_path << std::endl;
   std::cout << "Dash-Infer Model File: " << dimodel_file << std::endl;
@@ -130,6 +134,7 @@ class DLTensorManager {
     dl_managed_tensor_->dl_tensor.dtype.code = DLDataTypeCode::kDLInt;
     dl_managed_tensor_->dl_tensor.dtype.bits = 64;
     dl_managed_tensor_->deleter = [](DLManagedTensor* self) {
+#if 0
       if (self) {
         if (self->dl_tensor.shape) {
           delete[] self->dl_tensor.shape;
@@ -142,6 +147,7 @@ class DLTensorManager {
         }
         delete self;
       }
+#endif
     };
     dl_managed_tensor_->manager_ctx = nullptr;
   }

@@ -5,12 +5,16 @@
 
 #pragma once
 
-#include <common/allocator.h>
 #include <cpu/cpu_allocator.h>
 
 #include <unordered_set>
 
 #include "device_context.h"
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_allocator.h>
+#endif
+#include <bfc_allocator.h>
+#include <common/allocator.h>
 namespace allspark {
 
 template <DeviceType Device, size_t Alignment>
@@ -24,6 +28,14 @@ class BlockImpl : public Block {
         allocator_ = std::make_shared<CPUAllocator>();
         break;
       }
+#ifdef ENABLE_CUDA
+      case DeviceType::CUDA: {
+        allocator_ = GetBFCAllocator(Device);
+        if (allocator_ == nullptr)
+          allocator_ = std::make_shared<CUDAAllocator>();
+        break;
+      }
+#endif
       default: {
         LOG(ERROR) << "DeviceType::" << Device
                    << " is not supported. Please check build option."
@@ -93,6 +105,7 @@ class BlockImpl : public Block {
 
   void Destory() override {
     if (ptr_ != nullptr) {
+      // DeviceGuard<Device> guard(device_id_);
       allocator_->Free(ptr_);
       ptr_ = nullptr;
     }
@@ -100,11 +113,18 @@ class BlockImpl : public Block {
 
   void Restore() override {
     if (ptr_ == nullptr && size_ > 0) {
+      // DeviceGuard<Device> guard(device_id_);
       allocator_->Alloc((void**)ptr_, (int64_t)size_, "BLOCK");
+      // HIE_ENFORCE(ptr_, enum_to_string(Device), " memory allocate
+      // failed");
     }
   }
 
-  void* RawData() override { return ptr_; }
+  void* RawData() override {
+    // Restore();
+    // UnFreeze();
+    return ptr_;
+  }
 
   bool operator<(const BlockImpl& other) const {
     if (size_ != other.size_) return size_ < other.size_;
@@ -115,12 +135,43 @@ class BlockImpl : public Block {
 
   void UnBindTensor(AsTensor* tensor) override { tensors_.erase(tensor); }
 
+  // bool Freeze() override {
+  //     if (!freezed_ && ptr_ && size_ > 0 && freezer_ && tensors_.size() ==
+  //     1) {
+  //         freezed_tensor_ = *(tensors_.begin());
+  //         HIETensor hie_tensor(freezed_tensor_);
+  //         bool is_freezable = freezer_->CheckFreezable(hie_tensor);
+  //         if (is_freezable && freezer_->OnFreeze(hie_tensor)) {
+  //             this->Destory();
+  //             freezed_ = true;
+  //             return true;
+  //         }
+  //     }
+  //     return false;
+  // }
+
+  // bool UnFreeze() override {
+  //     if (freezed_) {
+  //         HIE_ENFORCE(freezer_, "invalid freezer");
+  //         HIE_ENFORCE(freezed_tensor_ != nullptr, "invalid freezed
+  //         tensor"); HIE_ENFORCE(tensors_.count(freezed_tensor_) != 0,
+  //         "invalid freezed tensor"); this->Restore(); freezed_ = false;
+  //         HIETensor hie_tensor(freezed_tensor_);
+  //         HIE_ENFORCE(freezer_->OnUnfreeze(hie_tensor) == true, "unfreeze
+  //         failed"); return true;
+  //     }
+  //     return false;
+  // }
+
  private:
-  int device_id_ = 0;
+  int device_id_ = 0;                               // gpu
   int64_t size_ = 0;                                // block size in bytes
   std::shared_ptr<Allocator> allocator_ = nullptr;  // allocator
   void* ptr_ = nullptr;                             // memory address
   std::unordered_set<AsTensor*> tensors_;  // most recently binded tensor
+
+  // AsTensor* freezed_tensor_ = nullptr;
+  // bool freezed_ = false;
 };
 
 }  // namespace allspark

@@ -6,6 +6,7 @@
 #include "weight_saver.h"
 
 namespace allspark {
+
 inline char BigEndianTest() {
   int x = 1;
   return (((char*)&x)[0]) ? '<' : '>';
@@ -104,6 +105,13 @@ void WeightSerialization::SerializeSingleTensor(const AsTensor* tensor,
       bin_data->back() = '\n';
       DenseData* data = (DenseData*)(tensor->GetData());
       char* data_ptr = (char*)(data->GetRawData());
+#ifdef ENABLE_CUDA
+      std::vector<char> buffer(data->GetSize());
+      if (tensor->GetDeviceType() == DeviceType::CUDA) {
+        data_ptr = buffer.data();
+        tensor->CopyDataTo(data_ptr, data->GetSize(), DeviceType::CPU);
+      }
+#endif
       bin_data->append(data_ptr, data->GetSize());
       break;
     }
@@ -122,6 +130,22 @@ void WeightSerialization::SerializeSingleTensor(const AsTensor* tensor,
       char* data_ptr = (char*)(data->GetRawData());
       char* row_idx_ptr = (char*)(data->GetRowIndices());
       char* col_offset_ptr = (char*)(data->GetColOffsets());
+#ifdef ENABLE_CUDA
+      std::vector<char> buffer(data->GetNNZ() * SizeofType(dtype));
+      std::vector<char> buffer_row(data->GetNNZ() * sizeof(int));
+      std::vector<char> buffer_col((cols + 1) * sizeof(int));
+      if (tensor->GetDeviceType() == DeviceType::CUDA) {
+        CopyData(buffer.data(), DeviceType::CPU, data_ptr, DeviceType::CUDA,
+                 data->GetNNZ() * SizeofType(dtype));
+        CopyData(buffer_row.data(), DeviceType::CPU, row_idx_ptr,
+                 DeviceType::CUDA, data->GetNNZ() * sizeof(int));
+        CopyData(buffer_col.data(), DeviceType::CPU, col_offset_ptr,
+                 DeviceType::CUDA, (cols + 1) * sizeof(int));
+        data_ptr = buffer.data();
+        row_idx_ptr = buffer_row.data();
+        col_offset_ptr = buffer_col.data();
+      }
+#endif
 
       bin_data->append(col_offset_ptr, (cols + 1) * sizeof(int));
       bin_data->append(row_idx_ptr, data->GetNNZ() * sizeof(int));
@@ -141,6 +165,18 @@ void WeightSerialization::SerializeSingleTensor(const AsTensor* tensor,
       ELLData* data = (ELLData*)(tensor->GetData());
       char* data_ptr = (char*)(data->GetRawData());
       char* row_idx_ptr = (char*)(data->GetRowIndices());
+#ifdef ENABLE_CUDA
+      std::vector<char> buffer(data->GetNNZ() * SizeofType(dtype));
+      std::vector<char> buffer_row(data->GetNNZ() * sizeof(unsigned short));
+      if (tensor->GetDeviceType() == DeviceType::CUDA) {
+        CopyData(buffer.data(), DeviceType::CPU, data_ptr, DeviceType::CUDA,
+                 data->GetNNZ() * SizeofType(dtype));
+        CopyData(buffer_row.data(), DeviceType::CPU, row_idx_ptr,
+                 DeviceType::CUDA, data->GetNNZ() * sizeof(unsigned short));
+        data_ptr = buffer.data();
+        row_idx_ptr = buffer_row.data();
+      }
+#endif
       bin_data->append(row_idx_ptr, data->GetNNZ() * sizeof(unsigned short));
       bin_data->append(data_ptr, data->GetNNZ() * SizeofType(dtype));
       break;
@@ -151,4 +187,5 @@ void WeightSerialization::SerializeSingleTensor(const AsTensor* tensor,
       break;
   }
 }
+
 }  // namespace allspark

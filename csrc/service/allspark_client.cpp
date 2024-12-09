@@ -19,19 +19,35 @@ AsModelConfig::AsModelConfig() {}
 AsModelConfig::AsModelConfig(
     std::string in_model_name, std::string in_model_path,
     std::string in_weights_path, std::string in_compute_unit,
-    int in_engine_max_length, int in_engine_max_batch, bool in_text_graph,
-    int in_num_threads, std::string in_matmul_precision,
-    AsMHAPrefill in_prefill_mode, AsCacheMode in_cache_mode)
+    int in_engine_max_length, int in_engine_max_batch,
+    int in_engine_max_prefill_length, int64_t in_swap_threshold,
+    bool in_text_graph, int in_num_threads, std::string in_matmul_precision,
+    std::vector<std::string> lora_names, int in_cache_span_size,
+    int in_cache_span_num_init, int in_cache_span_num_grow,
+    bool enable_prefix_cache, int prefix_cache_ttl,
+    AsMHAPrefill in_prefill_mode, AsCacheMode in_cache_mode,
+    AsEvictionStrategy in_eviction_strategy,
+    AsSchedulingStrategy in_scheduling_strategy, bool enable_sparsity_matmul)
     : model_name(std::move(in_model_name)),
       model_path(std::move(in_model_path)),
       weights_path(std::move(in_weights_path)),
       compute_unit(std::move(in_compute_unit)),
       num_threads(in_num_threads),
       matmul_precision(in_matmul_precision),
+      swap_threshold(in_swap_threshold),
       engine_max_length(in_engine_max_length),
       engine_max_batch(in_engine_max_batch),
+      engine_max_prefill_length(in_engine_max_prefill_length),
+      lora_names(lora_names),
+      cache_span_size(in_cache_span_size),
+      cache_span_num_init(in_cache_span_num_init),
+      cache_span_num_grow(in_cache_span_num_grow),
       cache_mode(in_cache_mode),
+      enable_prefix_cache(enable_prefix_cache),
+      prefix_cache_ttl(prefix_cache_ttl),
       prefill_mode(in_prefill_mode),
+      eviction_strategy(in_eviction_strategy),
+      enable_sparsity_matmul(enable_sparsity_matmul),
       text_graph(in_text_graph) {}
 
 static std::vector<std::string> g_errors;
@@ -65,7 +81,8 @@ const std::string AsGetErrorByCode(AsStatus error_code) {
         return "ALLSPARK_RUNTIME_ERROR" + AsConcatErrors();
       else
         return "ALLSPARK_RUNTIME_ERROR";
-
+    case AsStatus::ALLSPARK_CHUNK_PREFILL:
+      return "ALLSPARK_CHUNK_PREFILL";
     default:
       return "ALLSPARK_UNDEFINED_ERROR_CODE";
   }
@@ -79,6 +96,8 @@ void AsSaveError(const std::string& err_str) {
   }
 }
 
+// 为了在SLS平台上容易定位问题，将历史错误信息组合成一个大字符串
+// ALLSPARK_RUNTIME_ERROR|ecc error#illegal mem#out of mem#...#
 const std::string AsConcatErrors() {
   std::lock_guard<std::mutex> guard(g_errors_lock);
   std::stringstream ss;
@@ -153,6 +172,16 @@ AsStatus AsClientEngine::ReleaseRequest(const char* model_name,
 AsStatus AsClientEngine::SyncRequest(const char* model_name,
                                      RequestHandle_t request_handle) {
   return as_client_engine_impl_->SyncRequest(model_name, request_handle);
+}
+
+AsStatus AsClientEngine::LoadLoraByName(const char* model_name,
+                                        const char* lora_name) {
+  return AsStatus::ALLSPARK_LORA_NOT_LOADED;
+}
+
+AsStatus AsClientEngine::UnloadLoraByName(const char* model_name,
+                                          const char* lora_name) {
+  return AsStatus::ALLSPARK_LORA_NOT_LOADED;
 }
 
 AsEngineStat AsClientEngine::GetAsEngineStat(const char* model_name) {

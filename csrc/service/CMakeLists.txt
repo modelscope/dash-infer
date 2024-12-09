@@ -1,3 +1,4 @@
+if (ENABLE_MULTINUMA)
 set(PROTO_SERVICE_RAW_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../proto/")
 set(PROTO_SERVICE_RAW_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../proto/allspark_service.proto")
 message(STATUS "PROTO_SERVICE_RAW_FILES:${PROTO_SERVICE_RAW_FILES} CMAKE_CURRENT_BINARY_DIR:${CMAKE_CURRENT_BINARY_DIR} PROTOBUF_PROTOC_EXECUTABLE:${PROTOBUF_PROTOC_EXECUTABLE}")
@@ -21,11 +22,10 @@ add_custom_target(protobuf_svc_target DEPENDS ${PROTO_SVC_SRCS} ${PROTO_SVC_HDRS
 
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--unresolved-symbols=ignore-in-shared-libs")
 add_executable(allspark_daemon ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_service.cpp)
-
-set_target_properties(allspark_daemon PROPERTIES CXX_STANDARD 17)  # c17 for grpc
+# add_dependencies(allspark_daemon protobuf_svc_target)
 target_link_libraries(allspark_daemon allspark_framework CONAN_PKG::grpc CONAN_PKG::protobuf CONAN_PKG::glog)
 target_include_directories(
-  allspark_daemon
+    allspark_daemon
   PUBLIC
   ${CMAKE_CURRENT_BINARY_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}/..
@@ -33,10 +33,12 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../interface)
 
-add_library(allspark_client SHARED ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_client.cpp allspark_client_impl.cpp allspark_service_parallel.cpp)
-
-set_target_properties(allspark_client PROPERTIES CXX_STANDARD 17)  # c17 for grpc
+add_library(allspark_client STATIC ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_client.cpp allspark_client_impl.cpp allspark_service_parallel.cpp)
 target_link_libraries(allspark_client CONAN_PKG::grpc CONAN_PKG::protobuf CONAN_PKG::glog ${THREAD_LIB})
+
+if (MEM_CHECK)
+    target_link_options(allspark_client PUBLIC "-fsanitize=address")
+endif()
 target_include_directories(
   allspark_client
   PUBLIC
@@ -46,3 +48,4 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../interface)
+endif()

@@ -6,7 +6,11 @@
 #include "cpu_common.h"
 #include "cpu_kernel.h"
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 #include <math.h>
 namespace allspark {
@@ -16,6 +20,7 @@ template <typename T>
 void quantize(int m, int n, const T* data, int8_t* q_data, float* scale,
               int8_t* zero, int* redsum) {
   parallel_for(n, [&](int j) {
+    // for (int j = 0; j < n; j++) {
     float qmax = 127;
     float qmin = -128;
     int redsum_ = 0;
@@ -26,11 +31,13 @@ void quantize(int m, int n, const T* data, int8_t* q_data, float* scale,
       fmin = std::min(fmin, data[i * n + j]);
     }
     float scale_ = (float)(fmax - fmin) / (qmax - qmin);
-    float init_zero = qmin - fmin / scale_;
+    // when fmin is half, compiler complain type issue, make them into float.
+    float init_zero = qmin - ((float)fmin / scale_);
     init_zero = std::max(init_zero, qmin);
     init_zero = std::min(init_zero, qmax);
     zero[j] = (int8_t)(round(init_zero));
     parallel_for(m, [&](int i) {
+      // for (int i = 0; i < m; i++) {
       float q_data_ = (float)data[i * n + j] / scale_ + init_zero;
       q_data_ = std::max(q_data_, qmin);
       q_data_ = std::min(q_data_, qmax);

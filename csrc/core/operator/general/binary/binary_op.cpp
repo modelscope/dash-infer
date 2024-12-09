@@ -6,9 +6,15 @@
 #include "binary_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 using dnnl::memory;
+
+#define NO_INPLACE_BINARY 0
+#define USE_ONEDNN_BINARY 1
 
 namespace allspark {
 AsStatus BinaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
@@ -45,6 +51,11 @@ AsStatus BinaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
       dnnl_op_ctx_->outs_.resize(1);
       break;
     }
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      break;
+    }
+#endif
     default:
       LOG(ERROR) << "Binary Operator does not support "
                  << DeviceType_Name(backend) << " device type" << std::endl;
@@ -92,10 +103,33 @@ AsStatus BinaryOp::Forward() {
   int64_t count = x_tensor->GetShape().Count();
 
   switch (ctx_->GetDeviceType()) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+#ifdef CONFIG_DEBUG_OP
+      DLOG(INFO) << "gpu_binary" << std::endl;
+#endif
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      auto functor = [&]<typename T>() {
+        T* typed_out = static_cast<T*>(z_tensor->GetDataPtr());
+        const T* typed_in1 = static_cast<const T*>(x_tensor->GetDataPtr());
+        const T* typed_in2 = static_cast<const T*>(y_tensor->GetDataPtr());
+        cuda::BinaryKernelLauncher(typed_out, typed_in1, typed_in2, count,
+                                   binary_type_, gpu_ctx->GetStream());
+      };
+      DispatchCUDA(x_tensor->GetDataType(), functor);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       dnnl::memory& in0_mem = *(dnnl_op_ctx_->ins_[0]);
       dnnl::memory& in1_mem = *(dnnl_op_ctx_->ins_[1]);
       dnnl::memory& out_mem = *(dnnl_op_ctx_->outs_[0]);
+
+#if (NO_INPLACE_BINARY & USE_ONEDNN_BINARY)
+      auto eng = DNNLEngine::GetInstance().GetEngine();
+      dnnl::memory temp_mem =
+          dnnl::memory(dnnl_op_ctx_->ins_[1]->get_desc(), eng);
+#endif
 
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       in0_mem.set_data_handle(x_tensor->GetDataPtr());
@@ -104,6 +138,16 @@ AsStatus BinaryOp::Forward() {
       if ((binary_type_ == BinaryType::GEGLU ||
            binary_type_ == BinaryType::SWIGLU) &&
           dnnl_op_ctx_->pr_fwd_.size() > 1) {
+#if (NO_INPLACE_BINARY & USE_ONEDNN_BINARY)
+        std::unordered_map<int, memory> args1{{DNNL_ARG_SRC_0, in1_mem},
+                                              {DNNL_ARG_DST, temp_mem}};
+        dnnl_op_ctx_->pr_fwd_[1]->execute(cpu_ctx->GetStream(), args1);
+
+        std::unordered_map<int, memory> args2{{DNNL_ARG_SRC_0, in0_mem},
+                                              {DNNL_ARG_SRC_1, temp_mem},
+                                              {DNNL_ARG_DST, out_mem}};
+        dnnl_op_ctx_->pr_fwd_[0]->execute(cpu_ctx->GetStream(), args2);
+#elif USE_ONEDNN_BINARY
         std::unordered_map<int, memory> args1{{DNNL_ARG_SRC_0, in1_mem},
                                               {DNNL_ARG_DST, in1_mem}};
         dnnl_op_ctx_->pr_fwd_[1]->execute(cpu_ctx->GetStream(), args1);
@@ -112,11 +156,30 @@ AsStatus BinaryOp::Forward() {
                                               {DNNL_ARG_SRC_1, in1_mem},
                                               {DNNL_ARG_DST, out_mem}};
         dnnl_op_ctx_->pr_fwd_[0]->execute(cpu_ctx->GetStream(), args2);
+#else
+        // naive impl
+        for (size_t idx = 0; idx < y_tensor->GetShape().Count(); idx++) {
+          float y = ((float*)y_tensor->GetDataPtr())[idx];
+          float x = ((float*)x_tensor->GetDataPtr())[idx];
+          float tmp = y * (1.0f / (1.0f + expf(-y)));  // swiglu result
+          float out = tmp * x;                         // mul
+          *(((float*)z_tensor->GetDataPtr()) + idx) = out;
+        }
+#endif
       } else {
+#if USE_ONEDNN_BINARY
         std::unordered_map<int, memory> args{{DNNL_ARG_SRC_0, in0_mem},
                                              {DNNL_ARG_SRC_1, in1_mem},
                                              {DNNL_ARG_DST, out_mem}};
         dnnl_op_ctx_->pr_fwd_[0]->execute(cpu_ctx->GetStream(), args);
+#else
+        // naive impl
+        for (size_t idx = 0; idx < y_tensor->GetShape().Count(); idx++) {
+          float y = ((float*)y_tensor->GetDataPtr())[idx];
+          float x = ((float*)x_tensor->GetDataPtr())[idx];
+          *(((float*)z_tensor->GetDataPtr()) + idx) = x + y;
+        }
+#endif
       }
       break;
     }
@@ -125,5 +188,6 @@ AsStatus BinaryOp::Forward() {
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-REGISTER_OP("Binary", CPU, BinaryOp)
+REGISTER_OP(Binary, CUDA, BinaryOp)
+REGISTER_OP(Binary, CPU, BinaryOp)
 }  // namespace allspark

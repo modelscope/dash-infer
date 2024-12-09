@@ -6,12 +6,42 @@
 #include "embedding_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <utility>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+AsStatus gpu_embedding(DataType dtype, void* out, void* in_ids,
+                       void* token_type_ids, const void* embedding_table,
+                       const void* pos_table, const void* token_type_table,
+                       int batch_size, int seq_len, int hidden_size,
+                       int vocab_size, int offset, const DeviceContext* ctx) {
+  DLOG(INFO) << "gpu_embedding" << std::endl;
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    const int64_t* typed_in_ids = static_cast<const int64_t*>(in_ids);
+    const int64_t* typed_token_ids =
+        static_cast<const int64_t*>(token_type_ids);
+    const T* typed_embedding_table = static_cast<const T*>(embedding_table);
+    const T* typed_pos_table = static_cast<const T*>(pos_table);
+    const T* typed_token_type_table = static_cast<const T*>(token_type_table);
+    cuda::EmbeddingKernelLauncher<false, T>(
+        typed_out, typed_in_ids, typed_token_ids, typed_embedding_table,
+        typed_pos_table, typed_token_type_table, batch_size, seq_len,
+        hidden_size, vocab_size, nullptr, offset, gpu_ctx->GetStream());
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
+
 AsStatus cpu_embedding(DataType dtype, void* out, void* in_ids,
                        void* token_type_ids, const void* embedding_table,
                        const void* pos_table, const void* token_type_table,
@@ -65,6 +95,11 @@ AsStatus EmbeddingOp::Init(const OperatorProto& op_proto,
   // kernel choose
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_embedding;
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_embedding;
       break;
@@ -100,5 +135,6 @@ AsStatus EmbeddingOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Embedding", CPU, EmbeddingOp)
+REGISTER_OP(Embedding, CUDA, EmbeddingOp)
+REGISTER_OP(Embedding, CPU, EmbeddingOp)
 }  // namespace allspark

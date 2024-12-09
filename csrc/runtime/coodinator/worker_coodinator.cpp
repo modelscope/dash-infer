@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    worker_coodinator.cpp
  */
+
 #include "worker_coodinator.h"
 
 #define DISABLE_COODINATOR 1
