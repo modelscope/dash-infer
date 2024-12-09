@@ -6,12 +6,36 @@
 #include "embeddingT5_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
 
-#include <string>
 #include <utility>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
+
+#include <string>
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+AsStatus gpu_embedding(DataType dtype, void* out, void* in_ids,
+                       const void* embedding_table, int batch_size, int seq_len,
+                       int hidden_size, int vocab_size,
+                       const DeviceContext* ctx) {
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    const int64_t* typed_in_ids = static_cast<const int64_t*>(in_ids);
+    const T* typed_embedding_table = static_cast<const T*>(embedding_table);
+    cuda::EmbeddingT5KernelLauncher<false, T>(
+        typed_out, typed_in_ids, typed_embedding_table, batch_size, seq_len,
+        hidden_size, vocab_size, gpu_ctx->GetStream());
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
+
 AsStatus cpu_embedding(DataType dtype, void* out, void* in_ids,
                        const void* embedding_table, int batch_size, int seq_len,
                        int hidden_size, int vocab_size,
@@ -55,6 +79,11 @@ AsStatus EmbeddingT5Op::Init(const OperatorProto& op_proto,
   // kernel choose
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_embedding;
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_embedding;
       break;
@@ -83,5 +112,6 @@ AsStatus EmbeddingT5Op::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("EmbeddingT5", CPU, EmbeddingT5Op)
+REGISTER_OP(EmbeddingT5, CUDA, EmbeddingT5Op)
+REGISTER_OP(EmbeddingT5, CPU, EmbeddingT5Op)
 }  // namespace allspark

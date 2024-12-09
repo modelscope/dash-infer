@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    gemm.cpp
  */
+
 #include <memory.h>
 
 #include "cpu_common.h"
@@ -16,7 +17,9 @@ void GemmWraper<float>(float* matrix_C, const float* matrix_A,
                        int ldc, float alpha, float beta, const float* bin_res) {
   CBLAS_TRANSPOSE transA_ = transA ? CblasTrans : CblasNoTrans;
   CBLAS_TRANSPOSE transB_ = transB ? CblasTrans : CblasNoTrans;
+  // assert beta = 0.f
   if (bias) {
+    // broadcast_kernel(matrix_C, bias, m * n, m * n, n);
     parallel_for(
         m, [&](int j) { memcpy(matrix_C + j * n, bias, n * sizeof(float)); });
     beta = 1.f;
@@ -37,11 +40,13 @@ void StridedBatchGemmWraper<float>(float* matrix_C, const float* matrix_A,
                                    bool transB, int lda, int ldb, int ldc,
                                    float alpha, float beta, int batch,
                                    const float* bin_res) {
+  // int strideA = m * k;
   int strideA = 0;
   int strideB = k * n;
   int strideC = m * n;
   CBLAS_TRANSPOSE transA_ = transA ? CblasTrans : CblasNoTrans;
   CBLAS_TRANSPOSE transB_ = transB ? CblasTrans : CblasNoTrans;
+  // assert beta = 0.f
   if (bias) {
     parallel_for(batch, [&](int i) {
       parallel_for(m, [&](int j) {

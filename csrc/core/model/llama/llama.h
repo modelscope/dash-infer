@@ -24,6 +24,7 @@ class LLaMA_v2Model : public LLaMAModel {
   explicit LLaMA_v2Model(const std::string& model_type = "")
       : LLaMAModel(model_type){};
 };
+
 class LLaMA_v3Model : public LLaMAModel {
  public:
   explicit LLaMA_v3Model(const std::string& model_type = "")

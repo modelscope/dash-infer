@@ -1,0 +1,7 @@
+message("============ smhahser  Start ================")
+set(SMHASHER_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/smhasher)
+message("SMHASHER_DIR: ${SMHASHER_DIR}")
+add_subdirectory(${SMHASHER_DIR} EXCLUDE_FROM_ALL)
+set(SMHASHER_INCLUDE ${SMHASHER_DIR})
+set(SMHASHER_LIBRARY smhasher)
+message("============ smhahser  End ==================")

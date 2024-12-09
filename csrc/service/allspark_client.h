@@ -61,6 +61,8 @@ class AsClientEngine final {
 
   // sync request handle, nullptr for all requests on this model.
   AsStatus SyncRequest(const char* model_name, RequestHandle_t request_handle);
+  AsStatus LoadLoraByName(const char* model_name, const char* lora_name);
+  AsStatus UnloadLoraByName(const char* model_name, const char* lora_name);
   AsEngineStat GetAsEngineStat(const char* model_name);
 
   /**

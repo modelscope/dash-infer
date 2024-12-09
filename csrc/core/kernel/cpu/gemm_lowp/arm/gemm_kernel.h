@@ -13,6 +13,8 @@
 namespace allspark {
 namespace cpu {
 
+#define TEST_TYPE_CVT_FP16 1  // temporary macro for test
+
 void gemv_kernel_arm(int M, int N, int K, int lda, float* a_fp32, uint8_t* b_u8,
                      float* c_fp32, float* bias_fp32, void* wei_scale,
                      void* wei_scaleXzp, int GroupSize, int actType,

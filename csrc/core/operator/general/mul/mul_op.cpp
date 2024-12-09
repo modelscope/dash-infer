@@ -6,8 +6,11 @@
 #include "mul_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 using dnnl::memory;
 
 namespace allspark {
@@ -36,6 +39,20 @@ AsStatus MulOp::Forward() {
   AsTensor* x_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* y_tensor = tensor_map_->at(out_names_[0]).get();
   switch (ctx_->GetDeviceType()) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      auto functor = [&]<typename T>() {
+        T* typed_out = static_cast<T*>(y_tensor->GetDataPtr());
+        const T* typed_in = static_cast<const T*>(x_tensor->GetDataPtr());
+        cuda::MulKernelLauncher(typed_out, typed_in,
+                                x_tensor->GetShape().Count(), alpha_,
+                                gpu_ctx->GetStream());
+      };
+      DispatchCUDA(x_tensor->GetDataType(), functor);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       auto functor = [&]<typename T>() {
         T* typed_out = static_cast<T*>(y_tensor->GetDataPtr());
@@ -51,5 +68,6 @@ AsStatus MulOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Mul", CPU, MulOp)
+REGISTER_OP(Mul, CUDA, MulOp)
+REGISTER_OP(Mul, CPU, MulOp)
 }  // namespace allspark

@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    block.h
  */
+
 #pragma once
 
 #include <common.h>

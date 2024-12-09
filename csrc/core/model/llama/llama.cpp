@@ -21,6 +21,7 @@ AsStatus LLaMAModel::Init(const TransformerProto& model_proto,
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+REGISTER_MODEL("LLaMA", LLaMAModel)
 REGISTER_MODEL("LLaMA_v2", LLaMA_v2Model)
 REGISTER_MODEL("LLaMA_v3", LLaMA_v3Model)
 }  // namespace allspark

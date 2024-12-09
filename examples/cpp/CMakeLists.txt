@@ -4,10 +4,6 @@ project(DashInferExample)
 # install some 3rdparty requirement
 include(FetchContent)
 
-FetchContent_Declare(
-  CLI11 URL https://github.com/CLIUtils/CLI11/archive/refs/tags/v2.4.1.zip)
-FetchContent_MakeAvailable(CLI11)
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -17,28 +13,35 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
 
 ###########################################
-# Example 1: Single NUMA qwen v1 example.
+# Example 1: Single NUMA or GPU qwen v1 example.
 ###########################################
 add_executable(
-  example_qwen_single_numa 0_basic/example_qwen.cpp tokenizer/tokenizer.cpp
+  example_qwen 0_basic/example_qwen.cpp tokenizer/tokenizer.cpp
                            tokenizer/base64.cpp)
 
-target_link_libraries(example_qwen_single_numa PRIVATE allspark_framework
-                                                       CLI11::CLI11)
-target_include_directories(example_qwen_single_numa PRIVATE tokenizer utils)
+target_link_libraries(example_qwen PRIVATE allspark_framework
+                                                       )
+
+target_include_directories(example_qwen PRIVATE tokenizer utils)
 
 ###########################################
 # Example 2: Multi-NUMA qwen v1 example.
 ###########################################
-add_executable(
-  example_qwen_multi_numa 0_basic/example_qwen.cpp tokenizer/tokenizer.cpp
-                          tokenizer/base64.cpp)
-target_compile_definitions(example_qwen_multi_numa PRIVATE -DEXAMPLE_MULTI_NUMA)
-target_link_libraries(example_qwen_multi_numa PRIVATE allspark_client
-                                                      CLI11::CLI11)
-target_include_directories(example_qwen_multi_numa PRIVATE tokenizer utils)
-target_include_directories(example_qwen_multi_numa
-                           PRIVATE /usr/include/allspark/)
+#if (MEM_CHECK)
+#  message("ddd")
+#  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+#  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+#endif()
+
+#add_executable(
+#  example_qwen_multi_numa 0_basic/example_qwen.cpp tokenizer/tokenizer.cpp
+#                          tokenizer/base64.cpp)
+#target_compile_definitions(example_qwen_multi_numa PRIVATE -DEXAMPLE_MULTI_NUMA)
+#target_link_libraries(example_qwen_multi_numa PRIVATE allspark_client
+#                                                      )
+#target_include_directories(example_qwen_multi_numa PRIVATE tokenizer utils)
+#target_include_directories(example_qwen_multi_numa
+#                           PRIVATE /usr/include/allspark/)
 
 ###########################################
 # Example 3: simple api Server
@@ -75,6 +78,9 @@ ExternalProject_Add(
 
 add_executable(tgi_server 1_apiserver/apiserver.cpp tokenizer/tokenizer.cpp
                           tokenizer/base64.cpp)
+target_link_directories(tgi_server PRIVATE /home/jiejing.zjj/workspace/HIE-AllSpark/build/HIE-AllSpark-3.0.0/lib64/)
+target_include_directories(tgi_server PRIVATE /home/jiejing.zjj/workspace/HIE-AllSpark/build/HIE-AllSpark-3.0.0/include)
+
 
 add_dependencies(tgi_server externalRestbed)
 
@@ -89,25 +95,25 @@ target_link_directories(
   ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/lib64
   ${CMAKE_SOURCE_DIR}/1_apiserver/restbed/distribution/library)
 target_link_libraries(
-  tgi_server PRIVATE restbed allspark_framework CLI11::CLI11
+  tgi_server PRIVATE restbed allspark_framework
                      nlohmann_json::nlohmann_json)
 
 # multi numa server
-add_executable(
-  tgi_server_multi_numa 1_apiserver/apiserver.cpp tokenizer/tokenizer.cpp
-                        tokenizer/base64.cpp)
+#add_executable(
+#  tgi_server_multi_numa 1_apiserver/apiserver.cpp tokenizer/tokenizer.cpp
+#                        tokenizer/base64.cpp)
 
-add_dependencies(tgi_server_multi_numa externalRestbed)
+#add_dependencies(tgi_server_multi_numa externalRestbed)
 
-target_include_directories(
-  tgi_server_multi_numa
-  PRIVATE ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/include /usr/include/allspark/
-          ${CMAKE_SOURCE_DIR}/utils ${CMAKE_SOURCE_DIR}/tokenizer)
+#target_include_directories(
+#  tgi_server_multi_numa
+#  PRIVATE ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/include /usr/include/allspark/
+#          ${CMAKE_SOURCE_DIR}/utils ${CMAKE_SOURCE_DIR}/tokenizer)
 
-target_compile_definitions(tgi_server_multi_numa PRIVATE -DEXAMPLE_MULTI_NUMA)
-target_link_directories(
-  tgi_server_multi_numa PRIVATE ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/lib
-  ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/lib64)
-target_link_libraries(
-  tgi_server_multi_numa PRIVATE restbed allspark_client CLI11::CLI11
-                                nlohmann_json::nlohmann_json)
+#target_compile_definitions(tgi_server_multi_numa PRIVATE -DEXAMPLE_MULTI_NUMA)
+#target_link_directories(
+#  tgi_server_multi_numa PRIVATE ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/lib
+#  ${EXTERNAL_PROJECTS_INSTALL_PREFIX}/lib64)
+#target_link_libraries(
+#  tgi_server_multi_numa PRIVATE restbed allspark_client
+#                                nlohmann_json::nlohmann_json)

@@ -7,6 +7,10 @@
 
 #include <core/kernel/kernel.h>
 #include <cpu/cpu_context.h>
+#ifdef ENABLE_CUDA
+#include <check_cuda.h>
+#include <cuda/cuda_context.h>
+#endif
 #include <utility/datatype_dispatcher.h>
 
 namespace allspark {
@@ -22,11 +26,27 @@ AsStatus GemmOpBase::InitV2(const OperatorProto& op_proto,
                             const TensorMap& weights_map,
                             TensorMap& weights_buffer, TensorMap* tensor_map) {
   AS_CHECK_STATUS(AsOperator::Init(op_proto, ctx, weights_map, tensor_map));
+  // check weight
+  // if (weights_.size() != 2 && weights_.size() != 1) {
+  //     LOG(ERROR) << "GemmOpBase has 1~2 weights: [weight], (optional)
+  //     [bias]."
+  //                << std::endl;
+  //     return AsStatus::ALLSPARK_PARAM_ERROR;
+  // }
   // type inference
   DataType dtype = tensor_map_->at(in_names_[0])->GetDataType();
+  // tensor_map_->at(out_names_[0])->SetDataType(dtype);
   // attr
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      nranks_ = gpu_ctx->GetNranks();
+      rank_id_ = gpu_ctx->GetRank();
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       nranks_ = cpu_ctx->GetNranks();
@@ -81,6 +101,7 @@ AsStatus GemmOpBase::Reshape(int yn) {
   const Shape& x_shape = tensor_map_->at(in_names_[0])->GetShape();
   int x_ndims = x_shape.Size();
   Shape y_shape;
+  // int yn = is_npad_ ? n_padded_before_ : n_;
   if (is_pooler_) {
     if (x_shape.Size() != 3) {
       return AsStatus::ALLSPARK_RUNTIME_ERROR;

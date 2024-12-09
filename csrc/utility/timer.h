@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    timer.h
  */
+
 #pragma once
 
 #include <chrono>
@@ -58,9 +59,14 @@ class Timer {
         .count();
   }
 
+  static float duration_ms(const Timer& lhs, const Timer& rhs) {
+    return (lhs.elapsed_micro() - rhs.elapsed_micro()) / 1000.f;
+  }
+
  private:
   std::chrono::time_point<std::chrono::high_resolution_clock> m_begin;
   std::string name = "default_timer";
 };
+
 }  // namespace util
 }  // namespace allspark

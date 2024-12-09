@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    cpu_neon.h
  */
+
 #ifdef ALLSPARK_USE_NEON_
 #include <arm_neon.h>
 

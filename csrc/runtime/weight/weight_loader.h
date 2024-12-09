@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    weight_loader.h
  */
+
 #pragma once
 #include <common/common.h>
 #include <core/tensor/tensor.h>
@@ -88,7 +89,8 @@ class DenseWeightLoader : public WeightLoader {
   DenseWeightLoader(TensorInfo& info_p, RankInfo& r_info,
                     const std::string& name_p,
                     TensorMap* model_weight_save_buffer)
-      : WeightLoader(info_p, r_info, name_p) {}
+      : WeightLoader(info_p, r_info, name_p),
+        model_weight_buffer_for_swap_(model_weight_save_buffer) {}
 
   virtual void LoadFromFileStream(FILE* fp,
                                   std::shared_ptr<AsTensor> out_tensor);
@@ -98,6 +100,10 @@ class DenseWeightLoader : public WeightLoader {
                               std::shared_ptr<AsTensor> out_tensor);
 
  private:
+  /// the weight save buffer for gpu swap function
+  /// it will store the un-split weight
+  TensorMap* model_weight_buffer_for_swap_;
+
   std::shared_ptr<AsTensor> whole_weight_tensor_;
 };
 

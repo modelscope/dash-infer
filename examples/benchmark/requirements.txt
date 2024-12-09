@@ -1,0 +1,8 @@
+matplotlib
+statistics
+modelscope
+pandas
+tabulate
+tqdm
+optimum
+auto-gptq

@@ -11,7 +11,7 @@
 #include <allspark/dlpack.h>
 #include <unistd.h>
 
-#include <CLI/CLI.hpp>
+#include <CLI11.hpp>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -52,6 +52,7 @@ std::string start_request_and_fetch_output(
 int main(int argc, char** argv) {
   std::string model_path;
   std::string tiktoken_file;
+  std::string compute_unit = "CUDA:0";
   int compute_cores = 32;
 
   // parse arguments.
@@ -64,8 +65,11 @@ int main(int argc, char** argv) {
       ->required();
   app.add_option("--compute_cores , -c", compute_cores,
                  "compute core, suggestion setting max phy cores inside per "
-                 "NUMA(by cmd lscpu)")
-      ->required();
+                 "NUMA(by cmd lscpu)");
+  app.add_option("--compute_unit", compute_unit,
+                 "running device, like CUDA:0 for single GPU, CUDA:0,1 for "
+                 "double GPU, CPU:10 for cpu with 10 compute threads.  ")
+      ->default_str("CUDA:0");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -93,17 +97,22 @@ int main(int argc, char** argv) {
 
   // use model config builder to build model config.
   AsModelConfigBuilder model_config_builder;
-  auto model_config =
-      model_config_builder.withModelName(model_name)
-          .withModelPath(dimodel_file)
-          .withWeightsPath(ditensors_file)
-          .withEngineMaxLength(default_engine_max_length)
-          .withEngineMaxBatch(16)
-          .withMatmulPrecision("medium")
-          .withNumThreads(compute_cores)  // this number is worker's thread
-                                          // number, use phy core(not phy-thread
-                                          // number) number in side of each numa
-          .build();
+
+  model_config_builder.withModelName(model_name)
+      .withModelPath(dimodel_file)
+      .withWeightsPath(ditensors_file)
+      .withEngineMaxLength(default_engine_max_length)
+      .withEngineMaxBatch(16)
+      .withComputeUnit(compute_unit);
+
+  if (!begins_with(compute_unit, "CUDA")) {
+    model_config_builder.withMatmulPrecision("medium").withNumThreads(
+        compute_cores);  // this number is worker's thread
+                         // number, use phy core(not phy-thread
+                         // number) number in side of each numa
+  }
+
+  auto model_config = model_config_builder.build();
 
   // build the model by engine, in this step engine will start build a
   // runable model instance in created engine.
@@ -123,7 +132,9 @@ int main(int argc, char** argv) {
   auto base_gen_config = build_qwen_generate_config();
 
   // dl manager to keep dlpack life cycle.
-  auto dl_mgr_token = std::make_shared<DLTensorManager>();
+  auto dl_mgr_token = new DLTensorManager();
+  std::shared_ptr<AsEngine::RequestContent> req_;
+  std::vector<int64_t> tokens;
 
   int in_count = 0;
 
@@ -144,12 +155,11 @@ int main(int argc, char** argv) {
     std::cout << "Input Text: " << full_prompt_text << std::endl;
 
     // convert text to token
-    std::vector<int64_t> tokens = tokenizer.Encode(full_prompt_text);
+    tokens = tokenizer.Encode(full_prompt_text);
     std::string tokens_str = tokens2str(tokens);
     std::cout << " Input Tokens: " + tokens_str + "\n" << std::endl;
 
     // prepare token into request.
-    std::shared_ptr<AsEngine::RequestContent> req_;
     req_ = std::make_shared<AsEngine::RequestContent>();
     req_->config = base_gen_config;
 
@@ -173,6 +183,8 @@ int main(int argc, char** argv) {
     std::cerr << "Error on stop model, ret: " << (int)status;
     return 1;
   }
+
+  status = as_engine->ReleaseModel(model_name.c_str());
 
   return 0;
 }
@@ -206,13 +218,14 @@ std::string start_request_and_fetch_output(
 
     // if ele is null, it's either finish generation or intterrupted by some
     // case.
-    if (ele == nullptr) {
+    if (ele == nullptr || ele->ids_from_generate.size() == 0) {
       if (queue_->GenerateStatus() ==
           allspark::AsEngine::GenerateRequestStatus::GenerateFinished) {
         // the generate is finished(EOS) or get max length.
         // release this request.
+        std::cout << "Generate Finished.\n";
         as_engine->StopRequest(model_name.c_str(), handle_);
-        as_engine->ReleaseRequest(model_name.c_str(), handle_);
+        // as_engine->ReleaseRequest(model_name.c_str(), handle_);
         output_tokens.clear();
         break;
       } else if (queue_->GenerateStatus() ==
@@ -221,7 +234,7 @@ std::string start_request_and_fetch_output(
         // some output can be pull out.
         std::cout << "GenerateInterrupted... request id: " << std::endl;
         as_engine->StopRequest(model_name.c_str(), handle_);
-        as_engine->ReleaseRequest(model_name.c_str(), handle_);
+        // as_engine->ReleaseRequest(model_name.c_str(), handle_);
         output_tokens.clear();
         break;
       }
@@ -235,32 +248,35 @@ std::string start_request_and_fetch_output(
 
     output_tokens.insert(output_tokens.end(), copy_output_token.begin(),
                          copy_output_token.end());
-    auto strs = tokenizer.Decode(output_tokens);
+    std::cout << "output size: " << output_tokens.size();
     std::string tokens_str = " Output Tokens: " + tokens2str(output_tokens);
-    std::string out_str = " Decode Infer Text: " + strs;
+    if (1) {
+      auto strs = tokenizer.Decode(output_tokens);
+      std::string out_str = " Decode Infer Text: " + strs;
 
-    /*
-     * I am QianWen, a large language model created by Alibaba Cloud. I am
-     * designed to answer questions, provide information, and engage in
-     * conversation with users. How can I assist you today?
-     */
-    std::vector<int64_t> reference_token = {
-        40,   1079, 1207,  1103,  54,  268,   11,   264,   3460, 4128, 1614,
-        3465, 553,  54364, 14817, 13,  358,   1079, 6188,  311,  4226, 4755,
-        11,   3410, 1995,  11,    323, 16579, 304,  10435, 448,  3847, 13,
-        2585, 646,  358,   7789,  498, 3351,  30,   151645};
+      /*
+       * I am QianWen, a large language model created by Alibaba Cloud. I am
+       * designed to answer questions, provide information, and engage in
+       * conversation with users. How can I assist you today?
+       */
+      std::vector<int64_t> reference_token = {
+          40,   1079, 1207,  1103,  54,  268,   11,   264,   3460, 4128, 1614,
+          3465, 553,  54364, 14817, 13,  358,   1079, 6188,  311,  4226, 4755,
+          11,   3410, 1995,  11,    323, 16579, 304,  10435, 448,  3847, 13,
+          2585, 646,  358,   7789,  498, 3351,  30,   151645};
 
-    auto ref_text = tokenizer.Decode(reference_token);
-    std::string ref_str = " Decode Ref.  Text: " + ref_text;
+      auto ref_text = tokenizer.Decode(reference_token);
+      std::string ref_str = " Decode Ref.  Text: " + ref_text;
 
-    std::string print_str = tokens_str + "\n";
-    if (job_count == 0) {
-      print_str += ref_str + "\n";
+      std::string print_str = tokens_str + "\n";
+      if (job_count == 0) {
+        print_str += ref_str + "\n";
+      }
+
+      print_str += out_str + "\n";
+
+      inplace_print(print_str, need_init_cursor_pos);
     }
-
-    print_str += out_str + "\n";
-
-    inplace_print(print_str, need_init_cursor_pos);
     need_init_cursor_pos = false;
   }
 
@@ -272,6 +288,7 @@ std::string start_request_and_fetch_output(
 
 allspark::GenerateConfig build_qwen_generate_config(void) {
   allspark::GenerateConfig gen_config;
+
   gen_config.max_length = default_engine_max_length;
   gen_config.early_stopping = true;
   gen_config.eos_token_id = 151643;
@@ -279,6 +296,7 @@ allspark::GenerateConfig build_qwen_generate_config(void) {
   gen_config.top_k = default_topk;
   gen_config.top_p = default_topp;
   gen_config.seed = 12345;
+  gen_config.mm_info = 0;
 
   return std::move(gen_config);
 }

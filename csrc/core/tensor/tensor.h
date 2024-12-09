@@ -15,8 +15,16 @@
 #include "data.h"   // NOLINT
 #include "shape.h"  // NOLINT
 
+#ifdef ENABLE_CUDA
+#include <driver_types.h>
+#endif
+
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 #ifdef ENABLE_BF16
 #include <common/hie_bfloat16.hpp>
@@ -36,6 +44,7 @@ void CopyData(void* dst_data, DeviceType dst_device, const void* src_data,
 //
 enum class AsTensorFlags {
   empty_flag = 0x0,
+  cuda_pinned_mem = (1 << 0),
 };
 
 class AsTensor {
@@ -62,11 +71,11 @@ class AsTensor {
 
   explicit AsTensor(const std::string& name,
                     const std::vector<std::vector<int64_t>>& input,
-                    const DeviceType as_backend = DeviceType::CPU);
+                    const DeviceType as_backend = DeviceType::CUDA);
   explicit AsTensor(
       const std::string& name,
       const std::pair<std::vector<float>, std::vector<int64_t>>& input,
-      const DeviceType as_backend = DeviceType::CPU);
+      const DeviceType as_backend = DeviceType::CUDA);
 
   explicit AsTensor(const AsTensor& src_tensor, DeviceType backend);
 
@@ -165,9 +174,6 @@ class AsTensor {
                          const DeviceType new_tensor_device_type);
 };
 
-static DeviceType DLDeviceTypeToAsDeviceType(
-    const DLDeviceType dltensor_device_type);
-
 inline std::ostream& operator<<(std::ostream& out, AsTensor const& data) {
   out << "AsTensor: name: " << data.GetName()
       << " dtype_: " << data.GetDataType() << " " << data.GetShape()
@@ -238,9 +244,14 @@ class AsTensorBuilder {
 
 using DLTensorMap = std::map<std::string, DLManagedTensor*>;
 using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
-using TensorMap = std::map<std::string, std::shared_ptr<AsTensor>>;
+using TensorMap = std::unordered_map<std::string, std::shared_ptr<AsTensor>>;
 using TensorListMap =
-    std::map<std::string, std::vector<std::shared_ptr<AsTensor>>>;
+    std::unordered_map<std::string, std::vector<std::shared_ptr<AsTensor>>>;
+
+#ifdef ENABLE_CUDA
+cudaMemcpyKind GetCudaMemcpyKind(DeviceType src_dev_type,
+                                 DeviceType dst_dev_type);
+#endif
 
 // template argument for if enable type auto convert.
 class TensorUtils {
@@ -268,6 +279,19 @@ class TensorUtils {
    */
   static void DeepCopyWholeAsync(AsTensor& dst, AsTensor& src,
                                  const DeviceContext* device_context);
+
+  /**
+   * Copy From one tensor to another tensor, full copy, async copy.
+   *
+   * DeepCopyWholeAsync is restrict, dst and src must have the same
+   * data type and shape. While DeepCopyWholeTolerantAsync is tolerant,
+   * it only ask for larger dst.
+   *
+   * @param dst dest tensor of copy part.
+   * @param src source tensor of copy part
+   */
+  static void DeepCopyWholeTolerantAsync(AsTensor& dst, AsTensor& src,
+                                         const DeviceContext* device_context);
 
   /**
    * Copy a matrix size in dst size from source matrix and offset by the
@@ -323,6 +347,10 @@ class TensorUtils {
                                  const AsTensor& src, size_t src_col_offset,
                                  size_t len,
                                  const DeviceContext* ctx = nullptr);
+  static void ConcatMatrix2DColWise(
+      AsTensor& batch_dst, int batch_idx,
+      std::vector<std::shared_ptr<AsTensor>>& src_arr,
+      const DeviceContext* ctx = nullptr);
 
   static void DeepCopyVectorPartAsync(AsTensor& dst, size_t dst_col_offset,
                                       const AsTensor& src,
@@ -376,6 +404,13 @@ class TensorUtils {
   static std::shared_ptr<TensorListMap> DeepCopyDLTensorListMapToTensorListMap(
       std::shared_ptr<DLTensorListMap> in_map,
       const DeviceType target_device_type);
+
+  static DeviceType DLDeviceTypeToAsDeviceType(
+      const DLDeviceType dltensor_device_type);
+  static void CopyMatrix2D(void* dst, void* src, DeviceType dst_device,
+                           DeviceType src_device, size_t dst_stride,
+                           size_t src_stride, size_t height, size_t width,
+                           const DeviceContext* ctx = nullptr);
 };
 
 }  // namespace allspark

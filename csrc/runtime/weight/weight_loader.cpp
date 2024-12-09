@@ -2,9 +2,17 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    weight_loader.cpp
  */
+
 #include "weight_loader.h"
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 
 #include "string_util.h"
@@ -56,6 +64,9 @@ TensorInfo WeightFileParser::ParseTensorInfo(const void* ptr, size_t len) {
           break;
         case 2:
           dtype = DataType::FLOAT16;
+          break;
+        case 1:
+          dtype = DataType::FLOAT8E4M3;
         default:
           break;
       }
@@ -203,6 +214,11 @@ void DenseWeightLoader::LoadFromMemory(const void* ptr, size_t len,
   int32_t flags = static_cast<int32_t>(AsTensorFlags::empty_flag);
 
   auto splitMemType = out_tensor->GetDeviceType();
+  //        auto SplitMemType = DeviceType::CPU;
+
+#ifdef ENABLE_CUDA_PINNED_WEIGHT
+  flags |= static_cast<int32_t>(AsTensorFlags::cuda_pinned_mem);
+#endif
   if (!this->whole_weight_tensor_) {
     this->whole_weight_tensor_ = std::make_shared<AsTensor>(
         name_,
@@ -215,6 +231,7 @@ void DenseWeightLoader::LoadFromMemory(const void* ptr, size_t len,
   }
   this->whole_weight_tensor_->SetShape(Shape{tensor_info_.shape});
 
+  assert(len <= this->whole_weight_tensor_->GetSizeInByte());
   // for input tensor, it will a shape[0,0] tensor, don't copy it.
   // TODO: for those tensor, handle it before weight load.
   CopyData(this->whole_weight_tensor_->GetDataPtr(),
@@ -224,6 +241,12 @@ void DenseWeightLoader::LoadFromMemory(const void* ptr, size_t len,
   splitter->SetShape(tensor_info_, out_tensor);
   splitter->CopyWeight(tensor_info_, out_tensor, whole_weight_tensor_, ptr,
                        len);
+
+  // } else {
+  //     splitter->SetShape(tensor_info_, out_tensor);
+  //     splitter->CopyWeight(tensor_info_, out_tensor, opt_in_tensor, ptr,
+  //     len);
+  // }
 }
 
 // load a dense tensor from file stream to a tenesor.
@@ -234,6 +257,10 @@ void DenseWeightLoader::LoadFromFileStream(FILE* fp,
   const std::string& name = tensor->GetName();
 
   int32_t flags = static_cast<int32_t>(AsTensorFlags::empty_flag);
+
+#ifdef ENABLE_CUDA_PINNED_WEIGHT
+  flags |= static_cast<int32_t>(AsTensorFlags::cuda_pinned_mem);
+#endif
 
   auto whole_weight =
       std::make_shared<AsTensor>(name, DeviceType::CPU, tensor_info_.dtype,

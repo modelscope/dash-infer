@@ -123,16 +123,15 @@ AsStatus GemmOpCPU::Reshape() {
       std::make_unique<dnnl::memory>(prim_desc.src_desc(), eng);
   dnnl_op_ctx_->outs_[0] =
       std::make_unique<dnnl::memory>(prim_desc.dst_desc(), eng);
-
   if (binary_type_ != BINARYTYPE_UNDEFINED) {
     auto bin_idx = dnnl_op_ctx_->ins_.size() - 1;
     dnnl_op_ctx_->ins_[bin_idx] =
         std::make_unique<dnnl::memory>(prim_desc.dst_desc(), eng);
   }
-
   if (prim_desc.weights_desc() != dnnl_op_ctx_->ins_[1]->get_desc()) {
     memory::desc wei_src_desc = dnnl_op_ctx_->ins_[1]->get_desc();
     memory::desc wei_dst_desc = prim_desc.weights_desc();
+#if 1
     Shape weight_shape = weights_[0]->GetShape();
 
     int64_t num_elem = wei_dst_desc.get_size() / SizeofType(weight_data_type_);
@@ -148,11 +147,20 @@ AsStatus GemmOpCPU::Reshape() {
     weights_[0]->Free();
     weights_[0]->SetDataType(weight_data_type_);
     weights_[0]->SetShape(Shape({num_elem}));
-    TensorUtils::DeepCopyWhole(*weights_[0], *weight_tmp);
+    TensorUtils::DeepCopyWholeAsync(*weights_[0], *weight_tmp, ctx_);
     if (weights_[0]->GetSizeInByte() == wei_dst_desc.get_size())
       weights_[0]->SetShape(std::move(weight_shape));
     dnnl_op_ctx_->ins_[1] = std::make_unique<dnnl::memory>(
         wei_dst_desc, eng, weights_[0]->GetDataPtr());
+#else
+    auto weight_tmp = std::make_unique<AsTensor>(
+        weights_[0]->GetName() + "_tmp", *weights_[0]);
+    auto wei_src_mem = memory(wei_src_desc, eng, weight_tmp->GetDataPtr());
+    dnnl_op_ctx_->ins_[1] = std::make_unique<dnnl::memory>(
+        wei_dst_desc, eng, weights_[0]->GetDataPtr());
+    dnnl::reorder(wei_src_mem, *dnnl_op_ctx_->ins_[1])
+        .execute(cpu_ctx->GetStream(), wei_src_mem, *dnnl_op_ctx_->ins_[1]);
+#endif
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }

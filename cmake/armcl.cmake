@@ -28,9 +28,6 @@ if(ENABLE_ARMCL MATCHES "ON")
   message(STATUS "build arch for ArmCL: ${ARMCL_BUILD_ARCH} INSTALL_LOCATION: ${INSTALL_LOCATION}")
   list(APPEND HIE_PUBLIC_DEFINITIONS -DHIE_USE_ARMCL_)
 
-  #set(ARMCL_URL ${OSS_LOCATION}/ComputeLibrary-22.02.tar.gz)
-  #set(ARMCL_URL http://test-bucket-duplicate.oss-cn-hangzhou.aliyuncs.com/daoxian/HCI/ComputeLibrary-22.08.tar.gz)
-  #set(ARMCL_URL_MD5 b1f0bd88535f7fecb97139986cd5a9cb)
   set(ARMCL_INSTALL ${INSTALL_LOCATION}/ComputeLibrary-22.08)
   # set(ARMCL_SRC ${CMAKE_CURRENT_BINARY_DIR}/armcl)
   set(ARMCL_SRC ${PROJECT_SOURCE_DIR}/third_party/armcl)
@@ -44,6 +41,7 @@ if(ENABLE_ARMCL MATCHES "ON")
     set(ARMCL_LIBRARY ${ARMCL_LIBRARY_DIR}/libarm_compute.lib)
   else()
     set(ARMCL_LIBRARY ${ARMCL_LIBRARY_DIR}/libarm_compute-static.a)
+    # add_compile_options(-std=c++14)  # later: update with CXX_STD / C17 support.
   endif()
 
   if(${CMAKE_BUILD_TYPE} MATCHES "Release")

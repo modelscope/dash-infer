@@ -10,7 +10,11 @@
 #include "cmath"
 
 #ifdef ENABLE_FP16
+#ifdef ENABLE_CUDA
+#include <cuda_fp16.h>
+#else
 #include <common/float16.h>
+#endif
 #endif
 
 namespace allspark {
@@ -60,7 +64,7 @@ void dense_to_csc_padding<half>(const half* denseMatrix, int m, int n,
   for (int j = 0; j < n; ++j) {
     int last_nnz = nnz;
     for (int i = 0; i < m; ++i) {
-      if (std::fabs(static_cast<half>(denseMatrix[i * n + j])) > threshold) {
+      if (std::fabs(static_cast<float>(denseMatrix[i * n + j])) > threshold) {
         rowIdx[nnz] = i;
         sparseMatrix[nnz] = denseMatrix[i * n + j];
         ++nnz;
@@ -143,7 +147,7 @@ void dense_to_ell_padding<half>(const half* denseMatrix, int m, int n, int nnz_,
   for (int j = 0; j < n; ++j) {
     int last_nnz = nnz;
     for (int i = 0; i < m; ++i) {
-      if (std::fabs(static_cast<half>(denseMatrix[i * n + j])) > threshold) {
+      if (std::fabs(static_cast<float>(denseMatrix[i * n + j])) > threshold) {
         cscRowIdx[nnz] = i;
         cscVal[nnz] = denseMatrix[i * n + j];
         ++nnz;
@@ -205,7 +209,7 @@ int get_nnz<half>(const half* denseMatrix, int m, int n, int VECT) {
   for (int j = 0; j < n; ++j) {
     int last_nnz = nnz;
     for (int i = 0; i < m; ++i) {
-      if (std::fabs(static_cast<half>(denseMatrix[i * n + j])) > threshold) {
+      if (std::fabs(static_cast<float>(denseMatrix[i * n + j])) > threshold) {
         ++nnz;
       }
     }
@@ -249,7 +253,7 @@ int get_nnz_ell<half>(const half* denseMatrix, int m, int n, int VECT) {
   for (int j = 0; j < n; ++j) {
     int sum = 0;
     for (int i = 0; i < m; ++i) {
-      if (std::fabs(static_cast<half>(denseMatrix[i * n + j])) > threshold) {
+      if (std::fabs(static_cast<float>(denseMatrix[i * n + j])) > threshold) {
         ++sum;
       }
     }

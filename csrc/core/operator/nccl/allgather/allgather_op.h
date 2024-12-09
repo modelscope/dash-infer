@@ -6,9 +6,16 @@
 #pragma once
 
 #include <core/operator/operator.h>
+#ifdef ENABLE_CUDA
+#include <nccl.h>
+#endif
+
+#ifdef ENABLE_MULTINUMA
 #include <mpi.h>
+#endif
 
 namespace allspark {
+
 class AllGatherOp : public AsOperator {
  public:
   explicit AllGatherOp(const std::string& op_type = "")

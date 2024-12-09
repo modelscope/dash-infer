@@ -51,7 +51,19 @@ RUN pip3 install auditwheel
 ##########################################################################
 # github action requirements
 ##########################################################################
-# RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash \
-#     && yum install git-lfs -y
+RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash \
+    && yum install git-lfs -y
+
+RUN yum install -y libtool flex
+
+RUN wget "ftp://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" && \
+    tar -xvf automake-1.15.1.tar.gz && \
+    cd automake-1.15.1 && ./configure --prefix=/usr/local/ && make -j && make install && \
+    cd .. && rm -rf automake-1.15.1.tar.gz automake-1.15.1
+
+RUN wget "https://xxxxxx/conan_allspark_source_x86_20241119.tar" && \
+    tar -xvf conan_allspark_source_x86_20241119.tar && \
+    mv conan_allspark_source_x86_20241119 /root/.conan && \
+    rm -rf conan_allspark_source_x86_20241119.tar
 
 WORKDIR /root/

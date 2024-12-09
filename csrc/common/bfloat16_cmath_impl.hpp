@@ -10,6 +10,10 @@
 
 #include "bfloat16_impl.hpp"
 
+#if HIE_GPU_IMPL == HIE_GPU_IMPL_CUDA && defined(__CUDACC__)
+#include "device/cuda/cudabfloat16_cmath_impl.hpp"
+#endif
+
 namespace __hie_buildin {
 
 namespace __bf16_cmath_impl {

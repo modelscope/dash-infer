@@ -1,0 +1,695 @@
+diff --git a/.gitignore b/.gitignore
+index de7f0f3..0ca808f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -31,3 +31,6 @@
+ *.out
+ *.app
+ build/
++
++# VSCode
++.vscode/
+diff --git a/.vscode/c_cpp_properties.json b/.vscode/c_cpp_properties.json
+deleted file mode 100644
+index 6f8a28d..0000000
+--- a/.vscode/c_cpp_properties.json
++++ /dev/null
+@@ -1,18 +0,0 @@
+-{
+-    "configurations": [
+-        {
+-            "name": "Linux",
+-            "includePath": [
+-                "${workspaceFolder}/**",
+-                "${workspaceFolder}/build/_deps/catch-src/single_include",
+-                "${workspaceFolder}/build/llamacpp/include"
+-            ],
+-            "defines": [],
+-            "compilerPath": "/usr/bin/gcc",
+-            "cStandard": "c17",
+-            "cppStandard": "gnu++17",
+-            "intelliSenseMode": "linux-gcc-x64"
+-        }
+-    ],
+-    "version": 4
+-}
+\ No newline at end of file
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+deleted file mode 100644
+index b05b923..0000000
+--- a/.vscode/launch.json
++++ /dev/null
+@@ -1,34 +0,0 @@
+-{
+-    // Use IntelliSense to learn about possible attributes.
+-    // Hover to view descriptions of existing attributes.
+-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+-    "version": "0.2.0",
+-    "configurations": [
+-        {
+-            "name": "(gdb) Launch Tests",
+-            "type": "cppdbg",
+-            "request": "launch",
+-            "program": "${workspaceFolder}/build/tests/testlmfe",
+-            "args": [],
+-            "stopAtEntry": false,
+-            "cwd": "${workspaceFolder}",
+-            "environment": [],
+-            "externalConsole": false,
+-            "MIMode": "gdb",
+-            "setupCommands": [
+-                {
+-                    "description": "Enable pretty-printing for gdb",
+-                    "text": "-enable-pretty-printing",
+-                    "ignoreFailures": true
+-                },
+-                {
+-                    "description": "Set Disassembly Flavor to Intel",
+-                    "text": "-gdb-set disassembly-flavor intel",
+-                    "ignoreFailures": true
+-                }
+-            ]
+-        }
+-
+-
+-    ]
+-}
+\ No newline at end of file
+diff --git a/.vscode/settings.json b/.vscode/settings.json
+deleted file mode 100644
+index 9903512..0000000
+--- a/.vscode/settings.json
++++ /dev/null
+@@ -1,5 +0,0 @@
+-{
+-    "files.associations": {
+-        "memory": "cpp"
+-    }
+-}
+\ No newline at end of file
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4ce75dc..97f95bf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -35,23 +35,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+   #endif()
+ endif()
+ 
+-# FetchContent added in CMake 3.11, downloads during the configure step
+-# FetchContent_MakeAvailable was added in CMake 3.14; simpler usage
+-include(FetchContent)
+-
+-# Accumulator library
+-# This is header only, so could be replaced with git submodules or FetchContent
+-# find_package(Boost REQUIRED)
+-# Adds Boost::boost
+-
+-# Formatting library
+-FetchContent_Declare(
+-  fmtlib
+-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+-  GIT_TAG 5.3.0)
+-FetchContent_MakeAvailable(fmtlib)
+-# Adds fmt::fmt
+-
+ # The compiled library code is here
+ add_subdirectory(src)
+ 
+diff --git a/include/lmfe/characterlevelparser.hpp b/include/lmfe/characterlevelparser.hpp
+index bff11f7..a556cef 100644
+--- a/include/lmfe/characterlevelparser.hpp
++++ b/include/lmfe/characterlevelparser.hpp
+@@ -5,6 +5,7 @@
+ #include <stdexcept>
+ #include <memory>
+ #include <iostream>
++#include <tuple>
+ 
+ class CharacterLevelParser;
+ typedef std::shared_ptr<CharacterLevelParser> CharacterLevelParserPtr;
+diff --git a/include/lmfe/jsonschemaparser.hpp b/include/lmfe/jsonschemaparser.hpp
+index a6445e8..8f086e1 100644
+--- a/include/lmfe/jsonschemaparser.hpp
++++ b/include/lmfe/jsonschemaparser.hpp
+@@ -28,6 +28,7 @@ public:
+ 
+     virtual bool can_end() const;
+ 
++    std::tuple<std::string, int, int, int> shortcut_key();
+ 
+ public:
+     struct _Context {
+diff --git a/include/lmfe/tokenenforcer.hpp b/include/lmfe/tokenenforcer.hpp
+index 5e15c58..23f3de0 100644
+--- a/include/lmfe/tokenenforcer.hpp
++++ b/include/lmfe/tokenenforcer.hpp
+@@ -17,7 +17,7 @@ struct VectorHasher {
+     }
+ };
+ 
+-typedef const std::vector<int> FrozenTokenVector;
++typedef std::vector<int> FrozenTokenVector;
+ 
+ class TokenEnforcer
+ {
+@@ -28,13 +28,16 @@ public:
+         std::vector<int> current_word_tokens;
+     };
+ 
+-    TokenEnforcer(TokenEnforcerTokenizerData* tokenizer_data, CharacterLevelParserPtr parser): tokenizer_data(tokenizer_data), root_parser(parser) {
++    TokenEnforcer(std::shared_ptr<TokenEnforcerTokenizerData> tokenizer_data, CharacterLevelParserPtr parser): tokenizer_data(tokenizer_data), root_parser(parser) {
+         
+     }
+ 
+     FrozenTokenVector& get_allowed_tokens(FrozenTokenVector token_sequence) {
+         FrozenTokenVector sent_tuple(token_sequence.begin(), token_sequence.end());
+-        FrozenTokenVector prev_step_tuple(token_sequence.begin(), token_sequence.end() - 1);
++        FrozenTokenVector prev_step_tuple;
++        if (token_sequence.size() > 0) {
++            prev_step_tuple = FrozenTokenVector(token_sequence.begin(), token_sequence.end() - 1);
++        }
+ 
+         if (prefix_states.count(sent_tuple) > 0) {
+             return prefix_states[sent_tuple]->allowed_tokens;
+@@ -56,7 +59,7 @@ public:
+ private:
+     std::unordered_map<FrozenTokenVector, OutputTensorState*, VectorHasher> prefix_states;
+     CharacterLevelParserPtr root_parser;
+-    TokenEnforcerTokenizerData* tokenizer_data;
++    std::shared_ptr<TokenEnforcerTokenizerData> tokenizer_data;
+     // Other member variables
+ 
+     TokenEnforcer::OutputTensorState* _apply_new_characters(OutputTensorState* state, FrozenTokenVector& token_sequence) {
+@@ -95,12 +98,11 @@ private:
+         return new_state;
+     }
+ 
+-    void _collect_allowed_tokens(CharacterLevelParserPtr parser, TokenizerPrefixTreeNode* tree_node, std::vector<int>& allowed_tokens) {
++    void _collect_allowed_tokens(CharacterLevelParserPtr parser, TokenizerPrefixTreeNode* tree_node, std::vector<int>& allowed_tokens, std::tuple<std::string, int, int, int> * shortcut_key) {
+         allowed_tokens.insert(allowed_tokens.end(), tree_node->tokens.begin(), tree_node->tokens.end());
+         std::string allowed_characters = parser->get_allowed_characters();
+         std::set<char> allowed_characters_set(allowed_characters.begin(), allowed_characters.end());
+ 
+-        
+         std::string characters_to_explore;
+         for (const auto& entry : tree_node->children) {
+             if (allowed_characters_set.find(entry.first) != allowed_characters_set.end()) {
+@@ -108,28 +110,24 @@ private:
+             }
+         }
+         
+-        /*
+-        if (shortcut_key.has_value() && std::get<0>(shortcut_key.value()) == "json_freetext") {
+-            assert(std::get<shortcut_key.value().size() == 4);
+-            std::tuple<std::string, int, int, int> shortcut = shortcut_key.value();
+-            int cur_len = std::get<1>(shortcut);
+-            int min_len = std::get<2>(shortcut);
+-            int max_len = std::get<3>(shortcut);
+-            auto cache = this->tokenizer_tree.json_freetext_tokens;
++        if (shortcut_key != nullptr && std::get<0>(*shortcut_key) == "json_freetext") {
++            int cur_len = std::get<1>(*shortcut_key);
++            int min_len = std::get<2>(*shortcut_key);
++            int max_len = std::get<3>(*shortcut_key);
++            auto cache = tokenizer_data->tokenizer_tree->json_freetext_tokens;
+ 
+-            int min_remaining = std::min(cache.max_token_len, std::max(0, min_len - cur_len));
+-            int max_allowed_len = std::min(cache.max_token_len, max_len - cur_len);
++            int min_remaining = std::min(cache->maxTokenLen, std::max(0, min_len - cur_len));
++            int max_allowed_len = std::min(cache->maxTokenLen, max_len - cur_len);
+ 
+-            std::vector<int> allowed_tokens_cache = cache.lookup_allowed_tokens(min_remaining, max_allowed_len);
++            std::vector<int> allowed_tokens_cache = cache->lookupAllowedTokens(min_remaining, max_allowed_len);
+             allowed_tokens.insert(allowed_tokens.end(), allowed_tokens_cache.begin(), allowed_tokens_cache.end());
+-            characters_to_explore = std::set<char>{'"'}.intersection(characters_to_explore);
++            characters_to_explore = characters_to_explore.find('\"') == std::string::npos ? "" : "\"";
+         }
+-        */
+ 
+         for (char character : characters_to_explore) {
+             CharacterLevelParserPtr next_parser = parser->add_character(character);
+             TokenizerPrefixTreeNode* next_tree_node = tree_node->children[character];
+-            _collect_allowed_tokens(next_parser, next_tree_node, allowed_tokens);
++            _collect_allowed_tokens(next_parser, next_tree_node, allowed_tokens, nullptr);
+         }
+     }
+ 
+@@ -144,7 +142,10 @@ private:
+             }
+             auto shortcut_key = state.parser.shortcut_key();
+             */
+-            _collect_allowed_tokens(state->parser, tokenizer_data->tokenizer_tree->root, allowed_tokens/*, shortcut_key*/);
++            JsonSchemaParser* json_parser = dynamic_cast<JsonSchemaParser*>(state->parser.get());
++            assert(json_parser);
++            auto shortcut_key = json_parser->shortcut_key();
++            _collect_allowed_tokens(state->parser, tokenizer_data->tokenizer_tree->root, allowed_tokens, &shortcut_key);
+             if (state->parser->can_end()) {
+                 allowed_tokens.push_back(tokenizer_data->eos_token_id);
+             }
+diff --git a/include/lmfe/tokenizerdata.hpp b/include/lmfe/tokenizerdata.hpp
+index ac0c813..2ab9ed4 100644
+--- a/include/lmfe/tokenizerdata.hpp
++++ b/include/lmfe/tokenizerdata.hpp
+@@ -2,9 +2,12 @@
+ 
+ #include <vector>
+ #include <functional>
++#include <map>
++#include <algorithm>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <string>
++#include "./nlohmann_json.hpp"
+ 
+ struct TokenizerPrefixTreeNode;
+ 
+@@ -14,11 +17,38 @@ struct TokenizerPrefixTreeNode
+     std::unordered_map<char, TokenizerPrefixTreeNode*> children;
+ };
+ 
++class JsonFreetextTokenCache {
++public:
++    using TokenStrIntPair = std::pair<std::string, int>;
++    using TokenIntStrMap = std::map<int, std::string>;
++
++    class _StringLengthTokenCache {
++    public:
++        void build(const std::vector<TokenStrIntPair>& tokenStrsToInt);
++        std::vector<int> getIndicesBetweenLength(int minLength = -1, int maxLength = -1);
++        std::vector<int> tokens;
++        std::vector<int> firstIndexGeqThanLength;
++    };
++
++    void addToken(const std::string& tokenStr, int tokenInt);
++    std::vector<int> lookupAllowedTokens(int minRemaining, int maxLength);
++    void freeze();
++
++    TokenIntStrMap tokenNumToStr;
++    std::map<std::pair<int, int>, std::vector<int>> allowlistCache;
++    int maxTokenLen = 0;
++    _StringLengthTokenCache regularTokensLengthCache;
++    _StringLengthTokenCache quoteTokensLengthCache;
++
++    bool isValidJsonString(const std::string& tokenStr);
++};
++
+ class TokenizerPrefixTree {
+ public:
+     TokenizerPrefixTreeNode* root;
+     std::unordered_set<int> new_word_tokens;
+     std::unordered_map<int, std::string> tokens_to_strs;
++    std::shared_ptr<JsonFreetextTokenCache> json_freetext_tokens;
+ 
+     TokenizerPrefixTree(std::vector<std::tuple<int, std::string, bool>> regular_tokens);
+ 
+@@ -44,5 +74,7 @@ protected:
+     virtual std::vector<std::tuple<int, std::string, bool>> get_regular_tokens() const = 0;
+     virtual int get_eos_token_id() const = 0;
+ 
+-    ~TokenEnforcerTokenizerData();
++    virtual ~TokenEnforcerTokenizerData() {
++        delete tokenizer_tree;
++    };
+ };
+diff --git a/include/lmfe/valijson_nlohmann_bundled.hpp b/include/lmfe/valijson_nlohmann_bundled.hpp
+index 4c3f1c7..7f82e74 100644
+--- a/include/lmfe/valijson_nlohmann_bundled.hpp
++++ b/include/lmfe/valijson_nlohmann_bundled.hpp
+@@ -13,7 +13,6 @@ namespace valijson {
+ #define VALIJSON_NORETURN [[noreturn]]
+ #endif
+ 
+-#if VALIJSON_USE_EXCEPTIONS
+ #include <stdexcept>
+ 
+ VALIJSON_NORETURN inline void throwRuntimeError(const std::string& msg) {
+@@ -23,7 +22,7 @@ VALIJSON_NORETURN inline void throwRuntimeError(const std::string& msg) {
+ VALIJSON_NORETURN inline void throwLogicError(const std::string& msg) {
+   throw std::logic_error(msg);
+ }
+-#else
++/*
+ VALIJSON_NORETURN inline void throwRuntimeError(const std::string& msg) {
+   std::cerr << msg << std::endl;
+   abort();
+@@ -32,8 +31,7 @@ VALIJSON_NORETURN inline void throwLogicError(const std::string& msg) {
+   std::cerr << msg << std::endl;
+   abort();
+ }
+-
+-#endif
++*/
+ 
+ VALIJSON_NORETURN inline void throwNotSupported() {
+     throwRuntimeError("Not supported");
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index b70cb25..75112d6 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,6 +1,8 @@
+ # Note that headers are optional, and do not affect add_library, but they will not
+ # show up in IDEs unless they are listed in add_library.
+ 
++add_definitions(-D__cpp_exceptions)
++
+ # Optionally glob, but only for CMake 3.12 or later:
+ file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${LMFormatEnforcer_SOURCE_DIR}/include/lmfe/*.hpp")
+ # set(HEADER_LIST "${LMFormatEnforcer_SOURCE_DIR}/include/modern/lib.hpp")
+@@ -15,7 +17,8 @@ target_include_directories(lmfe_library PUBLIC ../include)
+ # target_link_libraries(lmfe_library PRIVATE Boost::boost)
+ 
+ # All users of this library will need at least C++11
+-target_compile_features(lmfe_library PUBLIC cxx_std_11)
++#target_compile_features(lmfe_library PUBLIC cxx_std_11)
++target_compile_features(lmfe_library PUBLIC cxx_std_17)
+ 
+ # IDEs should put the headers in a nice place
+ source_group(
+diff --git a/src/jsonschemaparser.cpp b/src/jsonschemaparser.cpp
+index 9a529c3..9117c41 100644
+--- a/src/jsonschemaparser.cpp
++++ b/src/jsonschemaparser.cpp
+@@ -7,8 +7,8 @@ typedef const Subschema* JsonSchemaPtr;
+ 
+ JsonSchemaPtr get_any_json_object_schema();
+ const std::string WHITESPACE_CHARACTERS = " \t\n\r\f\v";
+-const std::string COMPLETE_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+-=[]{};:,./<>? `'\"";
+-const int MAX_CONSECUTIVE_WHITESPACES = 12;
++std::string COMPLETE_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+-=[]{};:,./<>? `'\"";
++// const int MAX_CONSECUTIVE_WHITESPACES = 12;
+ 
+ std::string _ANY_JSON_SCHEMA_STRING = R"(
+     {"anyOf": [{"type": "integer"}, {"type": "number"}, {"type": "string"}, {"type": "boolean"}, {"type": "object"}, {"type": "null"}, {"type": "array"}]}
+@@ -67,7 +67,7 @@ public:
+ 
+ 
+ class StringParsingState : public PrimitiveParsingState {
+-private:
++public:
+     std::vector<std::string> allowed_strings;
+     bool seen_closing_quote;
+     bool seen_opening_quote;
+@@ -76,7 +76,6 @@ private:
+     bool require_closing_quote;
+     bool require_opening_quote;
+ 
+-public:
+     StringParsingState(
+         JsonSchemaParser* root,
+         std::vector<std::string> allowed_strings,
+@@ -620,13 +619,33 @@ CharacterLevelParserPtr get_parser(JsonSchemaParser *parser, const valijson::Sub
+     return get_parser(parser, get_any_json_object_schema());
+ }
+ 
++void buildCompleteAlphabet() {
++    unsigned char i = 0x80;
++    while (i != 0xFF) {
++        COMPLETE_ALPHABET += i;
++        i++;
++    }
++    COMPLETE_ALPHABET += i;
++}
+ 
+ JsonSchemaParser::JsonSchemaParser(const std::string& schema_string, CharacterLevelParserConfig* config) : config(config) {
++    buildCompleteAlphabet();
+     context = std::make_shared<_Context>();
+-    json schema_json = json::parse(schema_string.empty() ? _ANY_JSON_SCHEMA_STRING : schema_string);
+-    valijson::adapters::NlohmannJsonAdapter schema_adapter(schema_json);
+-    valijson::SchemaParser parser;
+-    parser.populateSchema(schema_adapter, context->model_class);
++    if (schema_string.empty()) {
++        std::cerr << "JsonSchemaParser got empty schema string, using default schema instead(allow any json text)\n";
++    }
++    try {
++        json schema_json = json::parse(schema_string.empty() ? _ANY_JSON_SCHEMA_STRING : schema_string);
++        valijson::adapters::NlohmannJsonAdapter schema_adapter(schema_json);
++        valijson::SchemaParser parser;
++        parser.populateSchema(schema_adapter, context->model_class);
++    } catch (...) {
++        std::cerr << "JsonSchemaParser got invalid schema: \n" << schema_string << "\nUsing default schema instead(allow any json text)\n";
++        json schema_json = json::parse(_ANY_JSON_SCHEMA_STRING);
++        valijson::adapters::NlohmannJsonAdapter schema_adapter(schema_json);
++        valijson::SchemaParser parser;
++        parser.populateSchema(schema_adapter, context->model_class);
++    }
+     context->active_parser = this;
+     context->alphabet_without_quotes = COMPLETE_ALPHABET;
+     //https://stackoverflow.com/a/20326454/1075114
+@@ -695,11 +714,11 @@ std::string JsonSchemaParser::get_allowed_characters() const {
+         allowed_characters = WHITESPACE_CHARACTERS;
+     }
+ 
+-    if (num_consecutive_whitespaces >= MAX_CONSECUTIVE_WHITESPACES) {
+-        allowed_characters.erase(std::remove_if(allowed_characters.begin(), allowed_characters.end(), [](char c) {
+-            return std::find(WHITESPACE_CHARACTERS.begin(), WHITESPACE_CHARACTERS.end(), c) != WHITESPACE_CHARACTERS.end();
+-        }), allowed_characters.end());
+-    }
++    // if (num_consecutive_whitespaces >= MAX_CONSECUTIVE_WHITESPACES) {
++    //     allowed_characters.erase(std::remove_if(allowed_characters.begin(), allowed_characters.end(), [](char c) {
++    //         return std::find(WHITESPACE_CHARACTERS.begin(), WHITESPACE_CHARACTERS.end(), c) != WHITESPACE_CHARACTERS.end();
++    //     }), allowed_characters.end());
++    // }
+     return allowed_characters;
+ }
+ 
+@@ -713,6 +732,24 @@ bool JsonSchemaParser::can_end() const
+     return true;
+ }
+ 
++std::tuple<std::string, int, int, int> JsonSchemaParser::shortcut_key() {
++    if (object_stack.size() > 0) {
++        auto current_parser = object_stack.back();
++        if (StringParsingState* parser = dynamic_cast<StringParsingState*>(current_parser.get())) {
++            if (parser->allowed_strings.empty() && parser->seen_opening_quote && !parser->seen_closing_quote) {
++                int cur_len = parser->parsed_string.size();
++                int min_len = parser->min_length != -1 ? parser->min_length : 0;
++                int max_len = parser->max_length != -1 ? parser->max_length : std::numeric_limits<int>::max();
++                assert(min_len <= max_len);
++                if (cur_len < max_len) {
++                    return std::tuple<std::string, int, int, int>("json_freetext", cur_len, min_len, max_len);
++                }
++            }
++        }
++    }
++    return std::tuple<std::string, int, int, int>("None", 0, 0, 0);
++}
++
+ JsonSchemaPtr _ANY_JSON_OBJECT_SCHEMA;
+ 
+ JsonSchemaPtr get_any_json_object_schema()
+diff --git a/src/tokenizerdata.cpp b/src/tokenizerdata.cpp
+index 9c49ca3..fac3844 100644
+--- a/src/tokenizerdata.cpp
++++ b/src/tokenizerdata.cpp
+@@ -1,7 +1,129 @@
+ #include "lmfe/tokenizerdata.hpp"
+ 
++bool JsonFreetextTokenCache::isValidJsonString(const std::string& tokenStr) {
++    try {
++        nlohmann::json j = nlohmann::json::parse(tokenStr);
++        return true;
++    } catch (nlohmann::json::parse_error&) {
++        return false;
++    }
++}
++
++void JsonFreetextTokenCache::_StringLengthTokenCache::build(
++    const std::vector<TokenStrIntPair>& tokenStrsToInt) {
++    auto compareLength = [](const TokenStrIntPair& a, const TokenStrIntPair& b) {
++        return a.first.length() < b.first.length();
++    };
++    std::vector<TokenStrIntPair> sortedPairs = tokenStrsToInt;
++    std::sort(sortedPairs.begin(), sortedPairs.end(), compareLength);
++
++    tokens.resize(sortedPairs.size());
++    std::transform(sortedPairs.begin(), sortedPairs.end(), tokens.begin(),
++                   [](const TokenStrIntPair& pair) { return pair.second; });
++
++    std::vector<size_t> tokenLengths;
++    tokenLengths.resize(sortedPairs.size());
++    std::transform(sortedPairs.begin(), sortedPairs.end(), tokenLengths.begin(),
++                   [](const TokenStrIntPair& pair) { return pair.first.length(); });
++
++    firstIndexGeqThanLength.push_back(0);
++    for (int i = 0; i < tokenLengths.size(); i++) {
++        while (firstIndexGeqThanLength.size() <= static_cast<int>(tokenLengths[i])) {
++            firstIndexGeqThanLength.push_back(i);
++        }
++    }
++    firstIndexGeqThanLength.push_back(tokenLengths.size());
++}
++
++std::vector<int> JsonFreetextTokenCache::_StringLengthTokenCache::getIndicesBetweenLength(
++    int minLength, int maxLength) {
++    std::vector<int> result;
++    if (minLength >= static_cast<int>(firstIndexGeqThanLength.size())) {
++        return result;
++    }
++
++    int startIndex = (minLength > 0) ? firstIndexGeqThanLength[minLength] : 0;
++    int endIndex = maxLength == 0 ? 0 : ((maxLength + 1) < static_cast<int>(firstIndexGeqThanLength.size()))
++                       ? firstIndexGeqThanLength[maxLength + 1]
++                       : static_cast<int>(tokens.size());
++
++    result.assign(tokens.begin() + startIndex, tokens.begin() + endIndex);
++    return result;
++}
++
++void JsonFreetextTokenCache::addToken(const std::string& tokenStr, int tokenInt) {
++    if (!allowlistCache.empty()) {
++        throw std::runtime_error("Cannot add more tokens after allowlists were precalculated");
++    }
++
++    if (tokenStr.empty()) {
++        return;
++    }
++
++    bool has_non_trailing_backslash = false;
++    bool has_quote_before_end = false;
++    bool has_newline = false;
++
++    for (int i = 0; i < tokenStr.size(); i++) {
++        if (tokenStr[i] == '\\' && i < tokenStr.size() - 1) {
++            has_non_trailing_backslash = true;
++        }
++        if (tokenStr[i] == '\"' && i < tokenStr.size() - 1) {
++            has_quote_before_end = true;
++        }
++        if (tokenStr[i] == '\n' || tokenStr[i] == '\r') {
++            has_newline = true;
++        }
++    }
++
++    if ((has_non_trailing_backslash || has_quote_before_end || has_newline) && !isValidJsonString("{" + tokenStr + "}")) {
++        return;
++    }
++
++    tokenNumToStr[tokenInt] = tokenStr;
++}
++
++std::vector<int> JsonFreetextTokenCache::lookupAllowedTokens(int minRemaining, int maxLength) {
++    auto cacheKey = std::make_pair(minRemaining, maxLength);
++    auto it = allowlistCache.find(cacheKey);
++    if (it == allowlistCache.end()) {
++        std::vector<int> tokensWithQuote = quoteTokensLengthCache.getIndicesBetweenLength(minRemaining + 1, maxLength + 1);
++        std::vector<int> tokensWithoutQuote = regularTokensLengthCache.getIndicesBetweenLength(-1, maxLength);
++        tokensWithQuote.insert(tokensWithQuote.end(), tokensWithoutQuote.begin(), tokensWithoutQuote.end());
++        allowlistCache[cacheKey] = tokensWithQuote;
++    }
++    return allowlistCache[cacheKey];
++}
++
++void JsonFreetextTokenCache::freeze() {
++    std::vector<TokenStrIntPair> allTokens;
++    for (const auto& pair : tokenNumToStr) {
++        allTokens.emplace_back(pair.second, pair.first);
++    }
++
++    std::vector<TokenStrIntPair> regularTokens;
++    std::vector<TokenStrIntPair> quoteTokens;
++
++    for (auto& pair : allTokens) {
++        if (pair.first.back() == '"') {
++            quoteTokens.push_back(pair);
++        } else {
++            regularTokens.push_back(pair);
++        }
++    }
++
++    regularTokensLengthCache.build(regularTokens);
++    quoteTokensLengthCache.build(quoteTokens);
++
++    maxTokenLen = std::max(static_cast<int>(regularTokensLengthCache.firstIndexGeqThanLength.size()),
++                           static_cast<int>(quoteTokensLengthCache.firstIndexGeqThanLength.size()));
++
++    tokenNumToStr.clear();
++}
++
+ TokenizerPrefixTree::TokenizerPrefixTree(std::vector<std::tuple<int, std::string, bool>> regular_tokens) {
+     root = new TokenizerPrefixTreeNode();
++    json_freetext_tokens = std::make_shared<JsonFreetextTokenCache>();
+     for (const auto& token : regular_tokens) {
+         int token_idx;
+         std::string decoded;
+@@ -9,10 +131,12 @@ TokenizerPrefixTree::TokenizerPrefixTree(std::vector<std::tuple<int, std::string
+         std::tie(token_idx, decoded, is_new_word) = token;
+         tokens_to_strs[token_idx] = decoded;
+         _add_token_to_tree(decoded, token_idx, root);
++        json_freetext_tokens->addToken(decoded, token_idx);
+         if (is_new_word) {
+             new_word_tokens.insert(token_idx);
+         }
+     }
++    json_freetext_tokens->freeze();
+ }
+ 
+ void TokenizerPrefixTree::_add_token_to_tree(const std::string& token_str, int token_idx, TokenizerPrefixTreeNode* node) {
+@@ -28,7 +152,7 @@ void TokenizerPrefixTree::_add_token_to_tree(const std::string& token_str, int t
+ void TokenEnforcerTokenizerData::initialize()
+ {
+     regular_tokens = get_regular_tokens();
+-    eos_token_id = get_eos_token_id();
++    //eos_token_id = get_eos_token_id();
+     
+     tokenizer_tree = new TokenizerPrefixTree(regular_tokens);
+     for (const auto& token_str : tokenizer_tree->root->children) {
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index cc4e933..fd72b41 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -19,7 +19,7 @@ ExternalProject_Add(llamacpp
+ )
+ 
+ include_directories(${LLAMACPP_INSTALL_LOCATION}/include)
+-link_directories(${LLAMACPP_INSTALL_LOCATION}/lib)
++link_directories(${LLAMACPP_INSTALL_LOCATION}/lib64)
+ 
+ # Download the phi2 model
+ if (EXISTS "${CMAKE_BINARY_DIR}/tests/phi2.gguf")
+@@ -36,7 +36,7 @@ add_executable(testlmfe lmfetests.cpp jsonschemaparsertests.cpp testutils.cpp)
+ target_compile_features(testlmfe PRIVATE cxx_std_17)
+ 
+ # Should be linked to the main library, as well as the Catch2 testing library
+-target_link_libraries(testlmfe PRIVATE lmfe_library Catch2::Catch2 llama ggml_shared)
++target_link_libraries(testlmfe PRIVATE lmfe_library Catch2::Catch2 llama ggml)
+ 
+ # If you register a test, then ctest and make test will run it.
+ # You can also run examples and check the output, as well.
+diff --git a/tests/llamacpp_adapter.hpp b/tests/llamacpp_adapter.hpp
+index f112866..5715479 100644
+--- a/tests/llamacpp_adapter.hpp
++++ b/tests/llamacpp_adapter.hpp
+@@ -17,7 +17,7 @@ protected:
+ 
+         for (int i = 0; i < vocab_size; ++i)
+         {
+-            bool is_regular_token = llama_token_get_type(model, i) == llama_token_type::LLAMA_TOKEN_TYPE_NORMAL;
++            bool is_regular_token = llama_token_get_attr(model, i) == llama_token_attr::LLAMA_TOKEN_ATTR_NORMAL;
+             if (!is_regular_token) {
+                 continue;
+             }
+@@ -36,10 +36,10 @@ protected:
+ 
+     std::string decode_token(int token) const {
+         std::vector<char> result(8, 0);
+-        const int n_tokens = llama_token_to_piece(model, token, result.data(), result.size());
++        const int n_tokens = llama_token_to_piece(model, token, result.data(), result.size(), 0, true);
+         if (n_tokens < 0) {
+             result.resize(-n_tokens);
+-            int check = llama_token_to_piece(model, token, result.data(), result.size());
++            int check = llama_token_to_piece(model, token, result.data(), result.size(), 0, true);
+             GGML_ASSERT(check == -n_tokens);
+         } else {
+             result.resize(n_tokens);
+diff --git a/tests/testutils.cpp b/tests/testutils.cpp
+index 5985614..989271f 100644
+--- a/tests/testutils.cpp
++++ b/tests/testutils.cpp
+@@ -9,7 +9,7 @@ LlamaCppTokenizerData* tokenizer_data = nullptr;
+ 
+ void initialize_llama_if_needed() {
+     if (model == nullptr) {
+-        llama_backend_init(false);
++        llama_backend_init();
+         llama_model_params model_params = llama_model_default_params();
+         model = llama_load_model_from_file(MODEL_PATH, model_params);
+         tokenizer_data = new LlamaCppTokenizerData(model);

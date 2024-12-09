@@ -11,7 +11,7 @@
 #include <allspark/dlpack.h>
 #include <unistd.h>
 
-#include <CLI/CLI.hpp>
+#include <CLI11.hpp>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -134,6 +134,7 @@ allspark::GenerateConfig build_qwen_generate_config(void) {
   gen_config.stop_words_ids = {{151643}, {151644}, {151645}};
   gen_config.top_k = default_topk;
   gen_config.top_p = default_topp;
+  gen_config.mm_info = nullptr;
   gen_config.seed = 12345;
 
   return std::move(gen_config);
@@ -146,7 +147,6 @@ void block_generate_handler(const shared_ptr<Session> session) {
 
   session->fetch(content_length, [](const shared_ptr<Session>& session,
                                     const Bytes& body) {
-    // 请求体现在已经被完整读取到 'body' 变量中
     string body_str(reinterpret_cast<const char*>(body.data()), body.size());
     printf("body (register): size:%ld body:  %s\n", body_str.size(),
            body_str.data());
@@ -198,7 +198,7 @@ void block_generate_handler(const shared_ptr<Session> session) {
       auto strs = tokenizer.Decode(ele->ids_from_generate);
 
       // get the handler uuid
-      std::string uuid = generate_uuid(32);  // 长度 32 的随机字符串
+      std::string uuid = generate_uuid(32);
       session->set_id(uuid);
 
       auto json_str = build_block_response(strs);
@@ -360,7 +360,10 @@ void event_stream_handler(void) {
 int main(int argc, const char** argv) {
   std::string model_path;
   std::string tiktoken_file;
+
+  std::string compute_unit = "CUDA:0";
   int compute_cores = 32;
+  int max_batch_size = 32;
 
   // parse arguments.
   CLI::App app{"DashInfer AllSpark Example load and infernece a qwen model."};
@@ -372,8 +375,16 @@ int main(int argc, const char** argv) {
       ->required();
   app.add_option("--compute_cores , -c", compute_cores,
                  "compute core, suggestion setting max phy cores inside per "
-                 "NUMA(by cmd lscpu)")
-      ->required();
+                 "NUMA(by cmd lscpu)");
+
+  app.add_option("--compute_unit", compute_unit,
+                 "running device, like CUDA:0 for single GPU, CUDA:0,1 for "
+                 "double GPU, CPU:10 for cpu with 10 compute threads.  ")
+      ->default_str("CUDA:0");
+
+  app.add_option("--max_batch_size", max_batch_size,
+                 "max batch size for this engine, exceeds this batch size will "
+                 "reject request.");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -393,17 +404,22 @@ int main(int argc, const char** argv) {
 
   // use model config builder to build model config.
   AsModelConfigBuilder model_config_builder;
-  auto model_config =
-      model_config_builder.withModelName(model_name)
-          .withModelPath(dimodel_file)
-          .withWeightsPath(ditensors_file)
-          .withEngineMaxLength(default_engine_max_length)
-          .withEngineMaxBatch(16)
-          .withMatmulPrecision("medium")
-          .withNumThreads(compute_cores)  // this number is worker's thread
-                                          // number, use phy core(not phy-thread
-                                          // number) number in side of each numa
-          .build();
+
+  model_config_builder.withModelName(model_name)
+      .withModelPath(dimodel_file)
+      .withWeightsPath(ditensors_file)
+      .withEngineMaxLength(default_engine_max_length)
+      .withEngineMaxBatch(max_batch_size)
+      .withComputeUnit(compute_unit);
+
+  if (!begins_with(compute_unit, "CUDA")) {
+    model_config_builder.withMatmulPrecision("medium").withNumThreads(
+        compute_cores);  // this number is worker's thread
+                         // number, use phy core(not phy-thread
+                         // number) number in side of each numa
+  }
+
+  auto model_config = model_config_builder.build();
 
   auto status = as_engine->BuildModelFromConfigStruct(model_config);
   if (status != allspark::AsStatus::ALLSPARK_SUCCESS) {

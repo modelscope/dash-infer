@@ -6,10 +6,32 @@
 #include "relativePE_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+AsStatus gpu_relativePE(DataType dtype, void* out, const void* attention_bias,
+                        int batch, int seq_len, int k, int step,
+                        bool is_decoder, const DeviceContext* ctx) {
+  DLOG(INFO) << "gpu_relativePE" << std::endl;
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    const T* attention_bias_typed = static_cast<const T*>(attention_bias);
+    cuda::RelativePEKernelLauncher(typed_out, attention_bias_typed, batch,
+                                   seq_len, k, step, is_decoder,
+                                   gpu_ctx->GetStream());
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+#endif
+
 AsStatus cpu_relativePE(DataType dtype, void* out, const void* attention_bias,
                         int batch, int seq_len, int k, int step,
                         bool is_decoder, const DeviceContext* ctx) {
@@ -41,12 +63,24 @@ AsStatus RelativePEOp::Init(const OperatorProto& op_proto,
   if (attr_map.find("max_seq") != attr_map.end()) {
     max_seq_ = *(int*)(attr_map.at("max_seq").c_str());
   }
+  // if (attr_map.find("k") != attr_map.end()) {
+  //     k_ = *(int*)(attr_map.at("k").c_str());
+  // }
   if (attr_map.find("is_decoder") != attr_map.end()) {
     is_decoder_ = *(bool*)(attr_map.at("is_decoder").c_str());
   }
   k_ = weights_[0]->GetShape()[1];
+  // if (weights_[0]->GetShape()[1] != k_) {
+  //     LOG(ERROR) << "RelativePEOp : Invalid weight shape." << std::endl;
+  //     return AsStatus::ALLSPARK_PARAM_ERROR;
+  // }
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_relativePE;
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_relativePE;
       break;
@@ -83,5 +117,6 @@ AsStatus RelativePEOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("RelativePE", CPU, RelativePEOp)
+REGISTER_OP(RelativePE, CUDA, RelativePEOp)
+REGISTER_OP(RelativePE, CPU, RelativePEOp)
 }  // namespace allspark

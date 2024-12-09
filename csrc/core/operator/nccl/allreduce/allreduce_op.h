@@ -6,18 +6,20 @@
 #pragma once
 
 #include <core/operator/operator.h>
+#ifdef ENABLE_CUDA
+#include <nccl.h>
+#endif
+
+#ifdef ENABLE_MULTINUMA
 #include <mpi.h>
+#endif
 
 namespace allspark {
+
 class AllReduceOp : public AsOperator {
  public:
   explicit AllReduceOp(const std::string& op_type = "")
-      : AsOperator(op_type),
-        nranks_(1),
-        rank_id_(0),
-        mpi_dtype_(MPI_FLOAT),
-        count_(0) {}
-
+      : AsOperator(op_type), count_(0) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
   AsStatus Reshape() override;
@@ -32,7 +34,12 @@ class AllReduceOp : public AsOperator {
  private:
   size_t nranks_;
   size_t rank_id_;
-  MPI_Datatype mpi_dtype_;
+#ifdef ENABLE_CUDA
+  ncclDataType_t nccl_dtype_ = ncclFloat32;
+#endif
+#ifdef ENABLE_MULTINUMA
+  MPI_Datatype mpi_dtype_ = MPI_FLOAT;
+#endif
 
   size_t count_;
 };

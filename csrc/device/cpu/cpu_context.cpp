@@ -7,9 +7,13 @@
 
 #include <libipc/condition.h>
 #include <libipc/shm.h>
-#include <mpi.h>
 
 #include <csignal>
+
+#ifdef ENABLE_MULTINUMA
+#include <mpi.h>
+#endif
+
 namespace allspark {
 
 struct CPUShareData {
@@ -20,6 +24,7 @@ struct CPUShareData {
   int data_recv_msg[];
 };
 
+#ifdef ENABLE_MULTINUMA
 class MPIContext {
  public:
   static MPIContext& GetInstance() {
@@ -104,17 +109,21 @@ class MPIContext {
   ipc::sync::mutex lock_recv_;
   ipc::shm::handle shm_hd_;
 };
+#endif
 
 CPUContext::~CPUContext() {}
 
+int CPUContext::GetRank() const { return rank_; }
+int CPUContext::GetNranks() const { return nranks_; }
+
+#ifdef ENABLE_MULTINUMA
 void CPUContext::InitMCCL(int rank, int nRanks) {
   MPIContext::GetInstance().Init(rank, nRanks);
   nranks_ = nRanks;
   rank_ = rank;
   LOG(INFO) << "CPUContext::InitMCCL() rank: " << rank << " nRanks: " << nRanks;
 }
-int CPUContext::GetRank() const { return rank_; }
-int CPUContext::GetNranks() const { return nranks_; }
+
 void CPUContext::SemPostInterProcess() {
   if (nranks_ == 1) {
     return;
@@ -188,5 +197,5 @@ bool CPUContext::SemWaitMsgSynInterProcess(int msg_size) {
   }
   return retry;
 }
-
+#endif
 }  // namespace allspark

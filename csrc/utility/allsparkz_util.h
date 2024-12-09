@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "sparse_util.h"
 namespace allspark {
 namespace util {
 

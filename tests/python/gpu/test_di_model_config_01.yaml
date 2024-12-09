@@ -1,0 +1,191 @@
+# this config is describing  model's basic information without depends on transfomers python frameworks etc.
+# for easier setup and correct inference result.
+
+# model meta info part, usually imported from huggingface config.json
+# example for qwen1.5 1.8B
+model:
+  huggingface_id: Qwen/Qwen1.5-1.8B-Chat  # optional, huggingface id can use to tokenizer etc.
+  modelscope_id: Qwen/Qwen1.5-1.8B-Chat  # optional, modelscope id tokenizer id
+  architectures:
+    - Qwen2ForCausalLM
+  hidden_size: 2048
+  max_position_embeddings: 32768
+  num_attention_heads: 16
+  num_hidden_layers: 24
+  num_key_value_heads: 16
+  rms_norm_eps: 1e-06
+  rope_theta: 1000000.0
+  sliding_window: 32768
+  use_sliding_window: FALSE
+  vocab_size: 151936
+
+  quantization_config:
+    # enable quantization or not
+    enable: FALSE
+
+    # quant activate format:
+    # this string describe which compute format should choose, which only work if compute mode ==  activate_quant
+    # currently following settings was supported:
+    #  - int8 : signed int with 8 bit width store the weight and compute[if disable weight only]
+    #  - fp8_e4m3 : nvidia fp8 e4m3 for weight store and compute # currently not supported yet.
+    activate_format: int8
+
+    # quant weight format:
+    # this string describe which weight width
+    # currently following settings was supported:
+    #  - int8 : signed int with 8 bit width store the weight and compute[if disable weight only]
+    #  - uint4 : unsigned int with 4 bit width store the weight and compute[if disable weight only]
+    #  - fp8_e4m3 : nvidia fp8 e4m3 for weight store and compute # currently not supported yet.
+    weight_format: int8
+
+    # compute method:
+    # choose which compute method
+    #  - weight_only: means the activation use fp16 and weight stored by `quant_format`
+    #  - activate_quant:  means use compute quantization, the activation and compute use the `quant_format`, **if choose compute, only `-1` is supported in group_size setting**
+    compute_method: weight_only # choose between ["weight_only", "activate_quant"]
+
+    # group size:
+    # this setting means the group size per-token  quantization.
+    # -1:  means one token use one quantization parameters(one scale, and zero point), this means per-token/per-channel quantization, this setting was recommended for most case.
+    # 128: means each 128 elements in GEMM share one group of quantization parameters(one scale, one zero point),
+    # other_value: value in  [32, 64， 128， 256， 512] is supported, other value is not supported in kernel.
+    # how to choose gorup size:  less group size means more quantization parameter, usually means less precision drop, but less performance.
+    group_size: -1
+
+    # detail group setting:
+    # the customized group setting for each layer, different layer use different group setting.
+    # such as : {r"\.c_proj.weight": 32, r".*": 128}, means some layer use 32 group , some layer use 128 group.
+    group_settings: ""
+
+    # quant method setting:
+    # choose which quantization method use.
+    # - instant_quant : this value is dynamic quantization provided by allspark engine, it doesn't require Post-Training [suggested]
+    # - gptq: model was fine-tuned by GPTQ method.
+    # - awq: model was fine-tuned by awq method, currently not supported yet.
+    quant_method: "instant_quant",  # choose between ["gptq", "instant_quant"]
+
+
+
+# TODO：add lora.
+
+# runtime config part
+runtime_config:
+  model_name: default_model_id   # the model's ID in engine,
+
+  # config part for compute device CPU and GPU
+  compute_unit:
+    #  device type can be [CUDA, CPU, CPU_NUMA]
+    device_type: CUDA
+
+    #       for CUDA, the len(device_ids) is card number, and compute_thread_in_device can be ignored.
+    #        for CPU,  the len(device_ids) is ignored,
+    #
+    #        for CPU_NUMA, the device_ids is NUMA id's, and len(device_ids) is NUMA Count
+    device_ids:
+      - 0
+      - 1
+
+    # compute_thread_in_device only works for CPU
+    # if device_type is CPU:  compute_thread_in_device is how many compute thread when inference,
+    #    suggest value is physical core number(without hyper-thread), or you can pass 0 to let autodetect.
+    # if device_type is CPU_NUMA:  compute_thread_in_device means compute thread inside NUMA,
+    #    suggest value is physical core number(without hyper-thread), or you can pass 0 to let autodetect.
+    compute_thread_in_device: 0
+
+  # max length of engine support: for input+output, will allocate resource and warm up by this length.
+  engine_max_length: 2048
+
+  # max batch or concurrency supported by this engine, will reject the request if this size meets.
+  engine_max_batch: 8
+
+  # kv-cache mode, choose between : [AsCacheDefault, AsCacheQuantI8, AsCacheQuantU4]
+  # which means :
+  #   - AsCacheDefault - FP16 or BF16 KV-Cache
+  #   - AsCacheQuantI8 - int8 KV-Cache
+  #   - AsCacheQuantU4 - uint4 KV-Cache
+  kv_cache_mode:  AsCacheDefault
+
+  # how to choose eviction request  when kv-cache is full for GPU
+  eviction_strategy : MaxLength
+
+  # prefill prefix caching function related settings, if you have lots of common prefix in prompts, this function is strongly suggested
+  enable_prefix_cache: TRUE
+
+  # try sparse compute, this config will enable sparse compute, it will try to check the weight enable sparse compute
+  # currently, the nvidia GPU's 2:4 sparse is supported, it will check weight, whether this weight satisfy nvidia's 2:4 sparse rule
+  # value can be:
+  # - none - use dense tensor core
+  # - nv_tensor_sparse_2_4 - use 2:4 sparse tensor core.
+  sparse_compute: none
+
+  cuda_mem:
+    # how many gpu memory allocated by this engine is caculated by this formula:
+    # (TOTAL_DEVICE_GPU_MEM_MB - RESERVE_SIZE_MB) * MEMORY_RATIO
+    # TOTAL_DEVICE_GPU_MEM_MB - how many gpu memory you device have, if multiple devices have different memory,
+    #                          will choose the least one
+    # RESERVE_SIZE_MB - defined by reserve_size_mb's value.
+    # MEMORY_RATIO    - defined by memory_ratio's value
+
+    # for cuda device, this ratio is how many should engine allocate memory,
+    # this config will override the BFC_MEM_RATIO envvar.
+    # set this to -1 means use "BFC_MEM_RATIO" env var's settings.
+    # comment out following config will use system env, otherwise it will override system device.
+    # memory_ratio: 0.96
+
+    # for cuda device, this config is for setup how many memory should reserve in Mega-Bytes(MB)
+    # reserve_size_mb: 600
+
+  # settings for rope scaling method.
+  rope_scaling:
+    type: yarn
+    # key-value config for each repo scaling method.
+    # this key-value config will forward to engine's runtime config
+    scaling_config:  # eg yarn
+      factor: 4.0,
+      original_max_position_embeddings: 32768
+
+    # TODO: add d-ntk exmaple
+
+# generation config part
+generation_config:
+  bos_token_id: 151643
+  pad_token_id: 151643
+  do_sample: TRUE
+  early_stopping: TRUE
+
+  eos_token_id:
+    - 151645
+    - 151643
+
+  seed: 13653   # default seed.
+
+  top_k: 20
+  repetition_penalty: 1.1
+  length_penalty: 0.0
+  presence_penalty: 1.0
+  top_p: 0.8
+  logprobs: FALSE
+  top_logprobs: 4
+
+  min_length: 2
+
+  # max length for this request, input + output, if max length is reached, engine will finish this request.
+  # this value should update together with runtime_config.engine_max_length and input length.
+  # the config value is just for a default value.
+  max_length: 2048
+
+
+
+# quantization part
+##  note: quantization config only works on serialization step, so for a *.dimodel,
+##        serialization config will only for display information, it cannot change the behavior
+
+# tokenizer part
+# it support use model hub's AutoTokenizer to set up tokenizer, also can use path to download
+tokenizer:
+  source: modelscope  # support [modelscope, huggingface, local]
+                      # will report error if huggingface_id, or modelscope_id is not set correctly.
+  local_path: USER_DEFINE_TOKENIZER_PATH # require this path can be called by transformers.AutoTokenizer()
+
+
+

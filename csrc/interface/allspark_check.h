@@ -56,11 +56,6 @@ class AsModelIOException : public AsModelException {
   } while (0);
 
 namespace allspark {
-struct AsLimit {
-  static const int LIMIT_MAX_BATCH = 256;    // tested safe
-  static const int LIMIT_MAX_LENGTH = 4096;  // tested safe
-  static const int LIMIT_TOP_K = 1024;       // tested safe
-};
 
 // AllSpark status code
 enum class AsStatus : int {
@@ -76,9 +71,11 @@ enum class AsStatus : int {
   ALLSPARK_EMPTY_REQUEST = 9,        // 无有效请求
   ALLSPARK_ILLEGAL_REQUEST_ID = 10,  // 没有找到有效的request_id
   ALLSPARK_CACHE_MEMORY_OUT = 11,
-  ALLSPARK_REQUEST_DENIED = 12,  // 停服务状态，拒绝服务
-  ALLSPARK_DEPRECATED = 20,      // 触发过时接口
-  ALLSPARK_STREAMING = 200,      // 流式返回
+  ALLSPARK_REQUEST_DENIED = 12,   // 停服务状态，拒绝服务
+  ALLSPARK_LORA_NOT_LOADED = 13,  // 用户指定的lora没加载
+  ALLSPARK_CHUNK_PREFILL = 14,    // 长请求首包分割进行
+  ALLSPARK_DEPRECATED = 20,       // 触发过时接口
+  ALLSPARK_STREAMING = 200,       // 流式返回
 };
 
 const std::string AsGetErrorByCode(AsStatus error_code);
