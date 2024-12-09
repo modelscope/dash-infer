@@ -48,7 +48,7 @@ class GemmA16W8Base : public AsOperator {
   int ldc_;
   float alpha_;
   float beta_;
-  bool is_pooler_;
+  bool is_pooler_;  // for bert pooler
   UnaryType activation_;
 
   int64_t group_size_ = -1;  // -1 mean per_channel

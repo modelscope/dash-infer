@@ -8,14 +8,29 @@
 #include "../core/model/model.h"
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+int allspark::ProfilerAdder::trace_id_ = 0;
+#endif
+
 ModelProfiler::ModelProfiler(AsModel* model) {
   assert(model != nullptr);
   card_id_ = model->GetRankId();
 }
 
+// TODO: for GPU, needs add stream to async collect data.
 void ModelProfiler::CollectBy(event_map& events, const std::string& tag,
                               std::string& name, float time_ms,
                               ProfileType type) {
+#ifdef ENABLE_CUDA
+  // only collect rank0 profiling info in CUDA.
+  // Since CPU multi-numa is runing in multi process, so we collect in each
+  // process
+  if (card_id_ != 0) {
+    return;
+  }
+#endif
+
   auto eit = events.find(tag);
   if (eit == events.end()) {
     auto ret = events.emplace(tag, profile_events());
@@ -54,6 +69,11 @@ std::vector<ModelProfiler::stat_type> ModelProfiler::ReportOpStat(
   }
 
   // loop the op and sort the output by avg.
+#ifdef ENABLE_CUDA
+  // for cuda, try to collect all op time left.
+  TryCollectOpTime(tag);
+#endif
+
   auto& op_times = it->second;
   std::vector<ModelProfiler::stat_type> op_stat_unsort;
   op_stat_unsort.reserve(op_times.size());

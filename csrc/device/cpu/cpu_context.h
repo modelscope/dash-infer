@@ -72,12 +72,14 @@ class CPUContext : public DeviceContext {
   void FreeBlock(const Block::Ptr& block) { allocator_.Free(block); }
   void ResetBlockPools() { allocator_.ResetPools(); }
 
-  void InitMCCL(int rank, int nRanks);
   int GetRank() const override;
   int GetNranks() const override;
+#ifdef ENABLE_MULTINUMA
+  void InitMCCL(int rank, int nRanks);
   void SemPostInterProcess() override;
   void SemWaitSendInterProcess() override;
   bool SemWaitMsgSynInterProcess(int msg_size) override;
+#endif
 
  private:
   int cpu_id_;

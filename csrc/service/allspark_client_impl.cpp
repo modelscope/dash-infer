@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <utility/uuid.h>
 
 #include "allspark_service_helper.h"
 #include "allspark_service_parallel.h"
@@ -111,6 +112,7 @@ std::shared_ptr<AsEngine::GeneratedElements> ClientResultQueueImpl::Get() {
     LOG(ERROR) << "service lauch failure, return nullptr";
     return nullptr;
   }
+  // LOG(INFO) << "ResultQueueImpl::Get() uuid: " << uuid_;
   allspark::allspark_service::GeneratedElements ele_proto;
   allspark_service::UUID uuid_proto;
   uuid_proto.set_uuid(uuid_);
@@ -263,6 +265,13 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
   switch (op) {
     case RequestOperation::Start: {
       allspark::allspark_service::StartRequestRequest request_proto;
+      GenerateConfig default_cfg;
+
+      // set one uuid if user don't set to make sure NUMA works.
+      if (request_info->config.user_request_id == default_cfg.user_request_id) {
+        request_info->config.user_request_id = GenNewUUID();
+      }
+
       std::string model_name_str = std::string(model_name);
       allspark_service::makeRequestParamsProtoFromAs(
           model_name_str, request_info.get(), request_proto);
@@ -277,7 +286,8 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
         auto req_data =
             std::make_shared<ClientRequestManager::ClientRequestData>();
         auto uuid = response_proto[0].uuid();
-        req_data->handle = std::make_shared<RequestHandle>(uuid);
+        req_data->handle = std::make_shared<RequestHandle>();
+        req_data->handle->request_uuid = uuid;
         req_data->queue = std::make_shared<ClientResultQueueImpl>(uuid);
         req_manager_->addRequest(uuid, req_data);
         *request_handle = req_data->handle.get();
@@ -294,6 +304,12 @@ AsStatus AsClientEngineImpl::CallRequestOperation(
         CALL_RPC_FUNC(stub_[id], StopRequest, &context[id], request_proto,
                       &response_proto[id], &rpc_status[id]);
       });
+      // bool success = true;
+      // AS_CLIENT_GET_SUCCESS_STATUS(context_size_, response_proto, success);
+      // if (success) {
+      //     auto uuid = response_proto[0].uuid();
+      //     req_manager_->eraseRequest(uuid);
+      // }
       break;
     }
     case RequestOperation::Release: {
@@ -467,6 +483,8 @@ AsStatus AsClientContext::LaunchService() {
     std::stringstream ss;
     ss << base_addr_ << client_pid_ << "_rank_" << i;
     server_path_old.push_back(ss.str());
+    // server_path.push_back(base_addr_);
+    // LOG(INFO) << "service path:" <<base_addr_ ;
   }
   RegisterService(server_path_old);
   // sent request

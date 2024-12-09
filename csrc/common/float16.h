@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    float16.h
  */
+
 #pragma once
 
 #include <cmath>

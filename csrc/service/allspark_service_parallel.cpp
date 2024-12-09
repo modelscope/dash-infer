@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    allspark_service_parallel.cpp
  */
+
 #include "allspark_service_parallel.h"
 
 #include <glog/logging.h>

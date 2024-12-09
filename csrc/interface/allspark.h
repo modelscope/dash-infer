@@ -5,10 +5,14 @@
 
 #pragma once
 
+#include <hash_fun.h>
+
 #include <cmath>
 #include <functional>
 #include <map>
 #include <memory>
+#include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -19,6 +23,7 @@
 namespace allspark {
 
 class AsEngineImpl;
+class MultiMediaInfoImpl;
 class RequestHandle;
 typedef RequestHandle* RequestHandle_t;
 
@@ -29,14 +34,52 @@ using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
 enum class AsMHAPrefill {
   AsPrefillDefault = 0,
   AsPrefillFlashV2 = 10,
+  AsPrefillXformer = 11,
+};
+
+enum class VocabType : int {
+  /* Tokenization algorithms */
+  VOCAB_TYPE_WPM = 0,  // Word Piece
+  VOCAB_TYPE_SPM = 1,  // Sentence Piece
+  VOCAB_TYPE_UGM = 2,  // Unigram
+  VOCAB_TYPE_BPE = 3,  // Byte Pair Encoding
+};
+
+class MultiMediaInfo {
+ public:
+  MultiMediaInfo();
+  ~MultiMediaInfo();
+  AsStatus add_multimedia_content(std::string key,
+                                  std::vector<std::vector<float>> data_list,
+                                  std::vector<std::vector<int64_t>> shape_list);
+  AsStatus add_multimedia_content(
+      std::string key, std::vector<DLManagedTensor*>& dl_tensor_py_list);
+  AsStatus set_multimedia_type(int multimedia_type_new);
+  std::map<std::string,
+           std::vector<std::pair<std::vector<float>, std::vector<int64_t>>>>&
+  get_tensor_list_map();
+  DLTensorListMap get_multimedia_map();
+
+ private:
+  std::unique_ptr<MultiMediaInfoImpl> multi_media_info_impl_;
 };
 
 enum class AsCacheMode {
   AsCacheDefault = 0,
+  AsCacheQuantI8 = 1,
+  AsCacheQuantU4 = 2,
 };
 
+enum class AsEvictionStrategy {
+  MaxLength = 0,
+  Random = 1,
+};
+enum class AsSchedulingStrategy {
+  ContextPriority = 0,
+  Balance = 1,
+};
 /**
- * Converted ditensors, dimodel file info class.
+ * Converted asparam, asgraph file info class.
  */
 
 class AsFileInfo {
@@ -46,12 +89,6 @@ class AsFileInfo {
   std::string current_version_engine;  // allspark engine version.
 };
 
-/**
- * @brief Configuration for text generation.
- *
- * This structure contains various configuration parameters used
- * for controlling the text generation process.
- */
 struct GenerateConfig {
   // Global options
   bool do_sample = true;  ///< Flag to enable/disable sampling in generation,
@@ -77,8 +114,10 @@ struct GenerateConfig {
   int top_k = 50;                  ///< Top-K sampling hyperparameter.
   float top_p = 1.0;               ///< Top-P sampling hyperparameter.
   float repetition_penalty = 1.0;  ///< Penalty for word repetition.
-  float length_penalty = 1.0;      ///< Penalty for the length of the sequence.
-  float presence_penalty = 0;      ///< Penalty for the presence of words.
+  float length_penalty =
+      1.0;  ///< Penalty for the length of the sequence.Only use in beamsearch
+  float presence_penalty = 0;   ///< Penalty for the presence of words.
+  float frequency_penalty = 0;  ///< Penalty for the frequency of words.
   bool suppress_repetition_in_generation =
       false;  ///< Suppress repetition of words during generation,
               /// if this option is on,
@@ -96,38 +135,84 @@ struct GenerateConfig {
           /// log probability. logprobs must be set to true if this parameter is
           /// used.
   // Generation Length Control options
-  int min_length = 0;   ///< Minimum total length, 0 means disable this fitler
+  int min_length =
+      0;  ///< Minimum total length toal length, 0 means disable this filter
   int max_length = 20;  ///< Maximum total length,  max_length =  input(prefill)
                         ///< + output(generation)
-
+  // other options
+  std::string lora_name = "";
+  MultiMediaInfo* mm_info = nullptr;
+  // for guided decoding
+  std::map<std::string, std::string>
+      response_format;  /// specify output format, currently only JSON supported
+  std::map<std::string, int> vocab;  /// model tokenizer vocab
+  VocabType vocab_type;              /// model tokenizer type
   // deprecated options
+
+  std::string user_request_id =
+      "Default-User-UUID";  /// This uuid should  only use for logging.
+
   int input_len = 0;  ///< deprecated option, will filled by engine internally.
-  std::string uuid =
-      "Default-UUID";  ///< deprecated option, will filled by engine internally.
 };
 
-// use AsModelConfigBuilder to build this config.
 class AsModelConfig {
  public:
+  static const int default_engine_max_length = 2048;
+  static const int default_engine_max_batch = 32;
+  static const int default_engine_max_prefill_length = 0;
+  static const int default_swap_threshold = -1;
+  static const int default_num_thread = 0;
+  static constexpr const char* default_matmul_precision = "highest";
+  static constexpr const char* default_compute_unit = "CUDA:0";
+  static const int default_span_size = 32;
+  static const AsMHAPrefill default_prefill_mode =
+      AsMHAPrefill::AsPrefillDefault;
+  static const AsCacheMode default_kv_cache_mode = AsCacheMode::AsCacheDefault;
+  static const AsEvictionStrategy default_eviction_strategy =
+      AsEvictionStrategy::MaxLength;
+  static const AsSchedulingStrategy default_scheduling_strategy =
+      AsSchedulingStrategy::ContextPriority;
   AsModelConfig();
-  AsModelConfig(std::string in_model_name, std::string in_model_path,
-                std::string in_weights_path, std::string in_compute_unit,
-                int in_engine_max_length = 0, int in_engine_max_batch = 0,
-                bool in_text_graph = false, int in_num_threads = 0,
-                std::string in_matmul_precision = "highest",
-                AsMHAPrefill in_prefill_mode = AsMHAPrefill::AsPrefillDefault,
-                AsCacheMode in_cache_mode = AsCacheMode::AsCacheDefault);
+  AsModelConfig(
+      std::string in_model_name, std::string in_model_path,
+      std::string in_weights_path, std::string in_compute_unit,
+      int in_engine_max_length = default_engine_max_length,
+      int in_engine_max_batch = default_engine_max_batch,
+      int in_engine_max_prefill_length = default_engine_max_prefill_length,
+      int64_t in_swap_threshold = default_swap_threshold,
+      bool in_text_graph = false, int in_num_threads = default_num_thread,
+      std::string in_matmul_precision = default_matmul_precision,
+      std::vector<std::string> lora_names = std::vector<std::string>(),
+      int in_cache_span_size = default_span_size,
+      int in_cache_span_num_init = 0, int in_cache_span_num_grow = 0,
+      bool enable_prefix_cache = true, int prefix_cache_ttl = 300,
+      AsMHAPrefill in_prefill_mode = default_prefill_mode,
+      AsCacheMode in_cache_mode = default_kv_cache_mode,
+      AsEvictionStrategy in_eviction_strategy = default_eviction_strategy,
+      AsSchedulingStrategy in_scheduling_strategy = default_scheduling_strategy,
+      bool enable_sparsity_matmul = false);
 
   bool operator==(const AsModelConfig& other) const {
     return model_name == other.model_name && model_path == other.model_path &&
            weights_path == other.weights_path &&
-           compute_unit == other.compute_unit &&
+           compute_unit == other.weights_path &&
            engine_max_length == other.engine_max_length &&
            engine_max_batch == other.engine_max_batch &&
+           engine_max_prefill_length == other.engine_max_prefill_length &&
            num_threads == other.num_threads &&
            matmul_precision == other.matmul_precision &&
-           text_graph == other.text_graph && cache_mode == other.cache_mode &&
-           prefill_mode == other.prefill_mode;
+           swap_threshold == other.swap_threshold &&
+           text_graph == other.text_graph &&
+           is_lora == other.is_lora &&  // TODO: compare lora_names ???
+           cache_span_size == other.cache_span_size &&
+           cache_span_num_init == other.cache_span_num_init &&
+           cache_span_num_grow == other.cache_span_num_grow &&
+           cache_mode == other.cache_mode &&
+           enable_prefix_cache == other.enable_prefix_cache &&
+           prefix_cache_ttl == other.prefix_cache_ttl &&
+           prefill_mode == other.prefill_mode &&
+           eviction_strategy == other.eviction_strategy &&
+           enable_sparsity_matmul == other.enable_sparsity_matmul;
   }
 
   std::string ToString() const;  // detail see as_engine.cpp
@@ -136,29 +221,55 @@ class AsModelConfig {
   std::string model_name;
   std::string model_path;
   std::string weights_path;
-  std::string compute_unit = "CPU:0";
-  std::string matmul_precision = "highest";
-  int num_threads = 0;
+  std::string compute_unit = default_compute_unit;
+  std::string matmul_precision = default_matmul_precision;
+  int num_threads = default_num_thread;
+  bool is_lora = false;
 
-  int engine_max_length = 0;
-  int engine_max_batch = 0;
-  AsCacheMode cache_mode;
-  AsMHAPrefill prefill_mode;
+  int64_t swap_threshold =
+      default_swap_threshold;  // -1: 不swap  0: swap全部tensors
+                               // 其他正整数：仅swap超过该阈值的tensors
+  int engine_max_length = default_engine_max_length;
+  int engine_max_batch = default_engine_max_batch;
+  int engine_max_prefill_length = default_engine_max_prefill_length;
+  std::vector<std::string> lora_names;
+  int cache_span_size = default_span_size;  // deprecated
+  int cache_span_num_init = 0;              // deprecated
+  int cache_span_num_grow = 0;              // deprecated
+  bool enable_prefix_cache = true;
+  int prefix_cache_ttl = 300;
+  AsCacheMode cache_mode = default_kv_cache_mode;
+  AsMHAPrefill prefill_mode = default_prefill_mode;
+  AsEvictionStrategy eviction_strategy = default_eviction_strategy;
+  AsSchedulingStrategy scheduling_strategy = default_scheduling_strategy;
   bool text_graph = false;
+  bool enable_sparsity_matmul = false;
 };
 
+/**
+ * Engine level statistic information
+ *
+ */
 class AsEngineStat {
  public:
   AsEngineStat() {}
   AsEngineStat(std::string in_model_name)
       : model_name(std::move(in_model_name)) {}
+
+  // bool operator==(const AsEngineStat& other) const {
+  //     return model_name == other.model_name &&
+  // }
   std::string ToString() const;
   std::map<std::string, std::string> ToMap() const;
 
  public:
   std::string model_name;
+  int64_t total_span = 0;
+  int64_t used_span = 0;
+  int64_t free_span = 0;
   int64_t total_token = 0;
   int64_t free_token = 0;
+  int64_t span_size = 0;
   int pendding_request = 0;
   int running_request = 0;
   int64_t total_device_memory_pool_size = 0;
@@ -168,6 +279,13 @@ class AsEngineStat {
   int64_t total_prefill_token = 0;
   float generate_token_persec = 0;
   float process_token_persec = 0;
+  float token_usage_percentage = 0;
+  int64_t prefix_cache_hit_token = 0;
+  int64_t prefix_cache_miss_token = 0;
+  float prefix_cache_hit_rate = 0;
+  float prefix_cache_miss_rate = 0;
+  // size_t TotalDeviceMemoryPoolSize;
+  // size_t UsedDeviceMemoryPoolSize;
 };
 
 struct TensorAttribute {
@@ -202,12 +320,14 @@ class AsEngine final {
   };
 
   enum class RequestMMType {
-    TextInput,  // default is all text input.
+    TextInput,               // default is all text input.
+    MultiMediaTypeRichText,  // behavior will be like RunRichTextGeneration.
   };
 
   class RequestContent {
    public:
     RequestInferType infer_type;
+    RequestMMType mm_type;
     std::shared_ptr<DLTensorMap>
         inputs;  /// input tensors, format: {input_name_1: tensor,
                  /// input_name_2: tensor}
@@ -238,7 +358,7 @@ class AsEngine final {
      * their probabilities when generated. Dimension: [num_token][top_logprobs],
      * where each token has a pair [token_id, prob].
      */
-    std::vector<std::vector<std::pair<int64_t, float>>> log_probs_list;
+    std::vector<std::vector<std::pair<int, float>>> log_probs_list;
 
     /**
      * Stores the probability value for each selected token.
@@ -249,6 +369,27 @@ class AsEngine final {
      * Tensor outputs from model inference.
      */
     DLTensorMap tensors_from_model_inference;
+
+    /**
+     * Cached prefix token length.
+     */
+    int prefix_cache_len;  // total cache len (gpu + cpu)
+    int prefix_len_gpu;    // gpu cache len
+    int prefix_len_cpu;    // cpu cache len
+
+    /**
+      add new single element to the end.
+    */
+    void AppendNewSingleElementToEnd(GeneratedElements& rhs) {
+      ids_from_generate.push_back(rhs.ids_from_generate[0]);
+      if (rhs.log_probs_list.size() > 0)
+        log_probs_list.push_back(rhs.log_probs_list[0]);
+      if (rhs.token_logprobs_list.size() > 0)
+        token_logprobs_list.push_back(rhs.token_logprobs_list[0]);
+      prefix_cache_len = rhs.prefix_cache_len;
+      prefix_len_gpu = rhs.prefix_len_gpu;
+      prefix_len_cpu = rhs.prefix_len_cpu;
+    }
   };
 
   enum class GenerateRequestStatus {
@@ -259,6 +400,8 @@ class AsEngine final {
     GenerateInterrupted,  /// The Generation was interrupted, often means
                           /// there is no enough memory, and this request
                           /// was unfortunedly stopped.
+    InternalError,        /// Internal error status.
+
   };
 
   /**
@@ -274,12 +417,30 @@ class AsEngine final {
   class ResultQueue {
    public:
     /**
+     * A Key-Value statistic info structure, for float like info, convert into
+     * long type.
+     */
+    typedef std::map<std::string, long> StatInfo;
+
+    virtual ~ResultQueue() {}
+
+    /**
      * Generates the status of a request.
      *
      * @return GenerateRequestStatus Returns the status of the generation
      * request.
      */
+
     virtual GenerateRequestStatus GenerateStatus() {
+      throw std::runtime_error("Function not implemented.");
+    }
+
+    /**
+     * Get Request statisitic info.
+     *
+     * @return key-value dict of all the statistic of this request.
+     */
+    virtual StatInfo RequestStatInfo() {
       throw std::runtime_error("Function not implemented.");
     }
 
@@ -303,6 +464,18 @@ class AsEngine final {
     }
 
     /**
+     * Fetches a result from the queue, will be block until new token generated
+     *
+     * @prarm timeout_ms wait with timeout in milliseconds.
+     *
+     * @return std::shared_ptr<GeneratedElements> Returns a smart pointer to the
+     * generated elements.
+     */
+    virtual std::shared_ptr<GeneratedElements> Get(int timeout_ms) {
+      throw std::runtime_error("Function not implemented.");
+    }
+
+    /**
      * Retrieves a result from the queue without waiting.
      *
      * @return std::shared_ptr<GeneratedElements> Returns a smart pointer to the
@@ -322,6 +495,7 @@ class AsEngine final {
   typedef ResultQueue* ResultQueue_t;
 
   AsEngine();
+
   ~AsEngine();
 
   /**
@@ -411,7 +585,7 @@ class AsEngine final {
   /** Sync the request
    *
    * Since start request is async api, this sync request will
-   * wait until all generate fninished, this api can be used to simulate sync
+   * wait until all generate finished, this api can be used to simulate sync
    * api.
    */
   AsStatus SyncRequest(const char* model_name, RequestHandle_t request_handle);
@@ -422,6 +596,10 @@ class AsEngine final {
    * @return return the statistic information structure
    */
   AsEngineStat GetAsEngineStat(const char* model_name);
+
+  AsStatus LoadLoraByName(const char* model_name, const char* lora_name);
+
+  AsStatus UnloadLoraByName(const char* model_name, const char* lora_name);
 
   /**
    * Get SDK version string
@@ -502,6 +680,11 @@ class AsModelConfigBuilder {
     return *this;
   }
 
+  AsModelConfigBuilder& withSwapThreshold(int64_t threshold) {
+    config.swap_threshold = threshold;
+    return *this;
+  }
+
   AsModelConfigBuilder& withTextGraph(bool text_graph) {
     config.text_graph = text_graph;
     return *this;
@@ -514,6 +697,36 @@ class AsModelConfigBuilder {
 
   AsModelConfigBuilder& withMatmulPrecision(const std::string& precision) {
     config.matmul_precision = precision;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withLoraNames(const std::vector<std::string>& names) {
+    config.lora_names = names;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withCacheSpanSize(int size) {
+    config.cache_span_size = size;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withCacheSpanNumInit(int num_init) {
+    config.cache_span_num_init = num_init;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withCacheSpanNumGrow(int num_grow) {
+    config.cache_span_num_grow = num_grow;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withEnablePrefixCache(bool mode) {
+    config.enable_prefix_cache = mode;
+    return *this;
+  }
+
+  AsModelConfigBuilder& withPrefixCacheTTL(int ttl) {
+    config.prefix_cache_ttl = ttl;
     return *this;
   }
 
@@ -530,10 +743,33 @@ class AsModelConfigBuilder {
   AsModelConfig build() { return config; }
 };
 
+inline std::string ToString(
+    const allspark::AsEngine::GenerateRequestStatus& status) {
+  using namespace allspark;
+  switch (status) {
+    case AsEngine::GenerateRequestStatus::Init:
+      return "Init";
+      break;
+    case AsEngine::GenerateRequestStatus::ContextFinished:
+      return "ContextFnished";
+      break;
+    case AsEngine::GenerateRequestStatus::Generating:
+      return "Generating";
+      break;
+    case AsEngine::GenerateRequestStatus::GenerateFinished:
+      return "GenerateFinished";
+      break;
+    case AsEngine::GenerateRequestStatus::GenerateInterrupted:
+      return "GenerateInterrupted";
+      break;
+    default:
+      return "Unknown";
+  }
+}
 }  // namespace allspark
 
 inline static std::ostream& operator<<(
-    std::ostream& os, const allspark::AsEngine::GenerateRequestStatus status) {
+    std::ostream& os, const allspark::AsEngine::GenerateRequestStatus& status) {
   using namespace allspark;
   switch (status) {
     case AsEngine::GenerateRequestStatus::Init:
@@ -551,6 +787,11 @@ inline static std::ostream& operator<<(
     case AsEngine::GenerateRequestStatus::GenerateInterrupted:
       os << std::string("GenerateInterrupted");
       break;
+    case AsEngine::GenerateRequestStatus::InternalError:
+      os << std::string("InternalError");
+      break;
+    default:
+      os << std::string("UnknownStatus");
   }
   return os;
 }

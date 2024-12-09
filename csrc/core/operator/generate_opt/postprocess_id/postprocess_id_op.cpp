@@ -6,8 +6,11 @@
 #include "postprocess_id_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
 
@@ -89,7 +92,7 @@ AsStatus PostProcessIdOp::RunDecoder(RuntimeContext* runtime_ctx) {
 void UpdateProbs(GenerateContext* gen_ctx, RuntimeContext* runtime_ctx,
                  int current_batch, int batch_stride) {
   if (gen_ctx->gen_cfg.logprobs) {
-    std::vector<std::pair<int64_t, float>> log_probs;
+    std::vector<std::pair<int, float>> log_probs;
     for (int index = 0; index < gen_ctx->gen_cfg.top_logprobs; index++) {
       log_probs.push_back(std::make_pair(
           runtime_ctx
@@ -117,6 +120,15 @@ AsStatus PostProcessIdOp::Forward(RuntimeContext* runtime_ctx) {
       static_cast<int64_t*>(tensor_map_->at(out_names_[0])->GetDataPtr());
   DeviceType backend = ctx_->GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* cu_ctx = static_cast<const CUDAContext*>(ctx_);
+      rank_ = cu_ctx->GetRank();
+      cuda::PostProcessId(out_ids, in_ids, batch_size_, in_stride_, out_stride_,
+                          cu_ctx->GetStream());
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
       cpu::PostProcessId(out_ids, in_ids, batch_size_, in_stride_, out_stride_);
@@ -152,5 +164,6 @@ AsStatus PostProcessIdOp::Forward(RuntimeContext* runtime_ctx) {
   return status;
 }
 
-REGISTER_OP("PostProcessId", CPU, PostProcessIdOp)
+REGISTER_OP(PostProcessId, CUDA, PostProcessIdOp)
+REGISTER_OP(PostProcessId, CPU, PostProcessIdOp)
 }  // namespace allspark

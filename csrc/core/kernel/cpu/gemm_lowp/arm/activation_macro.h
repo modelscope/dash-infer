@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    activation_macro.h
  */
+
 #pragma once
 #include <arm_sve.h>
 

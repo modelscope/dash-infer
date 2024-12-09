@@ -6,8 +6,11 @@
 #include "preprocess_id_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
 
@@ -48,7 +51,19 @@ AsStatus PreProcessIdOp::Forward() {
       static_cast<const int64_t*>(tensor_map_->at(in_names_[0])->GetDataPtr());
   DeviceType backend = ctx_->GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      cudaStream_t cu_stream =
+          static_cast<const CUDAContext*>(ctx_)->GetStream();
+      // TensorUtils::Memset(*tensor_map_->at(out_names_[1]), 0);
+      cuda::PreProcessForGeneration(dec_ids, max_dec_ids, in_ids, start_id_,
+                                    batch_size_, num_beam_, max_len_, seq_len_,
+                                    cu_stream);
+      break;
+    }
+#endif
     case DeviceType::CPU:
+      // TensorUtils::Memset(*tensor_map_->at(out_names_[1]), 0);
       cpu::PreProcessForGeneration(dec_ids, max_dec_ids, in_ids, start_id_,
                                    batch_size_, num_beam_, max_len_, seq_len_);
       break;
@@ -60,5 +75,6 @@ AsStatus PreProcessIdOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("PreProcessId", CPU, PreProcessIdOp)
+REGISTER_OP(PreProcessId, CUDA, PreProcessIdOp)
+REGISTER_OP(PreProcessId, CPU, PreProcessIdOp)
 }  // namespace allspark

@@ -68,6 +68,7 @@ AsStatus GemmA16W8ARM::InitV2(const OperatorProto& op_proto,
       PackWeightBf16(n_, k_, K_pack_, orig_weight_ptr, pack_weight_bf16_ptr,
                      orig_scale_ptr, orig_zero_ptr, group_size_);
 
+#if TEST_TYPE_CVT_FP16  // temporary macro for test
       int fp16_w = (scale_shape[1] + 3) / 4 * 4;
       int fp16_h = scale_shape[0] + scale_shape[0] % 2;
       int64_t fp16_size = fp16_w * fp16_h * 2;
@@ -94,13 +95,34 @@ AsStatus GemmA16W8ARM::InitV2(const OperatorProto& op_proto,
       weights_[1]->SetName(scale->GetName());
       weights_[1]->SetDataType(DataType::FLOAT16);
       weights_[1]->SetShape(std::move(scale_shape_new));
-      TensorUtils::DeepCopyWhole(*weights_[1], *scale);
+      TensorUtils::DeepCopyWholeAsync(*weights_[1], *scale, ctx_);
 
       weights_[2]->Free();
       weights_[2]->SetName(scaleXzp->GetName());
       weights_[2]->SetDataType(DataType::FLOAT16);
       weights_[2]->SetShape(std::move(scale_shape_new));
-      TensorUtils::DeepCopyWhole(*weights_[2], *scaleXzp);
+      TensorUtils::DeepCopyWholeAsync(*weights_[2], *scaleXzp, ctx_);
+#else
+      std::shared_ptr<AsTensor> scale = std::make_shared<AsTensor>(
+          weights_[1]->GetName() + "_packed", DeviceType::CPU,
+          DataType::FLOAT32, weights_[1]->GetDataMode(), scale_shape);
+
+      std::shared_ptr<AsTensor> scaleXzp = std::make_shared<AsTensor>(
+          weights_[2]->GetName() + "_packed", DeviceType::CPU,
+          DataType::FLOAT32, weights_[2]->GetDataMode(), scale_shape);
+
+      float* new_scale_ptr = static_cast<float*>(scale->GetDataPtr());
+      float* new_scaleXzp_ptr = static_cast<float*>(scaleXzp->GetDataPtr());
+
+      ProcessQuantParam(orig_scale_ptr, orig_zero_ptr, scale_shape,
+                        new_scale_ptr, new_scaleXzp_ptr);
+
+      weights_[1]->SetName(scale->GetName());
+      TensorUtils::DeepCopyWholeAsync(*weights_[1], *scale, ctx_);
+
+      weights_[2]->SetName(scaleXzp->GetName());
+      TensorUtils::DeepCopyWholeAsync(*weights_[2], *scaleXzp, ctx_);
+#endif
       break;
     }
     default:
@@ -123,7 +145,7 @@ AsStatus GemmA16W8ARM::InitV2(const OperatorProto& op_proto,
   weights_[0]->SetName(weight_packed->GetName());
   weights_[0]->SetDataType(weight_packed->GetDataType());
   weights_[0]->SetShape(std::move(weight_packed_shape));
-  TensorUtils::DeepCopyWhole(*weights_[0], *weight_packed);
+  TensorUtils::DeepCopyWholeAsync(*weights_[0], *weight_packed, ctx_);
 
   return AsStatus::ALLSPARK_SUCCESS;
 }
@@ -217,6 +239,6 @@ void GemmA16W8ARM::ProcessQuantParamFp16(float* scale, float* zero,
   return;
 }
 
-REGISTER_OP("GemmA16W8", CPU, GemmA16W8ARM)
+REGISTER_OP(GemmA16W8, CPU, GemmA16W8ARM)
 }  // namespace allspark
 #endif

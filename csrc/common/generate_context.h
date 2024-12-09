@@ -4,6 +4,10 @@
  */
 
 #pragma once
+
+#if ENABLE_SPAN_ATTENTION
+#include <cache/virtual_cache.h>
+#endif
 #include <common/common.h>
 #include <common/request.h>
 #include <core/tensor/cache_memory.h>
@@ -12,6 +16,12 @@
 #include <vector>
 
 namespace allspark {
+
+#ifdef ENABLE_JSON_MODE
+namespace util {
+class FormatEnforcer;
+}
+#endif
 
 enum class AsyncStage : int {
   INIT = 0,
@@ -33,6 +43,8 @@ struct GenerateContext {
   bool async = false;
   bool gen_over[1024];  // max_batch = 1024
   int input_len = 0;
+  int real_input_len = 0;  // for rich_embedding
+  int prefix_len = 0;
   bool is_first_round = true;  // 一串异步请求里的第一个，即"首包"
   AsyncStage async_stage = AsyncStage::INIT;
   std::string uuid = "default-gen-ctx-uuid";
@@ -44,7 +56,17 @@ struct GenerateContext {
   /// @deprecated Use virtual cache instead.
   std::vector<std::unique_ptr<CacheMemory>> k_cache_list, v_cache_list;
 
-  // for random sampling algo of SampleOp
+#if ENABLE_SPAN_ATTENTION
+  std::unique_ptr<VirtualCache> virtual_k_cache;
+  std::unique_ptr<VirtualCache> virtual_v_cache;
+  std::vector<std::string> prefix_cache_hash_list;
+#endif
+
+#ifdef ENABLE_JSON_MODE
+  std::shared_ptr<util::FormatEnforcer> format_enforcer;
+#endif
+
+  // for random sampling algo of SampleOp,only for cpu or cuda PhiloxCudaState
   std::unique_ptr<AsTensor> sample_state = nullptr;
 };
 
@@ -58,7 +80,12 @@ class LayerCacheManager {
     cache_map_[cache_name] = std::move(cache);
     cache_set_map[cache_name] = false;
   }
-  bool IsCacheSet(std::string cache_name) { return cache_set_map[cache_name]; }
+  bool IsCacheSet(std::string cache_name) {
+    if (cache_set_map.count(cache_name))
+      return cache_set_map[cache_name];
+    else
+      return false;
+  }
   void SetCache(std::string cache_name) { cache_set_map[cache_name] = true; }
   void ResetCache(std::string cache_name) { cache_set_map[cache_name] = false; }
 
@@ -71,9 +98,10 @@ class RuntimeContext {
   bool is_context = false;
   int current_batch = 0;
   int generate_method = 0;
-  std::vector<int64_t> logprobs_indice_host;
+  std::vector<int> logprobs_indice_host;
   std::vector<float> logprobs_value_host;
   std::vector<float> token_logprobs_host;
+
   GenerateContext* GetContextGenCtx() const {
     return gen_ctx_list[current_batch].get();
   }
@@ -92,9 +120,6 @@ class RuntimeContext {
     gen_ctx_list[index]->request->finish = true;
     gen_ctx_list[index]->request->status =
         AsEngine::GenerateRequestStatus::GenerateFinished;
-    // LOG(INFO) << "uuid = " << gen_ctx_list[index]->request->request_id <<
-    // "finish = "<< gen_ctx_list[index]->request->finish<<"FinishRequest "
-    // <<std::endl;
     gen_ctx_list[index] = std::move(gen_ctx_list[batch_size - 1]);
     gen_ctx_list[index]->current_batch = index;
     gen_ctx_list.pop_back();

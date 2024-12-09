@@ -2,14 +2,34 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    transmask_op.cpp
  */
-
 #include "transmask_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+AsStatus gpu_transmask(DataType dtype, void* out, const int64_t* in, int batch,
+                       int seq_len, bool seq_mask, bool blank,
+                       const DeviceContext* ctx) {
+  DLOG(INFO) << "gpu_transmask" << std::endl;
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    cuda::TransMaskKernelLauncher(typed_out, in, batch, seq_len, seq_mask,
+                                  blank, gpu_ctx->GetStream());
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+#endif
+
 AsStatus cpu_transmask(DataType dtype, void* out, const int64_t* in, int batch,
                        int seq_len, bool seq_mask, bool blank,
                        const DeviceContext* ctx) {
@@ -46,6 +66,16 @@ AsStatus TransMaskOp::Init(const OperatorProto& op_proto,
   }
   DeviceType backend = ctx.GetDeviceType();
   switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA:
+      kernel_launcher = gpu_transmask;
+
+      // TODO(zhangyufei): this is a fastfix, please remove this in future ..
+      int device_id;
+      cudaGetDevice(&device_id);
+      cudaGetDeviceProperties(&dprop_, device_id);
+      break;
+#endif
     case DeviceType::CPU:
       kernel_launcher = cpu_transmask;
       break;
@@ -59,6 +89,20 @@ AsStatus TransMaskOp::Init(const OperatorProto& op_proto,
 }
 
 AsStatus TransMaskOp::Reshape() {
+  std::pair<bool, AsMHAPrefill> prefill_mode_pair = GetPrefillMode();
+  if (!prefill_mode_pair.first) {
+    LOG(ERROR) << "TransMaskOp get prefill mode error. " << std::endl;
+    return AsStatus::ALLSPARK_RUNTIME_ERROR;
+  }
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    if (prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillFlashV2 ||
+        prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillXformer) {
+      return AsStatus::ALLSPARK_SUCCESS;
+    }
+  }
+#endif  // ENABLE_CUDA
   Shape out_shape = tensor_map_->at(in_names_[0])->GetShape();
   batch_size_ = out_shape[0];
   seq_length_ = out_shape[1];
@@ -76,6 +120,20 @@ AsStatus TransMaskOp::Reshape() {
 }
 
 AsStatus TransMaskOp::Forward() {
+  std::pair<bool, AsMHAPrefill> prefill_mode_pair = GetPrefillMode();
+  if (!prefill_mode_pair.first) {
+    LOG(ERROR) << "TransMaskOp get prefill mode error. " << std::endl;
+    return AsStatus::ALLSPARK_RUNTIME_ERROR;
+  }
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    if (prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillFlashV2 ||
+        prefill_mode_pair.second == allspark::AsMHAPrefill::AsPrefillXformer) {
+      return AsStatus::ALLSPARK_SUCCESS;
+    }
+  }
+#endif  // ENABLE_CUDA
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   // use nullptr as mask,default all mask = 1
   kernel_launcher(out_tensor->GetDataType(), out_tensor->GetDataPtr(), nullptr,
@@ -83,5 +141,6 @@ AsStatus TransMaskOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("TransMask", CPU, TransMaskOp)
+REGISTER_OP(TransMask, CUDA, TransMaskOp)
+REGISTER_OP(TransMask, CPU, TransMaskOp)
 }  // namespace allspark

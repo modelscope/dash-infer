@@ -20,6 +20,8 @@ class DecOptEmbeddingOp : public AsOperator {
         offset_(0) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
+  // AsStatus Reshape() override;
+  // AsStatus Forward() override;
   AsStatus Reshape(RuntimeContext* runtime_ctx) override;
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);

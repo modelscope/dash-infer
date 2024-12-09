@@ -49,4 +49,15 @@ index-url = https://mirrors.aliyun.com/pypi/simple/ \n' > /root/.pip/pip.conf
 RUN yum install -y atlas-devel
 RUN pip3 install auditwheel
 
+RUN yum install -y libtool flex
+
+RUN wget "ftp://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" && \
+    tar -xvf automake-1.15.1.tar.gz && \
+    cd automake-1.15.1 && ./configure && make -j && make install && \
+    cd .. && rm -rf automake-1.15.1.tar.gz automake-1.15.1
+
+RUN wget "https://xxxxxx/conan_allspark_source_arm_20241119.tar" && \
+    tar -xvf conan_allspark_source_arm_20241119.tar && \
+    mv conan_allspark_source_arm_20241119 /root/.conan && \
+    rm -rf conan_allspark_source_arm_20241119.tar
 WORKDIR /root/

@@ -1,0 +1,370 @@
+diff --git a/csrc/CMakeLists.txt b/csrc/CMakeLists.txt
+new file mode 100644
+index 0000000..cc91698
+--- /dev/null
++++ b/csrc/CMakeLists.txt
+@@ -0,0 +1,117 @@
++cmake_minimum_required(VERSION 3.18)
++
++project(FLASHATTN LANGUAGES CXX CUDA)
++option(CMAKE_EXPORT_COMPILE_COMMANDS ON)
++
++set(FLASHATTN_CUDA_VERSION
++    "11.8"
++    CACHE STRING "cuda version")
++set(FLASHATTN_GPU_ARCHS
++    "80;86"
++    CACHE STRING "gpu archs")
++set(FLASHATTN_USE_EXTERNAL_CUTLASS
++    OFF
++    CACHE BOOL "use external cutlass target")
++set(FLASHATTN_USE_CUDA_STATIC
++    OFF
++    CACHE BOOL "use static CUDA")
++# Generate SASS for each architecture
++foreach(arch ${FLASHATTN_GPU_ARCHS})
++  list(APPEND GENCODES "${arch}-real")
++endforeach()
++# Generate PTX for the last architecture
++list(GET FLASHATTN_GPU_ARCHS -1 LATEST_GPU_ARCH)
++list(APPEND GENCODES "${LATEST_GPU_ARCH}-virtual")
++set(CMAKE_CUDA_ARCHITECTURES ${GENCODES})
++
++find_package(CUDAToolkit ${FLASHATTN_CUDA_VERSION} EXACT REQUIRED)
++
++if(FLASHATTN_USE_CUDA_STATIC)
++  set(FLASHATTN_CUDA_CUDART CUDA::cudart_static)
++else()
++  set(FLASHATTN_CUDA_CUDART CUDA::cudart)
++endif()
++
++if(FLASHATTN_USE_EXTERNAL_CUTLASS)
++  message("flash attn use external cutlass")
++  find_package(NvidiaCutlass PATHS ${CUTLASS_INSTALL_PATH})
++  set(CUTLASS_INCLUDE_DIR ${CUTLASS_INSTALL_PATH}/include)
++  set(CUTLASS_LIBRARY NvidiaCutlass)
++else()
++  message("flash attn use internal cutlass")
++  message("========== CUTLASS ==========")
++  set(CUTLASS_ENABLE_TESTS
++      OFF
++      CACHE BOOL "Enable CUTLASS Tests")
++  set(CUTLASS_ENABLE_TOOLS
++      OFF
++      CACHE BOOL "Enable CUTLASS Tools")
++  set(CUTLASS_ENABLE_EXAMPLES
++      OFF
++      CACHE BOOL "Enable CUTLASS Examples")
++  set(CUTLASS_NVCC_ARCHS
++      ${FLASHATTN_GPU_ARCHS}
++      CACHE STRING "The SM architectures requested.")
++  add_subdirectory(${PROJECT_SOURCE_DIR}/cutlass EXCLUDE_FROM_ALL)
++  set(CUTLASS_LIBRARY nvidia::cutlass::cutlass)
++  unset(CUTLASS_ENABLE_TESTS)
++  unset(CUTLASS_ENABLE_TOOLS)
++  unset(CUTLASS_ENABLE_EXAMPLES)
++  unset(CUTLASS_NVCC_ARCHS)
++  message("===========================")
++endif()
++
++set(FLASHATTN_ROOT ${PROJECT_SOURCE_DIR}/flash_attn/src)
++set(FLASHATTN_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/flash_attn/src
++                          ${PROJECT_SOURCE_DIR})
++file(GLOB_RECURSE FLASHATTN_SRCS ${FLASHATTN_ROOT}/*.cu)
++# no bwd
++file(GLOB_RECURSE FLASHATTN_BWD_SRCS ${FLASHATTN_ROOT}/*_bwd_*.cu)
++foreach(file ${FLASHATTN_BWD_SRCS})
++  list(REMOVE_ITEM FLASHATTN_SRCS "${file}")
++endforeach()
++
++list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_HALF_OPERATORS__")
++list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_HALF_CONVERSIONS__")
++list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_HALF2_OPERATORS__")
++list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
++list(APPEND FLASHATTN_CUDA_FLAGS "--expt-relaxed-constexpr")
++list(APPEND FLASHATTN_CUDA_FLAGS "--expt-extended-lambda")
++list(APPEND FLASHATTN_CUDA_FLAGS "--use_fast_math")
++list(APPEND FLASHATTN_CUDA_FLAGS "-O3")
++# list(APPEND FLASHATTN_CUDA_FLAGS "--ptxas-options=-v")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-lineinfo")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_BACKWARD")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_DROPOUT")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_ALIBI")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_SOFTCAP")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_UNEVEN_K")
++# list(APPEND FLASHATTN_CUDA_FLAGS "-DFLASHATTENTION_DISABLE_LOCAL")
++
++# Create an object library with the source files
++add_library(flash-attn-obj OBJECT ${FLASHATTN_SRCS})
++set_target_properties(flash-attn-obj PROPERTIES CXX_STANDARD 17 CUDA_STANDARD 17)
++set_target_properties(flash-attn-obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
++target_compile_options(flash-attn-obj PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${FLASHATTN_CUDA_FLAGS}>)
++target_include_directories(flash-attn-obj PUBLIC ${FLASHATTN_INCLUDE_DIR} ${CUTLASS_INCLUDE_DIR})
++
++# Create STATIC library from the object files
++add_library(flash-attn_static STATIC $<TARGET_OBJECTS:flash-attn-obj>)
++set_target_properties(flash-attn_static PROPERTIES OUTPUT_NAME "flash-attn")
++target_link_libraries(flash-attn_static PRIVATE ${FLASHATTN_CUDA_CUDART})
++
++# Create SHARED library from the object files
++add_library(flash-attn SHARED $<TARGET_OBJECTS:flash-attn-obj>)
++target_link_libraries(flash-attn PRIVATE ${FLASHATTN_CUDA_CUDART})
++
++# Create alias for static library
++add_library(flash-attention::flash-attn_static ALIAS flash-attn_static)
++
++# Create alias for shared library
++add_library(flash-attention::flash-attn ALIAS flash-attn)
++
++# Install both static and shared libraries
++install(TARGETS flash-attn_static flash-attn
++    EXPORT flash-attn
++    # PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}
++)
+diff --git a/csrc/flash_attn/src/flash.cu b/csrc/flash_attn/src/flash.cu
+new file mode 100644
+index 0000000..6f01a05
+--- /dev/null
++++ b/csrc/flash_attn/src/flash.cu
+@@ -0,0 +1,18 @@
++#include "cuda.h"
++#include "flash.h"
++#include "static_switch.h"
++#include <cutlass/numeric_types.h>
++ 
++void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel) {
++    FP16_SWITCH(!params.is_bf16, [&] {
++        HEADDIM_SWITCH(params.d, [&] {
++            BOOL_SWITCH(params.is_causal, Is_causal, [&] {
++                if (params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
++                    run_mha_fwd_<elem_type, kHeadDim, Is_causal>(params, stream);
++                } else {
++                    run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim, Is_causal>(params, stream);
++                }
++            });
++        });
++    });
++}
+diff --git a/csrc/flash_attn/src/flash.h b/csrc/flash_attn/src/flash.h
+index 1a218b0..1c82549 100644
+--- a/csrc/flash_attn/src/flash.h
++++ b/csrc/flash_attn/src/flash.h
+@@ -7,6 +7,7 @@
+ #include <cuda.h>
+ #include <vector>
+ 
++#if 0
+ #ifdef OLD_GENERATOR_PATH
+ #include <ATen/CUDAGeneratorImpl.h>
+ #else
+@@ -18,6 +19,7 @@
+ constexpr int TOTAL_DIM = 0;
+ constexpr int H_DIM = 1;
+ constexpr int D_DIM = 2;
++#endif
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+@@ -49,6 +51,7 @@ struct Qkv_params {
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ struct Flash_fwd_params : public Qkv_params {
++    void SetCudaConfig(const cudaDeviceProp* dprop_) { dprop = dprop_; }
+ 
+     // The O matrix (output).
+     void * __restrict__ o_ptr;
+@@ -122,7 +125,7 @@ struct Flash_fwd_params : public Qkv_params {
+     float softcap;
+ 
+     // Random state.
+-    at::PhiloxCudaState philox_args;
++    // at::PhiloxCudaState philox_args;
+ 
+     // Pointer to the RNG seed (idx 0) and offset (idx 1).
+     uint64_t * rng_state;
+@@ -143,6 +146,9 @@ struct Flash_fwd_params : public Qkv_params {
+ 
+     bool unpadded_lse;  // For varlen paths: LSE is in [nheads, total_seqlen_q] format instead of [b, nheads, seqlen_q].
+     bool seqlenq_ngroups_swapped;  // q has been transposed from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d).
++
++    // Cuda Device Properties
++    const cudaDeviceProp* dprop;
+ };
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -189,6 +195,8 @@ struct Flash_bwd_params : public Flash_fwd_params {
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
++void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel=false);
++
+ template<typename T, int Headdim, bool Is_causal> void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream);
+ template<typename T, int Headdim, bool Is_causal> void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream);
+ 
+diff --git a/csrc/flash_attn/src/flash_fwd_kernel.h b/csrc/flash_attn/src/flash_fwd_kernel.h
+index edaf605..922427a 100644
+--- a/csrc/flash_attn/src/flash_fwd_kernel.h
++++ b/csrc/flash_attn/src/flash_fwd_kernel.h
+@@ -71,6 +71,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+     constexpr int kHeadDim = Kernel_traits::kHeadDim;
+     constexpr int kNWarps = Kernel_traits::kNWarps;
+ 
++#if 0
+     auto seed_offset = at::cuda::philox::unpack(params.philox_args);
+     flash::Dropout dropout(std::get<0>(seed_offset), std::get<1>(seed_offset), params.p_dropout_in_uint8_t,
+                            bidb, bidh, tidx, params.h);
+@@ -81,6 +82,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+         params.rng_state[0] = std::get<0>(seed_offset);
+         params.rng_state[1] = std::get<1>(seed_offset);
+     }
++#endif
+ 
+     const BlockInfo</*Varlen=*/!Is_even_MN> binfo(params, bidb);
+     if (m_block * kBlockM >= binfo.actual_seqlen_q) return;
+@@ -350,6 +352,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+ 
+         // Convert acc_s from fp32 to fp16/bf16
+         Tensor rP = flash::convert_type<Element>(acc_s);
++#if 0
+         int block_row_idx = m_block * (kBlockM / 16) + tidx / 32;
+         int block_col_idx = n_block * (kBlockN / 32);
+         if (Return_softmax) {
+@@ -364,6 +367,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+         if (Is_dropout) {
+             dropout.apply_dropout(rP, block_row_idx, block_col_idx, kNWarps);
+         }
++#endif
+ 
+         // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+         // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+@@ -412,6 +416,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+         softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
+ 
+         Tensor rP = flash::convert_type<Element>(acc_s);
++#if 0
+         int block_row_idx = m_block * (kBlockM / 16) + tidx / 32;
+         int block_col_idx = n_block * (kBlockN / 32);
+         if (Return_softmax) {
+@@ -426,6 +431,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
+         if (Is_dropout) {
+             dropout.apply_dropout(rP, block_row_idx, block_col_idx, kNWarps);
+         }
++#endif
+ 
+         // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+         // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+diff --git a/csrc/flash_attn/src/flash_fwd_launch_template.h b/csrc/flash_attn/src/flash_fwd_launch_template.h
+index eb8bcea..30c9a2e 100644
+--- a/csrc/flash_attn/src/flash_fwd_launch_template.h
++++ b/csrc/flash_attn/src/flash_fwd_launch_template.h
+@@ -4,12 +4,23 @@
+ 
+ #pragma once
+ 
+-#include <ATen/cuda/CUDAContext.h>
++// #include <ATen/cuda/CUDAContext.h>
+ 
+ #include "static_switch.h"
+ #include "flash.h"
+ #include "flash_fwd_kernel.h"
+ 
++#define CUDA_CHECK(status)                                                    \
++    {                                                                         \
++        cudaError_t error = status;                                           \
++        if (error != cudaSuccess) {                                           \
++            std::cerr << "Got bad cuda status: " << cudaGetErrorString(error) \
++                      << " at line: " << __LINE__ << std::endl;               \
++            exit(EXIT_FAILURE);                                               \
++        }                                                                     \
++    }
++#define CUDA_KERNEL_LAUNCH_CHECK() CUDA_CHECK(cudaGetLastError())
++
+ // Determine if the architecture supports FLASH and define a macro to handle parameter modifiers
+ #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+ #define ARCH_SUPPORTS_FLASH
+@@ -78,7 +89,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+                             // printf("IsEvenMNConst = %d, IsEvenKConst = %d, Is_local = %d, Is_causal = %d, ReturnSoftmaxConst = %d, Is_dropout = %d\n", int(IsEvenMNConst), int(IsEvenKConst), int(Is_local), int(Is_causal), int(ReturnSoftmaxConst), int(Is_dropout));
+                             // auto kernel = &flash_fwd_kernel<Kernel_traits, false, Is_causal, false, true, true, false>;
+                             if (smem_size >= 48 * 1024) {
+-                                C10_CUDA_CHECK(cudaFuncSetAttribute(
++                                CUDA_CHECK(cudaFuncSetAttribute(
+                                     kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+                             }
+                             // int ctas_per_sm;
+@@ -86,7 +97,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+                             //     &ctas_per_sm, kernel, Kernel_traits::kNThreads, smem_size);
+                             // printf("smem_size = %d, CTAs per SM = %d\n", int(smem_size), ctas_per_sm);
+                             kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
+-                            C10_CUDA_KERNEL_LAUNCH_CHECK();
++                            CUDA_KERNEL_LAUNCH_CHECK();
+                         });
+                     });
+                 });
+@@ -118,11 +129,11 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, true, Split, Append_KV>;
+                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, IsEvenKConst>;
+                                 if (smem_size >= 48 * 1024) {
+-                                    C10_CUDA_CHECK(cudaFuncSetAttribute(
++                                    CUDA_CHECK(cudaFuncSetAttribute(
+                                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+                                 }
+                                 kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
+-                                C10_CUDA_KERNEL_LAUNCH_CHECK();
++                                CUDA_KERNEL_LAUNCH_CHECK();
+                             });
+                         });
+                     });
+@@ -152,7 +163,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+             } else if (params.num_splits <= 128) {
+                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 7, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
+             }
+-            C10_CUDA_KERNEL_LAUNCH_CHECK();
++            CUDA_KERNEL_LAUNCH_CHECK();
+         });
+     }
+ }
+@@ -198,7 +209,7 @@ void run_mha_fwd_hdim64(Flash_fwd_params &params, cudaStream_t stream) {
+ template<typename T, bool Is_causal>
+ void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
+     constexpr static int Headdim = 96;
+-    auto dprops = at::cuda::getCurrentDeviceProperties();
++    auto dprops = params.dprop;
+     bool is_sm8x = dprops->major == 8 && dprops->minor > 0;
+     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+         // For sm86 or sm89, 64 x 64 is the fastest for causal (because it's square),
+@@ -222,7 +233,7 @@ void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
+ template<typename T, bool Is_causal>
+ void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
+     constexpr static int Headdim = 128;
+-    auto dprops = at::cuda::getCurrentDeviceProperties();
++    auto dprops = params.dprop;
+     bool is_sm8x = dprops->major == 8 && dprops->minor > 0;
+     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+         if constexpr(!Is_dropout) {
+@@ -257,7 +268,7 @@ void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
+ template<typename T, bool Is_causal>
+ void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
+     constexpr static int Headdim = 160;
+-    auto dprops = at::cuda::getCurrentDeviceProperties();
++    auto dprops = params.dprop;
+     bool is_sm8x = dprops->major == 8 && dprops->minor > 0;
+     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+         // For A100, H100, 128 x 32 is the fastest.
+@@ -308,7 +319,7 @@ void run_mha_fwd_hdim224(Flash_fwd_params &params, cudaStream_t stream) {
+     cudaError status_ = cudaDeviceGetAttribute(
+         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+     if (status_ != cudaSuccess) {
+-      C10_CUDA_CHECK(status_);
++      CUDA_CHECK(status_);
+     }
+     // printf("max_smem_per_block = %d\n", max_smem_per_block);
+     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+@@ -337,7 +348,7 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
+     status_ = cudaDeviceGetAttribute(
+         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+     if (status_ != cudaSuccess) {
+-      C10_CUDA_CHECK(status_);
++      CUDA_CHECK(status_);
+     }
+     // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
+     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {

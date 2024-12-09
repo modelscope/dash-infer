@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    cpu_avx.h
  */
+
 /*
    AVX implementation of sin, cos, sincos, exp and log
    Based on "sse_mathfun.h", by Julien Pommier

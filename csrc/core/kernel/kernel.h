@@ -5,3 +5,7 @@
 
 #pragma once
 #include <cpu/cpu_kernel.h>
+
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_kernel.h>
+#endif

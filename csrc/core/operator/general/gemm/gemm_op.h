@@ -48,7 +48,7 @@ class GemmOpBase : public AsOperator {
   int ldb_;
   int ldc_;
   float alpha_;
-  bool is_pooler_;
+  bool is_pooler_;  // for bert pooler
   bool is_split_k_;
   UnaryType activation_;
   BinaryType binary_type_ = BINARYTYPE_UNDEFINED;

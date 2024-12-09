@@ -19,8 +19,12 @@ static inline void setThreadName(int id, const std::string& baseName) {
   auto handle = pthread_self();
   pthread_setname_np(handle, threadName.str().c_str());
 }
+#elif defined(_WIN32)
+
+// TODO
+static inline void setThreadName(int id, const std::string& baseName) {}
 #else
-#error "Unsupported platform"
+#error "Not support platform"
 #endif
 
 #endif  // HIE_ALLSPARK_CSRC_COMMON_THREAD_UTILS_H_

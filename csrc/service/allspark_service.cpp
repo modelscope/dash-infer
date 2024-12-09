@@ -90,7 +90,10 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
         client_pid_(pid),
         req_manager_(std::make_unique<RequestManager>()),
         shut_down_promise_(std::make_unique<std::promise<void>>()) {
+    // init log
     allspark_service::as_rpc_init_log("as_service");
+    // init mpi, only valid for CPU
+    // engine_.SetDeviceIds({0});
   };
 
   Status BuildModelFromConfigStruct(
@@ -183,12 +186,22 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
         req_data->shared_inputs);
     auto status = engine_.StartRequest(model_name.c_str(), req_data->req,
                                        &req_data->handle, &req_data->queue);
+    // for (auto &input : *req_data->req->inputs) {
+    //     LOG(INFO) << "name: " << input.first
+    //               << " device_type: " <<
+    //               static_cast<int>(input.second->dl_tensor.device.device_type)
+    //               << " status: " << static_cast<int>(status)
+    //               << " first two tokens after start request: " <<
+    //               *((int64_t*)input.second->dl_tensor.data)
+    //               << " " << *((int64_t*)input.second->dl_tensor.data+1)
+    //               << " seq_len: " << input.second->dl_tensor.shape[1];
+    // }
     if (status == allspark::AsStatus::ALLSPARK_SUCCESS) {
       DLOG(INFO) << "add request data req: " << req_data->req
-                 << " uuid: " << req_data->req->config.uuid;
-      req_manager_->addRequest(req_data->req->config.uuid, req_data);
+                 << " uuid: " << req_data->req->config.user_request_id;
+      req_manager_->addRequest(req_data->req->config.user_request_id, req_data);
     }
-    response->set_uuid(req_data->req->config.uuid);
+    response->set_uuid(req_data->req->config.user_request_id);
     response->set_as_status(static_cast<allspark_service::AS_STATUS>(status));
     return Status::OK;
   }
@@ -201,10 +214,13 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     if (!req_data) {
       LOG(ERROR) << "StopRequest RequestData was not found, uuid: "
                  << request->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     auto status =
         engine_.StopRequest(request->model_name().c_str(), req_data->handle);
+    // // erase key/value
+    // req_manager_->eraseRequest(request->uuid());
     response->set_uuid(request->uuid());
     response->set_as_status(static_cast<allspark_service::AS_STATUS>(status));
     return Status::OK;
@@ -218,6 +234,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     if (!req_data) {
       LOG(ERROR) << "ReleaseRequest RequestData was not found, uuid: "
                  << request->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     DLOG(INFO) << "service release request uuid: " << request->uuid();
@@ -307,6 +324,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     if (!req_data) {
       LOG(ERROR) << "GenerateStatus RequestData was not found, uuid: "
                  << uuid->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     auto status = req_data->queue->GenerateStatus();
@@ -323,6 +341,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     if (!req_data) {
       LOG(ERROR) << "GeneratedLength RequestData was not found, uuid: "
                  << uuid->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     auto size = req_data->queue->GeneratedLength();
@@ -336,9 +355,22 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     auto req_data = req_manager_->getRequest(uuid->uuid());
     if (!req_data) {
       LOG(ERROR) << "Get RequestData was not found, uuid: " << uuid->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     auto ele = req_data->queue->Get();
+    // LOG(INFO) << "AllSparkServiceImpl::Get() req_data: " << req_data.get()
+    //           << " req: " << req_data->req.get()
+    //           << " ele: " << ele.get()
+    //           << " uuid: " << uuid->uuid();
+    // for (auto &input : *req_data->req->inputs) {
+    //     LOG(INFO) << "name: " << input.first
+    //               << " device_type: " <<
+    //               static_cast<int>(input.second->dl_tensor.device.device_type)
+    //               << " first two tokens after start request: " <<
+    //               *((int64_t*)input.second->dl_tensor.data)
+    //               << " " << *((int64_t*)input.second->dl_tensor.data+1);
+    // }
     allspark_service::makeGeneratedElementsProtoFromAs(response, ele);
     return Status::OK;
   }
@@ -350,6 +382,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
     auto req_data = req_manager_->getRequest(uuid->uuid());
     if (!req_data) {
       LOG(ERROR) << "Get RequestData was not found, uuid: " << uuid->uuid();
+      // TODO, return errror???
       return Status::OK;
     }
     auto ele = req_data->queue->GetNoWait();
@@ -358,6 +391,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
   }
 
   std::string GetServerAddress(int rank_id) {
+    // auto rank = engine_.GetRankId();
     std::stringstream ss;
     ss << base_addr_ << client_pid_ << "_rank_" << rank_id;
     return ss.str();
@@ -392,6 +426,7 @@ class AllSparkServiceImpl final : public allspark_service::AllSpark::Service {
   }
 
  private:
+  // address: base_addr_ + client_pid_ + "_rank_" + numa_index
   const std::string base_addr_ = "unix:/tmp/allspark.pid_";
   allspark::AsEngine engine_;
   std::unique_ptr<Server> server_;

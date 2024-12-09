@@ -6,8 +6,11 @@
 #include "split_op.h"  // NOLINT
 
 #include <core/kernel/kernel.h>
-#include <cpu/cpu_context.h>
 #include <utility/datatype_dispatcher.h>
+#ifdef ENABLE_CUDA
+#include <cuda/cuda_context.h>
+#endif
+#include <cpu/cpu_context.h>
 #include <weight/weight_loader.h>
 
 namespace allspark {
@@ -34,6 +37,15 @@ AsStatus SplitOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
           WeightSplitterFactory::GetSplitterByMode(split_type_, rank_info_);
       break;
     }
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      rank_info_ = RankInfo(gpu_ctx->GetRank(), gpu_ctx->GetNranks());
+      splitter_ =
+          WeightSplitterFactory::GetSplitterByMode(split_type_, rank_info_);
+      break;
+    }
+#endif
     default:
       LOG(ERROR) << "Split Operator does not support "
                  << DeviceType_Name(backend) << " device type" << std::endl;
@@ -79,6 +91,12 @@ AsStatus SplitOp::Forward() {
   TensorInfo tensor_info = TensorInfo();
   tensor_info.shape = Shape{batch * seq, k};
   switch (ctx_->GetDeviceType()) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      splitter_->CopyWeight(tensor_info, out_tensor, in_tensor, nullptr, 0);
+      break;
+    }
+#endif
     case DeviceType::CPU: {
       splitter_->CopyWeight(tensor_info, out_tensor, in_tensor, nullptr, 0);
       break;
@@ -91,5 +109,6 @@ AsStatus SplitOp::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-REGISTER_OP("Split", CPU, SplitOp)
+REGISTER_OP(Split, CUDA, SplitOp)
+REGISTER_OP(Split, CPU, SplitOp)
 }  // namespace allspark

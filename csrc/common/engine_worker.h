@@ -16,6 +16,7 @@ class Worker {
  public:
   Worker(int rank, int nranks, int device_id)
       : rank_(rank), nranks_(nranks), device_id_(device_id) {}
+  virtual ~Worker() {}
 
   virtual AsStatus InitCCL(int rank, int nranks) = 0;
   virtual void SetWorkerDeviceId(int device_id) = 0;
@@ -23,16 +24,19 @@ class Worker {
   virtual AsStatus SetNumThreads(int nums) {
     return AsStatus::ALLSPARK_SUCCESS;
   }
-  AsStatus BuildModel(const TransformerProto& model_proto,
-                      std::shared_ptr<WeightManager> weight_manager,
-                      std::shared_ptr<ModelWeightHandler> model_handler,
-                      const DeviceContext* main_ctx);
+  AsStatus BuildModel(
+      const TransformerProto& model_proto,
+      std::shared_ptr<WeightManager> weight_manager,
+      std::shared_ptr<ModelWeightHandler> model_handler,
+      const DeviceContext* main_ctx,
+      PrefixCacheCoordinator::Ptr prefix_cache_coordinator = nullptr);
 
   AsStatus RebuildModelFromBuffer(
       const std::unique_ptr<TransformerProto>& model_ir);
 
   AsStatus StartRequestImpl(std::shared_ptr<RequestHandle> request_handle,
-                            TensorMap* outputs, GenerateConfig& gen_cfg);
+                            std::string uuid, TensorMap* outputs,
+                            const GenerateConfig& gen_cfg);
 
   int GetUnFinishedRequest();
   Request* GetRequestById(std::string request_id);
@@ -40,15 +44,28 @@ class Worker {
   AsStatus ReleaseRequest(std::string request_id);
 
   AsStatus RunTextGenerationContinue();
-  AsStatus RunTextGenerationContext();
+  AsStatus RunTextGenerationContext(bool is_new_context);
   AsStatus AllocDecoderMemory();
-  AsStatus Warmup(int64_t bytes_available, int64_t bytes_per_req);
+  AsStatus Warmup(int64_t bytes_available, int64_t bytes_runtime);
   int64_t GetAvailableMemoryBytes();
+  int64_t GetOccupiedMemoryBytes();
+  int64_t GetTotalMemoryBytes();
 
+#if ENABLE_SPAN_ATTENTION
+  int64_t GetFreeFrame();
+#endif
   void UpdateAsEngineStat(AsEngineStat* as_stat);
   DeviceContext* GetDeviceContext() { return device_ctx_.get(); }
 
-  void ResetProfiler();
+  void ResetProfiler() { model_->ResetProfiler(); }
+
+#if ENABLE_SPAN_ATTENTION
+  void ResetPrefixCache() { model_->ResetPrefixCache(); }
+  void SetPrefixCacheSeqlenThre(int thre) {
+    model_->SetPrefixCacheSeqlenThre(thre);
+  }
+#endif
+
   std::string GetOpProfilingInfo();
 
   AsStatus UnloadModelFromDeviceMemory();
@@ -63,6 +80,8 @@ class Worker {
     weight_manager_ = manager;
   }
 
+  AsStatus LoadLoraByName(const std::string lora_name);
+  AsStatus UnloadLoraByName(const std::string lora_name);
   std::unique_ptr<AsModel>& GetModel() { return model_; }
 
  protected:
@@ -77,6 +96,17 @@ class Worker {
   Worker() = delete;
 };
 
+#ifdef ENABLE_CUDA
+class CudaWorker : public Worker {
+ public:
+  CudaWorker(int rank, int nranks, const ncclUniqueId& id, int device_id);
+  void SetWorkerDeviceId(int device_id) override;
+  AsStatus InitCCL(int rank, int nranks) override;
+
+ private:
+  const ncclUniqueId nccl_id_;
+};
+#endif
 class CpuWorker : public Worker {
  public:
   CpuWorker(int rank, int nranks, int device_id);

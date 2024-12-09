@@ -2,7 +2,7 @@ FROM dashinfer/base_ubuntu_x86:v1.2.1
 
 WORKDIR /workspace
 
-COPY ./dashinfer_worker.py ./
+COPY ./allspark_worker.py ./
 COPY ./fschat_entrypoint.sh ./
 
 SHELL ["conda", "run", "-n", "py38env", "/bin/bash", "-c"]

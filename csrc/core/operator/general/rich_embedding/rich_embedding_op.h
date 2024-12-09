@@ -15,7 +15,7 @@ class RichEmbeddingOp : public AsOperator {
  public:
   using AsOperator::AsOperator;
   explicit RichEmbeddingOp(const std::string& op_type = "")
-      : AsOperator(op_type), hidden_size_(768), batch_size_(1), seq_len_(1) {}
+      : AsOperator(op_type), hidden_size_(768), batch_size_(1) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
   AsStatus Reshape(RuntimeContext* runtime_ctx) override;
@@ -24,8 +24,6 @@ class RichEmbeddingOp : public AsOperator {
  private:
   int hidden_size_;
   int batch_size_;
-  int seq_len_;
-  std::unique_ptr<AsTensor> input_ids_host_;
   std::unique_ptr<AsTensor> embedding_device_;
 };
 }  // namespace allspark

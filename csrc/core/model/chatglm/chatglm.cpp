@@ -22,14 +22,18 @@ AsStatus ChatGLMModel::Init(const TransformerProto& model_proto,
 }
 
 AsStatus ChatGLMModel::Forward(const TensorMap& inputs, TensorMap* outputs) {
+  // GenerateConfig gen_cfg;
   const Shape& in_shape = inputs.at("input_ids")->GetShape();
   int batch_size = in_shape[0];
   int in_length = in_shape[1];
   gen_ctx_->batch_size = batch_size;
   gen_ctx_->max_length = in_length;
   gen_ctx_->only_decoder = true;
+  // use default:
+  // gen_ctx_->generate_method = 0
+  // gen_ctx_->num_beams = 1;
+  // gen_ctx_->step = 0;
 
-  bool need_reshape = false;
   for (auto& t : inputs) {
     const std::string& name = t.first;
     if (tensors_.find(name) == tensors_.end()) {
@@ -47,10 +51,6 @@ AsStatus ChatGLMModel::Forward(const TensorMap& inputs, TensorMap* outputs) {
                  << ", please check input_shape, data_type or device_type."
                  << std::endl;
       return AsStatus::ALLSPARK_PARAM_ERROR;
-    }
-    // check shape
-    if (old_in_tensor->GetShape() != tensor->GetShape()) {
-      need_reshape = true;
     }
     tensors_[name] = tensor;
   }
@@ -100,6 +100,7 @@ AsStatus ChatGLMModel::Forward(const TensorMap& inputs, TensorMap* outputs) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+REGISTER_MODEL("ChatGLM_v1", ChatGLMModel)
 REGISTER_MODEL("ChatGLM_v2", ChatGLM_v2Model)
 REGISTER_MODEL("ChatGLM_v3", ChatGLM_v3Model)
 REGISTER_MODEL("ChatGLM_v4", ChatGLM_v4Model)

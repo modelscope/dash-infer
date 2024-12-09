@@ -2,6 +2,7 @@
  * Copyright (c) Alibaba, Inc. and its affiliates.
  * @file    memory_reuser.h
  */
+
 #include <core/tensor/tensor.h>
 
 #include "device_context.h"
@@ -34,6 +35,14 @@ class MemoryReuser {
  public:
   void binding_with_algo_0(std::vector<std::vector<AsTensor*>>& visit_list,
                            DeviceContext* ctx);
+
+  // size_t caculate_size_algo_1(const std::string& graph_name, Workspace& ws,
+  //                             std::map<DeviceType, interval_list_t>&
+  //                             intervals_map, assign_strategy_t& strategy);
+
+  // void binding_with_algo_1(const std::string& graph_name,
+  //                          std::vector<std::vector<AsTensor*>>& visit_list,
+  //                          Workspace& ws, const assign_strategy_t& strategy);
 };
 
 }  // namespace allspark

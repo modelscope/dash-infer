@@ -5,15 +5,19 @@
 
 #include <core/kernel/kernel.h>
 #include <cpu/cpu_context.h>
-#include <mpi.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <algorithm>
 #include <limits>
 #include <random>
 
-#include "cpu/mpi_utils.hpp"
 #include "generate_op.h"  // NOLINT
+
+#ifdef ENABLE_MULTINUMA
+#include <mpi.h>
+
+#include "cpu/mpi_utils.hpp"
+#endif
 
 namespace allspark {
 
@@ -29,7 +33,7 @@ AsStatus copy_matrix_cpu(DataType dtype, void* in_ptr, void* new_ptr, int M,
 }
 AsStatus logprobs_cpu(DataType dtype, void* in_logits, int64_t* out_tokens,
                       void* token_logprobs, void* logprobs, void* topk_value,
-                      int64_t* topk_indice, int batch_size, int length,
+                      int* topk_indice, int batch_size, int length,
                       RuntimeContext* runtime_ctx, void* ws_ptr,
                       size_t ws_bytes, const DeviceContext* ctx) {
   auto functor = [&]<typename T>() {
@@ -55,36 +59,6 @@ AsStatus logprobs_cpu(DataType dtype, void* in_logits, int64_t* out_tokens,
   DispatchCPU(dtype, functor);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus process_bad_words_ids_cpu(GenerateContext* gen_ctx,
-                                   int* bad_words_ids_ptr,
-                                   std::vector<int>& bad_words_ids_size) {
-  /*
-      copy gen_cfg.bad_words_ids to bad_words_ids_
-      different requests may have different gen_cfg
-      thus we have to update bad_words_ids_ every time
-  */
-  int num_bad_words = gen_ctx->gen_cfg.bad_words_ids.size();
-  if (num_bad_words > 1024) {
-    LOG(ERROR) << "Assert bad_word_id's max size is 1024" << std::endl;
-    return AsStatus::ALLSPARK_PARAM_ERROR;
-  }
-  bad_words_ids_size.resize(num_bad_words);
-  int* cur_words = bad_words_ids_ptr;
-  int i = 0;
-  for (auto& vec : gen_ctx->gen_cfg.bad_words_ids) {
-    if (vec.size() > 1024) {
-      LOG(ERROR) << "Assert bad_word_id's max "
-                    "size is 1024"
-                 << std::endl;
-      return AsStatus::ALLSPARK_PARAM_ERROR;
-    }
-    memcpy(cur_words, vec.data(), sizeof(int) * vec.size());
-
-    cur_words += vec.size();
-    bad_words_ids_size[i++] = vec.size();
-  }
-  return AsStatus::ALLSPARK_SUCCESS;
-}
 
 void gen_beam_init_cpu(DataType dtype, void* beam_score, void* hyps_beam_score,
                        int64_t* hyps_beam_idx, int* eos_count, int batch_size,
@@ -98,42 +72,59 @@ void gen_beam_init_cpu(DataType dtype, void* beam_score, void* hyps_beam_score,
   DispatchCPU(dtype, functor);
 }
 
-AsStatus gen_process_logits_cpu(DataType dtype, int64_t* in_tokens,
-                                void* in_logits, int batch_size, int length,
+AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
+                                void* ori_in_logits, int batch_size, int length,
                                 const DeviceContext* ctx,
-                                GenerateContext* gen_ctx,
-                                std::unique_ptr<AsTensor>& bad_words_ids,
-                                void* ws_ptr, size_t ws_bytes) {
-  int* bad_words_ids_ptr = static_cast<int*>(bad_words_ids->GetDataPtr());
+                                RuntimeContext* runtime_ctx,
+                                BatchGencfg batch_gencfg, void* ws_ptr,
+                                size_t ws_bytes) {
+  // for batch
   std::vector<int> bad_words_ids_size(0);
+  if (runtime_ctx->is_context) {
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+    int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens);
+    void* in_logits = (ori_in_logits);
+    auto functor = [&]<typename T>() {
+      T* typed_in = static_cast<T*>(in_logits);
+      int cur_len = gen_ctx->step + gen_ctx->in_length_bias;
+      int64_t in_ids_len = batch_size * ctx->GetModelMaxLength();
 
-  AsStatus stat =
-      process_bad_words_ids_cpu(gen_ctx, bad_words_ids_ptr, bad_words_ids_size);
-  if (stat != AsStatus::ALLSPARK_SUCCESS) return stat;
+      cpu::LogitsProcessor(typed_in, in_tokens, in_ids_len, batch_size, cur_len,
+                           ctx->GetModelMaxLength(), length, nullptr,
+                           bad_words_ids_size, gen_ctx->gen_cfg, ws_ptr,
+                           ws_bytes);
+    };
+    DispatchCPU(dtype, functor);
+  } else {
+    for (int i = 0; i < batch_size; i++) {
+      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+      int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens) +
+                           gen_ctx->current_batch * ctx->GetModelMaxLength();
+      void* in_logits = ((char*)ori_in_logits + i * length * SizeofType(dtype));
+      auto functor = [&]<typename T>() {
+        T* typed_in = static_cast<T*>(in_logits);
+        int cur_len = gen_ctx->step + gen_ctx->in_length_bias;
+        int64_t in_ids_len = batch_size * ctx->GetModelMaxLength();
 
-  auto functor = [&]<typename T>() {
-    T* typed_in = static_cast<T*>(in_logits);
-    int cur_len = gen_ctx->step + gen_ctx->in_length_bias;
-    int64_t in_ids_len = batch_size * ctx->GetModelMaxLength();
-
-    cpu::LogitsProcessor(typed_in, in_tokens, in_ids_len, batch_size, cur_len,
-                         ctx->GetModelMaxLength(), length, bad_words_ids_ptr,
-                         bad_words_ids_size, gen_ctx->gen_cfg, ws_ptr,
-                         ws_bytes);
-  };
-
-  DispatchCPU(dtype, functor);
+        cpu::LogitsProcessor(typed_in, in_tokens, in_ids_len, 1, cur_len,
+                             ctx->GetModelMaxLength(), length, nullptr,
+                             bad_words_ids_size, gen_ctx->gen_cfg, ws_ptr,
+                             ws_bytes);
+      };
+      DispatchCPU(dtype, functor);
+    }
+  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
 AsStatus gen_sample_cpu(DataType dtype, int64_t* total_out_tokens,
                         void* total_topk_value, void* total_topp_value,
-                        int64_t* total_topk_indice, void* total_in_logits,
+                        int* total_topk_indice, void* total_in_logits,
                         void* sample_states_vec_unused, int total_batch_size,
                         int max_k, int length, int* k_arr_list,
                         float* p_arr_list, float* temperature_arr_unused,
                         const DeviceContext* ctx, RuntimeContext* runtime_ctx,
-                        void* ws_ptr, size_t ws_bytes) {
+                        void* ws_ptr, size_t ws_bytes, void* device_prop) {
   DLOG(INFO) << "cpu_sample" << std::endl;
 
   constexpr int batch_size = 1;
@@ -184,6 +175,8 @@ void gen_sample_init_cpu(void* sample_state, unsigned long long seed,
                          int batch_size, const DeviceContext* ctx) {
   cpu::SampleKernelInitLauncher(sample_state, seed, batch_size);
 }
+
+#ifdef ENABLE_MULTINUMA
 AsStatus MpiBcast(std::shared_ptr<AsTensor> tensor) {
   void* out = tensor->GetDataPtr();
   int count = tensor->GetShape().Count();
@@ -193,4 +186,6 @@ AsStatus MpiBcast(std::shared_ptr<AsTensor> tensor) {
 
   return AsStatus::ALLSPARK_SUCCESS;
 }
+#endif
+
 }  // namespace allspark

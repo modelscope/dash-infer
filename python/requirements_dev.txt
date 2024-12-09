@@ -1,0 +1,33 @@
+transformers>=4.41.0
+modelscope>=1.9.2
+
+
+# following are required if want to download model from modelscope.
+sentencepiece
+accelerate
+transformers_stream_generator==0.0.4
+tiktoken
+einops
+scipy
+peft
+deepspeed
+
+optimum
+auto-gptq
+
+# xformers
+# transformers>=4.32.0
+
+safetensors
+
+ninja
+
+# for unit test
+Levenshtein
+jieba
+scikit-learn
+oss2
+
+
+# build
+auditwheel==3.3.1
