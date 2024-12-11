@@ -471,10 +471,10 @@ def get_vl_request(
                 else max_completion_tokens + len(input_ids)
             ),
             "min_length": 5,
-            "repetition_penalty": frequency_penalty,  # or presence_penalty?
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
             "length_penalty": 1,
             "eos_token_id": context.get("eos_token_id"),
-            # "stop_words_ids": [] if os.getenv("VL_DEBUG") == "1" else context.get("stop_words_ids"),
             "seed": 1234567,
         }
         vl_request.gen_cfg = generate_config
