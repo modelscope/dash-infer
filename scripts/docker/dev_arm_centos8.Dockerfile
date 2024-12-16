@@ -66,6 +66,15 @@ RUN wget "ftp://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" && \
     cd automake-1.15.1 && ./configure --prefix=/usr/ && make -j && make install && \
     cd .. && rm -rf automake-1.15.1.tar.gz automake-1.15.1
 
+RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz && \
+    tar -xzf 0.14.5.tar.gz && \
+    cd patchelf-0.14.5 && \
+    ./bootstrap.sh && \
+    ./configure && \
+    make install && \
+    cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
+RUN pip3 install auditwheel==6.1.0
+
 RUN wget "https://xxxxxx/conan_allspark_source_arm_20241119.tar" && \
     tar -xvf conan_allspark_source_arm_20241119.tar && \
     mv conan_allspark_source_arm_20241119 /root/.conan && \

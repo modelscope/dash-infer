@@ -1,57 +1,28 @@
 name: Release Packages
 
 on:
- push:
-   tags:
-     - 'v[0-9]+.[0-9]+.[0-9]+'
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 # Needed to create release and upload assets
 permissions:
   contents: write
 
 jobs:
-  build-deb:
-    runs-on: [self-hosted, Linux, X64]
-    container:
-      image: registry-1.docker.io/dashinfer/dev-ubuntu-22.04-x86:v1
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v3
-        
-    - name: Pull LFS
-      run: |
-        git lfs pull
-        
-    - name: Build deb package
-      run: |
-        git fetch --tags
-        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        source activate ds_py
-        AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM="x86" \
-        AS_BUILD_PACKAGE=ON \
-        bash build.sh
-        
-    - name: Upload deb package
-      uses: actions/upload-artifact@v3
-      with:
-        name: dashinfer-deb
-        path: build/*.deb
-
-  build-rpm:
+  build-tgz:
     strategy:
       matrix:
         arch: [X64, ARM64]
-        image: ["dev-centos7-x86:v1", "dev-alinux-arm:v1"]
+        image: ["dev-centos7-x86:v2", "dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
         exclude:
           - arch: X64
-            image: "dev-alinux-arm:v1"
+            image: "dev-centos8-arm:v2"
           - arch: ARM64
-            image: "dev-centos7-x86:v1"
+            image: "dev-centos7-x86:v2"
+          - arch: ARM64
+            image: "dev-centos7-cu124:v1"
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
@@ -67,40 +38,61 @@ jobs:
       uses: actions/checkout@v3
       with:
         lfs: true
-        
+
     - name: Pull LFS
       run: |
+        git lfs install --force
         git lfs pull
-        
-    - name: Build rpm package
+
+    - name: Init submodule
+      run: |
+        git submodule init
+        git submodule update
+
+    - name: Build tgz package
       run: |
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        source /opt/rh/devtoolset-7/enable
-        source activate ds_py
-        AS_RELEASE_VERSION=$VERSION_NUMBER \
-        AS_PLATFORM=$( [[ "${{ matrix.arch }}" = "X64" ]] && echo "x86" || echo "armclang" ) \
-        AS_BUILD_PACKAGE=ON \
-        bash build.sh
+        source /root/.bashrc
+
+        export AS_RELEASE_VERSION=$VERSION_NUMBER
+        export AS_BUILD_PACKAGE=ON
+
+        if command -v nvcc &> /dev/null
+        then
+            export AS_PLATFORM="cuda"
+            export AS_CUDA_SM="'70;75;80;86;89;90a'"
+            bash scripts/release/cpp_build_cuda.sh
+        else
+            # export ENABLE_MULTINUMA="ON"
+            if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
+                export AS_PLATFORM="armclang"
+            else
+                export AS_PLATFORM="x86"
+            fi
+            bash build.sh
+        fi
   
-    - name: Upload rpm package
+    - name: Upload tgz package
       uses: actions/upload-artifact@v3
       with:
-        name: dashinfer-rpm-${{ matrix.arch }}
-        path: build/*.rpm
-      
+        name: dashinfer-tgz-${{ matrix.arch }}
+        path: build/*.tar.gz
+
 
   build-wheels:
     strategy:
       matrix:
         arch: [X64, ARM64]
-        image: ["dev-manylinux-x86:v1", "dev-manylinux-arm:v1"]
+        image: ["dev-centos7-x86:v2", "dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
         exclude:
           - arch: X64
-            image: "dev-manylinux-arm:v1"
+            image: "dev-centos8-arm:v2"
           - arch: ARM64
-            image: "dev-manylinux-x86:v1"
+            image: "dev-centos7-x86:v2"
+          - arch: ARM64
+            image: "dev-centos7-cu124:v1"
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
@@ -114,12 +106,31 @@ jobs:
       with:
         lfs: true
         
+    - name: Pull LFS
+      run: |
+        git lfs install --force
+        git lfs pull
+
+    - name: Init submodule
+      run: |
+        git submodule init
+        git submodule update
+
     - name: Build manylinux wheels
       run: |
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        source /root/.bashrc
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_build.sh
+        export AS_RELEASE_VERSION=$VERSION_NUMBER
+
+        if command -v nvcc &> /dev/null
+        then
+            export AS_CUDA_SM="'70;75;80;86;89;90a'"
+            bash scripts/release/python_manylinux_build_cuda.sh
+        else
+            bash scripts/release/python_manylinux_build.sh
+        fi
 
     - name: Upload wheels
       uses: actions/upload-artifact@v3
@@ -127,56 +138,50 @@ jobs:
         name: python-manylinux-wheels-${{ matrix.arch }}
         path: python/wheelhouse/*-manylinux*.whl
         
-  test:
-    strategy:
-      matrix:
-        arch: [X64, ARM64]
-        image: ["test-ubuntu-x86:v1", "test-centos-arm:v1"]
-        exclude:
-          - arch: X64
-            image: "test-centos-arm:v1"
-          - arch: ARM64
-            image: "test-ubuntu-x86:v1"
-    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
-    container:
-      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
-      volumes:
-        - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
-      options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
-    needs: build-wheels
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v3
+  # test:
+  #   strategy:
+  #     matrix:
+  #       arch: [X64, ARM64]
+  #       image: ["test-ubuntu-x86:v1", "test-centos-arm:v1"]
+  #       exclude:
+  #         - arch: X64
+  #           image: "test-centos-arm:v1"
+  #         - arch: ARM64
+  #           image: "test-ubuntu-x86:v1"
+  #   runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
+  #   container:
+  #     image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+  #     volumes:
+  #       - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
+  #     options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
+  #   needs: build-wheels
+  #   steps:
+  #   - name: Check out code
+  #     uses: actions/checkout@v3
         
-    - name: Download wheels
-      uses: actions/download-artifact@v3
-      with:
-        name: python-manylinux-wheels-${{ matrix.arch }}
-        path: python/wheelhouse
+  #   - name: Download wheels
+  #     uses: actions/download-artifact@v3
+  #     with:
+  #       name: python-manylinux-wheels-${{ matrix.arch }}
+  #       path: python/wheelhouse
         
-    - name: Test manylinux wheels
-      run: |
-        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
+  #   - name: Test manylinux wheels
+  #     run: |
+  #       TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+  #       VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+  #       AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
 
   publish:
     runs-on: [self-hosted, Linux]
-    needs: [build-deb, build-rpm, test]
+    needs: [build-tgz, build-wheels]
     strategy:
       matrix:
         arch: [X64, ARM64]
     steps:
-    - name: Download deb packages
+    - name: Download tgz packages
       uses: actions/download-artifact@v3
       with:
-        name: dashinfer-deb
-        path: release/
-      
-    - name: Download rpm packages
-      uses: actions/download-artifact@v3
-      with:
-        name: dashinfer-rpm-${{ matrix.arch }}
+        name: dashinfer-tgz-${{ matrix.arch }}
         path: release/
 
     - name: Download python wheels
@@ -189,6 +194,3 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: release/*
-    
-
-    

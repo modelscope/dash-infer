@@ -32,9 +32,10 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../interface)
+set_target_properties(allspark_daemon PROPERTIES INSTALL_RPATH "$ORIGIN:$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 
 add_library(allspark_client STATIC ${PROTO_SVC_SRCS} ${PROTO_SVC_GRPC_SRC} allspark_client.cpp allspark_client_impl.cpp allspark_service_parallel.cpp)
-target_link_libraries(allspark_client CONAN_PKG::grpc CONAN_PKG::protobuf CONAN_PKG::glog ${THREAD_LIB})
+target_link_libraries(allspark_client allspark_framework CONAN_PKG::grpc CONAN_PKG::protobuf CONAN_PKG::glog ${THREAD_LIB})
 
 if (MEM_CHECK)
     target_link_options(allspark_client PUBLIC "-fsanitize=address")
