@@ -63,7 +63,6 @@ jobs:
         then
             export AS_PLATFORM="cuda"
             export AS_CUDA_SM="'70;75;80;86;89;90a'"
-            bash scripts/release/cpp_build_cuda.sh
         else
             # export ENABLE_MULTINUMA="ON"
             if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
@@ -71,8 +70,9 @@ jobs:
             else
                 export AS_PLATFORM="x86"
             fi
-            bash build.sh
         fi
+
+        bash build.sh
   
     - name: Upload tgz package
       uses: actions/upload-artifact@v3
@@ -191,6 +191,6 @@ jobs:
         path: release/
 
     - name: Release all packages
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v1
       with:
         files: release/*
