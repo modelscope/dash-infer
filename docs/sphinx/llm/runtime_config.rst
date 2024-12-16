@@ -78,11 +78,10 @@ Sequence Length and Batch Size
 - ``max_prefill_length(length: int)``: Sets the maximum prefill length that will be processed in one context inference; if input length is greater than
   this length, it will be process in multiple context inference steps.
 
-Prefix Cache Configuration
+Prefix Caching Configuration
 --------------------------
 
-- ``prefill_cache(enable=True)``: Enables or disables the prefix cache.
-- ``prefix_cache_ttl(ttl: int)``: Prefix cache time to live, default value is 300s.
+See :doc:`Prefix Caching <../llm/prefix_caching>`.
 
 KV Cache Quantization Configuration
 -----------------------------------

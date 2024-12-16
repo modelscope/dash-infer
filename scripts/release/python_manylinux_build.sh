@@ -15,13 +15,17 @@ pushd $SCRIPT_DIR
 # 捕获arch命令的输出
 architecture=$(arch)
 
+export AS_PYTHON_PKG_NAME="dashinfer-cpu"
+
 # 使用if-else结构进行条件判断
 if [ "${architecture}" == "aarch64" ]; then
     export PLAT=manylinux_2_28_aarch64
     export AS_PLATFORM=armclang
+    # export ENABLE_MULTINUMA="ON"
 else
     export PLAT=manylinux2014_x86_64
     export AS_PLATFORM=x86
+    # export ENABLE_MULTINUMA="ON"
 fi
 
 if [ -z "$PLAT" ] || [ -z "$AS_PLATFORM" ];
@@ -29,8 +33,6 @@ then
 	echo " please set PLAT and AS_PLATFORM  env, PLAT can be manylinux_2_28_aarch64 or manylinux2014_x86_64"
 	exit 1
 fi
-
-export AS_PYTHON_MANYLINUX=ON
 
 function repair_wheel {
     wheel="$1"
@@ -57,8 +59,9 @@ build_wheel_for_python() {
     conda install pybind11 -y
 
     pip install -r ${REPO_ROOT}/python/requirements_dev_cpu.txt -i https://mirrors.aliyun.com/pypi/simple/
-    python ${REPO_ROOT}/python/setup.py bdist_wheel
-    pip wheel ${REPO_ROOT}/python --no-deps -w ${REPO_ROOT}/python/wheelhouse/ --log wheel_log.txt
+    ln -sf ${REPO_ROOT}/python/dashinfer .
+    # python ${REPO_ROOT}/python/setup.py bdist_wheel
+    pip wheel ${REPO_ROOT}/python --no-deps -w ${REPO_ROOT}/python/wheelhouse/ --verbose
 
     conda deactivate
     # conda remove --name "$env_name" --all -y
@@ -69,7 +72,7 @@ build_wheel_for_python() {
 mkdir -p ${REPO_ROOT}/python/wheelhouse/
 
 for python_version in $BUILD_VERSION; do
-    build_wheel_for_python ${python_version}  2>&1 | tee whl_build_log_py${python_version//.}.txt
+    build_wheel_for_python ${python_version}  2>&1 | tee wheel_build_log_py${python_version//.}.txt
 done
 
 

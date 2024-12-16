@@ -33,14 +33,6 @@ Install python package by following command:
 - Install local package: `pip install dashinfer-allspark-<version>-xxx.whl`
 - Uninstall: `pip uninstall dashinfer-allspark -y`
 
-## Install C++ Pacakge
+## C++ Library
 
-for Ubuntu:
-
-- Install: `dpkg -i DashInfer-<version>-ubuntu.deb`
-- Uninstall: `dpkg -r DashInfer`
-
-for CentOS:
-
-- Install: `rpm -i DashInfer-<version>-centos.rpm`
-
+Download the *.tar.gz package, unzip it, and add it to the compile search path.

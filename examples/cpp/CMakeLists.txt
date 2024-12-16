@@ -12,6 +12,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # std::string crash.
 # add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
 
+if (DEFINED ENV{DASHINFER_INCLUDE_PATH})
+  include_directories($ENV{DASHINFER_INCLUDE_PATH})
+endif()
+
+if (DEFINED ENV{DASHINFER_LIBRARY_PATH})
+  link_directories($ENV{DASHINFER_LIBRARY_PATH})
+endif()
+
 ###########################################
 # Example 1: Single NUMA or GPU qwen v1 example.
 ###########################################
@@ -19,8 +27,7 @@ add_executable(
   example_qwen 0_basic/example_qwen.cpp tokenizer/tokenizer.cpp
                            tokenizer/base64.cpp)
 
-target_link_libraries(example_qwen PRIVATE allspark_framework
-                                                       )
+target_link_libraries(example_qwen PRIVATE allspark_framework)
 
 target_include_directories(example_qwen PRIVATE tokenizer utils)
 

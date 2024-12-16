@@ -20,7 +20,7 @@ NCCL_VERSION="${AS_NCCL_VERSION:-2.23.4}"
 system_nv_lib="${AS_SYSTEM_NV_LIB:-OFF}"
 build_type="${AS_BUILD_TYPE:-Release}"
 cuda_static="${AS_CUDA_STATIC:-OFF}"
-rpm_package="${AS_RPM_PACKAGE:-OFF}"
+build_package="${AS_BUILD_PACKAGE:-ON}"
 enable_glibcxx11_abi="${AS_CXX11_ABI:-OFF}"
 enable_span_attn="${ENABLE_SPAN_ATTENTION:-ON}"
 enable_multinuma="${ENABLE_MULTINUMA:-OFF}"
@@ -81,6 +81,7 @@ export PATH=`pwd`/bin:$PATH
 if [ "${with_platform,,}" == "cuda" ]; then
   cmake .. \
       -DCMAKE_BUILD_TYPE=${build_type} \
+      -DBUILD_PACKAGE=${build_package} \
       -DCONFIG_ACCELERATOR_TYPE=CUDA \
       -DCONFIG_HOST_CPU_TYPE=X86 \
       -DNCCL_VERSION=${NCCL_VERSION} \
@@ -97,9 +98,11 @@ if [ "${with_platform,,}" == "cuda" ]; then
 elif [ "${with_platform,,}" == "x86" ]; then
   cmake .. \
       -DCMAKE_BUILD_TYPE=${build_type} \
+      -DBUILD_PACKAGE=${build_package} \
       -DCONFIG_ACCELERATOR_TYPE=NONE \
       -DCONFIG_HOST_CPU_TYPE=X86 \
       -DENABLE_GLIBCXX11_ABI=${enable_glibcxx11_abi} \
+      -DBUILD_PYTHON=OFF \
       -DALLSPARK_CBLAS=MKL \
       -DENABLE_CUDA=OFF \
       -DENABLE_SPAN_ATTENTION=OFF \
@@ -108,10 +111,12 @@ elif [ "${with_platform,,}" == "x86" ]; then
 elif [ "${with_platform,,}" == "armclang" ]; then
   cmake .. \
       -DCMAKE_BUILD_TYPE=${build_type} \
+      -DBUILD_PACKAGE=${build_package} \
       -DCONFIG_ACCELERATOR_TYPE=NONE \
       -DCONFIG_HOST_CPU_TYPE=ARM \
       -DENABLE_BLADE_AUTH=${enable_blade_auth} \
       -DENABLE_GLIBCXX11_ABI=${enable_glibcxx11_abi} \
+      -DBUILD_PYTHON=OFF \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
       -DENABLE_ARMCL=ON \
       -DALLSPARK_CBLAS=BLIS \
@@ -134,7 +139,7 @@ make -j16 && make install
 
 
 if [ $? -eq 0 ]; then
-  if [ ${rpm_package} == "ON" ]; then
+  if [ ${build_package} == "ON" ]; then
   make package
   fi
 else

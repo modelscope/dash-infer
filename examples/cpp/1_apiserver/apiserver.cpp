@@ -394,8 +394,8 @@ int main(int argc, const char** argv) {
   auto all_exists = check_model_file_exists(model_path, tiktoken_file);
   if (!all_exists) return 1;
 
-  std::string dimodel_file = model_path + ".dimodel";
-  std::string ditensors_file = model_path + ".ditensors";
+  std::string dimodel_file = model_path + ".asgraph";
+  std::string ditensors_file = model_path + ".asparam";
 
   // create an inference engine instance.
   setup_tiktoken_tokenizer(tiktoken_file, tokenizer);

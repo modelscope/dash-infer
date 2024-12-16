@@ -56,7 +56,7 @@ Memory Mangament
        store kv cache.
      - float
      - ``0.0``
-     - float value between (0.0,1.0]
+     - float value between [0.0, 1.0]
 
 Logging
 =======

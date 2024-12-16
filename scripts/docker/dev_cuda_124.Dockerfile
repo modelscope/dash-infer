@@ -72,10 +72,7 @@ RUN conda config --set ssl_verify false
 RUN curl -LO https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-x86_64.sh \
     && bash ./cmake-3.27.9-linux-x86_64.sh --skip-license --prefix=/usr
 RUN pip3 install pytest
-RUN curl https://gosspublic.alicdn.com/ossutil/install.sh |  bash
 RUN conda install -y pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
-
-RUN ossutil config
 
 RUN yum install -y epel-release && yum install -y dnf
 RUN dnf makecache &&  dnf -y install ccache
@@ -91,26 +88,33 @@ RUN yum install -y bash-completion tig
 
 RUN yum install -y build-essential autoconf automake libtool ca-certificates
 
-RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz
-RUN tar -xzf 0.14.5.tar.gz && \
-    cd patchelf-0.14.5 && \
-    ./bootstrap.sh && \
-    ./configure && \
-    source /opt/rh/devtoolset-10/enable && make install && \
-    rm -rf patchelf-0.14.5 0.14.5.tar.gz && rm -rf patchelf-0.14.5
-
-RUN pip3 install auditwheel==6.1.0
-
 RUN yum install -y libtool flex
-
 RUN wget "ftp://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" && \
     tar -xvf automake-1.15.1.tar.gz && \
     cd automake-1.15.1 && ./configure --prefix=/usr/ && make -j && make install && \
     cd .. && rm -rf automake-1.15.1.tar.gz automake-1.15.1
 
-RUN wget "https://xxxxxx/conan_allspark_source_cuda124_20241121.tar" && \
-    tar -xvf conan_allspark_source_cuda124_20241121.tar && \
-    mv conan_allspark_source_cuda124_20241121 /root/.conan && \
-    rm -rf conan_allspark_source_cuda124_20241121.tar
+# git version required by github actions
+RUN yum install -y gettext
+RUN source /root/.bashrc && \
+    wget "https://github.com/git/git/archive/refs/tags/v2.47.0.tar.gz" && \
+    tar -xvf v2.47.0.tar.gz && cd git-2.47.0 && \
+    make configure && ./configure --prefix=/usr && \
+    make -j && make install &&\
+    cd .. && rm -rf v2.47.0.tar.gz git-2.47.0
+
+RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz && \
+    tar -xzf 0.14.5.tar.gz && \
+    cd patchelf-0.14.5 && \
+    ./bootstrap.sh && \
+    ./configure && \
+    source /opt/rh/devtoolset-10/enable && make install && \
+    cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
+RUN pip3 install auditwheel==6.1.0
+
+RUN wget "https://xxxxxx/conan_allspark_source_cuda124_20241203_verbose.tar" && \
+    tar -xvf conan_allspark_source_cuda124_20241203_verbose.tar && \
+    mv conan_allspark_source_cuda124_20241203_verbose /root/.conan && \
+    rm -rf conan_allspark_source_cuda124_20241203_verbose.tar
 
 WORKDIR /root/

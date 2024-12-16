@@ -30,10 +30,10 @@ CUDA
   - CUDA sdk version >= 11.4
   - cuBLAS: CUDA sdk provided
 
-conan
+Conan
 ,,,,,
 
- + **conan**:  C++ package management tools, can be installed by : `pip install conan==1.60.0`, only 1.60.0 is supported.
+ + **conan**:  C++ package management tools, can be installed by : ``pip install conan==1.60.0``, only 1.60.0 is supported.
 
  .. note:: if there is any package-not-found issue, please make sure your conan center is available. Reset it with this command: `conan remote add conancenter https://center.conan.io`
 
@@ -51,7 +51,7 @@ Leak check tool
 CPU
 ,,,
 
-For multi-NUMA inference, `numactl`, `openmpi` are required:
+For multi-NUMA inference, ``numactl``, ``openmpi`` are required:
 
 - for Ubuntu:
 
@@ -77,76 +77,96 @@ We have build some Docker image for easier development setup.
 .. code-block:: shell
 
   docker run -d --name="dashinfer-dev-cu124-${USER}" \
-    --shm-size=8g \
+    --shm-size=8g --gpus all \
     --network=host \
-    --gpus all \
-    -v $(pwd):/root/workspace/HIE-AllSpark \
+    -v $(pwd):/root/workspace/DashInfer \
     -w /root/workspace \
     -it registry-1.docker.io/dashinfer/dev-centos7-cu124
   docker exec -it "dashinfer-dev-cu124-${USER}" /bin/bash
 
-- YiTian 710 Develoment
+- CPU-only (Linux x86 server)
 
 .. code-block:: shell
 
   docker run -d --name="dashinfer-dev-${USER}" \
     --network=host \
-    -v $(pwd):/root/workspace/HIE-AllSpark \
+    -v $(pwd):/root/workspace/DashInfer \
+    -w /root/workspace \
+    -it registry-1.docker.io/dashinfer/dev-centos7-x86
+  docker exec -it "dashinfer-dev-${USER}" /bin/bash
+
+- CPU-only (Linux ARM server)
+
+.. code-block:: shell
+
+  docker run -d --name="dashinfer-dev-${USER}" \
+    --network=host \
+    -v $(pwd):/root/workspace/DashInfer \
     -w /root/workspace \
     -it registry-1.docker.io/dashinfer/dev-centos8-arm
   docker exec -it "dashinfer-dev-${USER}" /bin/bash
+
+.. note:: When creating a container for multi-NUMA inference, ``--cap-add SYS_NICE --cap-add SYS_PTRACE --ipc=host`` arguments are required, because components such as numactl and openmpi need the appropriate permissions to run. If you only need to use the single NUMA API, you may not grant this permission.
 
 
 Build from Source Code
 ======================
 
-.. tip:: Here we use CUDA 12.4 as the default CUDA version. If you want to change to a different version, you can use enviroment variable to control CUDA dependency version.
-
-
-Python package build
+Build Python Package
 ,,,,,,,,,,,,,,,,,,,,
 
-CUDA normal build:
+1. Build python package for CUDA:
 
 .. code-block:: bash
 
   cd python
-  AS_CUDA_VERSION="12.4" AS_NCCL_VERSION="2.23.4" AS_CUDA_SM="'80;86;89;90a'" AS_PLATFORM="cuda" python3 setup.py bdist_wheel
+  AS_CUDA_VERSION="12.4" AS_NCCL_VERSION="2.23.4" AS_CUDA_SM="'80;86;89;90a'" AS_PLATFORM="cuda" \
+  python3 setup.py bdist_wheel
 
-.. note:: The Python build only performs the `conan install` operation at the first time; subsequent builds will not conduct `conan install`. If you encounter issues, consider using `rm -rf ./python/build/temp.*` to re-run the entire process.
+2. Build python package for x86:
 
-.. note:: Change `AS_RELEASE_VERSION` enviroment var to change package version.
+.. code-block:: bash
 
-.. note:: To build an x86 or arm CPU only Python package, it's similar to CUDA build, but change the `AS_PLATFORM` environment variable to `x86` or `arm`.
+  cd python
+  AS_PLATFORM="x86" python3 setup.py bdist_wheel
+
+3. Build python package for arm:
+
+.. code-block:: bash
+
+  cd python
+  AS_PLATFORM="armclang" python3 setup.py bdist_wheel
+
+.. note:: 
+  - We use CUDA 12.4 as the default CUDA version. If you want to change to a different version, set ``AS_CUDA_VERSION`` to the target CUDA version.
+  - Set ``AS_RELEASE_VERSION`` enviroment variable to change package version.
+  - Set ``ENABLE_MULTINUMA=ON`` enviroment variable to enable multi-NUMA inference in CPU-only version.
 
 
-
-C++ package build
+Build C++ Libraries
 ,,,,,,,,,,,,,,,,,,,
 
-1. C++ lib build for CUDA
+1. Build C++ libraries for CUDA
 
 .. code-block:: bash
 
-  mkdir build;
-  AS_CUDA_VERSION="12.4" AS_NCCL_VERSION="2.23.4" AS_CUDA_SM="'80;86;89;90a'" ./build.sh
+  AS_CUDA_VERSION="12.4" AS_NCCL_VERSION="2.23.4" AS_CUDA_SM="'80;86;89;90a'" AS_PLATFORM="cuda" AS_BUILD_PACKAGE="ON" ./build.sh
 
 
-2. C++ lib build for x86
+2. Build C++ libraries for x86
 
 .. code-block:: bash
 
-  AS_PLATFORM="x86" ./build.sh
+  AS_PLATFORM="x86" AS_BUILD_PACKAGE="ON" ./build.sh
 
-3. C++ lib build for armclang
-
-ARM Compile require armcc to archive best performance, setup the compiler in enviroment var.
+3. Build C++ libraries for arm
 
 .. code-block:: bash
 
   export ARM_COMPILER_ROOT=/opt/arm/arm-linux-compiler-24.04_RHEL-8/   # change this path to your own
   export PATH=$PATH:$ARM_COMPILER_ROOT/bin
-  AS_PLATFORM="armclang" ./build.sh
+
+  AS_PLATFORM="armclang" AS_BUILD_PACKAGE="ON" ./build.sh
 
 Profiling
 ---------
@@ -156,9 +176,9 @@ Operator Profiling
 
 This section describes how to enable and utilize the operator profiling functionality.
 
-1. Enable OP profile data collection
+1. Enable OP profiling data collection
 
-To enable OP profiling, set the environment variable as follows:
+To enable OP profiling, set the environment variable ``AS_PROFILE=ON`` before running DashInfer.
 
 .. code-block:: bash
 
@@ -166,9 +186,9 @@ To enable OP profiling, set the environment variable as follows:
    # Then, run any Python program utilizing the DashInfer Engine.
 
 
-2. Print OP profile data
+2. Print OP pro
 
-   To view the profiling information, insert the following function call before deinitializing the engine, replacing model_name with your actual model's name:
+To view the profiling information, call the following function before deinitializing the engine:
 
 .. code-block:: bash
 
@@ -177,14 +197,13 @@ To enable OP profiling, set the environment variable as follows:
 .. tip:: Replace *model_name* with the name of your model.
 
 
-3. Analyze OP profile data
+3. Analyze OP profiling data
 
-   An OP profile data report begins with a section header marked by ***** <section> ***** followed by a detailed table. The report consists of three main sections:
+   An OP profiling data report begins with a section header marked by \*\*\* <section> \*\*\* followed by a detailed table. The report consists of three main sections:
 
    - reshape: Statistics on the cost of reshaping inputs for operators.
    - alloc: Measures the cost of memory allocation for paged KV cache.
    - forward: Focuses on the execution time of operators' forward passes; developers should closely examine this section.
-
 
    Below is an illustration of the table structure and the meaning of each column:
 
@@ -193,7 +212,6 @@ To enable OP profiling, set the environment variable as follows:
    3. **(min/max/ave)**:  Minimum, maximum, and average execution times in milliseconds.
    4. **total_ms**: The cumulative time spent on this operator.
    5. **percentage**: The operator's total time as a percentage of the overall profiling duration.
-   6. **rank**: This column is deprecated.
 
    An example snippet of the profiling output is shown below:
 
@@ -243,10 +261,10 @@ This section describes how to use controlled Nsys profiling to obtain decoder an
 **Steps:**
 
 0. **Disable Warm-up:** Set the environment variable `ALLSPARK_DISABLE_WARMUP=1` to disable the warm-up phase.
-1. **Enable Nsys Profiling Call:** In the file `cuda_context.cpp`, uncomment line 14 to enable the Nsys profiling call.
+1. **Enable Nsys Profiling Call:** Set ``#define ENABLE_NSYS_PROFILE 1`` in file `cuda_context.cpp`.
 2. **Model.cpp Configuration:**
-    - **Context Phase Profiling:** To profile the context phase, set the variable `PROFILE_CONTEXT_TIME_GPU` to `1`. This will initiate Nsys profiling on the 10th request and terminate the process after one context loop completes.
-    - **Generation Phase Profiling:** To profile the generation phase, set the variable `PROFILE_GENERATION_TIME_GPU` to `1`. Profiling will commence after reaching a concurrency (or batch size) specified by `PROFILE_GENERATION_TIME_BS` (adjust this value according to your needs). This allows you to profile the system under a fixed concurrency level.
+    - **Context Phase Profiling:** To profile the context phase, set ``#define PROFILE_CONTEXT_TIME_GPU 1`` in file `model.cpp`. This will initiate Nsys profiling on the 10th request and terminate the process after one context loop completes.
+    - **Generation Phase Profiling:** To profile the generation phase, set ``#define PROFILE_GENERATION_TIME_GPU 1`` in file `model.cpp`. Profiling will commence after reaching a concurrency (or batch size) specified by `PROFILE_GENERATION_TIME_BS` (adjust this value according to your needs). This allows you to profile the system under a fixed concurrency level.
 3. **ReCompile:** Recompile your package and install
 4. **Start Profiling:**  Execute your benchmark or server using the following command:
 

@@ -90,7 +90,7 @@ if (FLASHATTN_USE_STATIC_LIB)
 else()
   add_library(flash-attention::flash-attn SHARED IMPORTED)
   install(FILES ${FLASHATTN_LIBRARY_PATH}/libflash-attn.so
-          DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
+          DESTINATION ${CMAKE_INSTALL_LIBDIR})
   message(STATUS "libflash-attn.so installing path: ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 endif()
 
