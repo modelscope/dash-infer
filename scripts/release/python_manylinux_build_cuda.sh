@@ -3,7 +3,6 @@ set -e -x
 
 ALL_VERSION="3.8 3.9 3.10 3.11"
 BUILD_VERSION=${@:-$ALL_VERSION}
-CUDA_VERSION=$(nvcc --version | grep -oP 'release \K[\d.]+')
 
 echo " going to build python wheels with version: ${BUILD_VERSION}"
 
@@ -18,6 +17,8 @@ architecture=$(arch)
 
 export PLAT=manylinux2014_x86_64
 export AS_PLATFORM=cuda
+
+CUDA_VERSION=$(nvcc --version | grep -oP 'release \K[\d.]+')
 
 mkdir -p local_cuda_libs
 ln -sf /usr/local/cuda-${CUDA_VERSION}/targets/x86_64-linux/lib/stubs/libnvidia-ml.so local_cuda_libs/libnvidia-ml.so.1
@@ -36,7 +37,8 @@ function repair_wheel {
         echo "Skipping non-platform wheel $wheel"
     else
         # TODO: add lib path to build lib path
-        auditwheel repair "$wheel" --plat "$PLAT" -w ${REPO_ROOT}/python/wheelhouse/
+        auditwheel repair "$wheel" --plat "$PLAT" -w ${REPO_ROOT}/python/wheelhouse/ --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcudart.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12 --exclude libcuda.so.1 --exclude libnccl.so.2 --exclude libnvidia-ml.so.1 --exclude libcudart.so.12
+
     fi
 }
 

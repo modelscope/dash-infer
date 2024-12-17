@@ -191,6 +191,6 @@ jobs:
         path: release/
 
     - name: Release all packages
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v1
       with:
         files: release/*
