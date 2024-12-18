@@ -107,15 +107,19 @@ Launching with CLI
 You can also opt to install dashinfer-vlm locally and use command line to launch server.
 
 1. Pull dashinfer docker image (see :ref:`docker-label`)
-2. Download and extract the TensorRT GA build
+2. Install TensorRT Python package, and download TensorRT GA build from NVIDIA Developer Zone.
+
+Example: TensorRT 10.6.0.26 for CUDA 12.6, Linux x86_64
 
 .. code-block:: bash
 
+   pip install tensorrt
    wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.6.0/tars/TensorRT-10.6.0.26.Linux.x86_64-gnu.cuda-12.6.tar.gz
    tar -xvzf TensorRT-10.6.0.26.Linux.x86_64-gnu.cuda-12.6.tar.gz
-   export TRT_LIBPATH=`pwd`/TensorRT-10.6.0.26
+   export LD_LIBRARY_PATH=`pwd`/TensorRT-10.6.0.26/lib
 
-3. Install ``dashinfer-vlm``: ``pip install dashinfer-vlm``.
+3. Install dashinfer Python Package from `release <https://github.com/modelscope/dash-infer/releases>`_
+4. Install dashinfer-vlm: ``pip install dashinfer-vlm``.
 
 Now you can launch server with command line:
 
