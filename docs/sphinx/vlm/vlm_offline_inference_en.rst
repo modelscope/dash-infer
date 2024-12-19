@@ -97,10 +97,17 @@ You can also use OpenAI's Python client library:
                },
          ],
       }],
-      stream=False,
+      stream=True,
       max_completion_tokens=1024,
       temperature=0.1,
    )
+
+   full_response = ""
+   for chunk in response:
+      full_response += chunk.choices[0].delta.content
+      print(".", end="")
+
+   print(f"\nFull Response: \n{full_response}")
 
 Launching with CLI
 -------------------------
@@ -109,14 +116,11 @@ You can also opt to install dashinfer-vlm locally and use command line to launch
 1. Pull dashinfer docker image (see :ref:`docker-label`)
 2. Install TensorRT Python package, and download TensorRT GA build from NVIDIA Developer Zone.
 
-Example: TensorRT 10.6.0.26 for CUDA 12.6, Linux x86_64
-
 .. code-block:: bash
 
-   pip install tensorrt
-   wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.6.0/tars/TensorRT-10.6.0.26.Linux.x86_64-gnu.cuda-12.6.tar.gz
-   tar -xvzf TensorRT-10.6.0.26.Linux.x86_64-gnu.cuda-12.6.tar.gz
-   export LD_LIBRARY_PATH=`pwd`/TensorRT-10.6.0.26/lib
+   wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.5.0/tars/TensorRT-10.5.0.18.Linux.x86_64-gnu.cuda-12.6.tar.gz
+   tar -xvzf TensorRT-10.5.0.18.Linux.x86_64-gnu.cuda-12.6.tar.gz
+   export LD_LIBRARY_PATH=`pwd`/TensorRT-10.5.0.18/lib
 
 3. Install dashinfer Python Package from `release <https://github.com/modelscope/dash-infer/releases>`_
 4. Install dashinfer-vlm: ``pip install dashinfer-vlm``.

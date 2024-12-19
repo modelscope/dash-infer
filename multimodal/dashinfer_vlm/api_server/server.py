@@ -76,7 +76,8 @@ def init():
     context.set("chat_format", chat_format)
 
     # -----------------------Convert Model------------------------
-    output_dir = "/root/.cache/as_model/" + model.split("/")[-1]
+    home_dir = os.environ.get("HOME") or "/root"
+    output_dir = os.path.join(home_dir, ".cache/as_model/", model.split("/")[-1])
     model_name = "model"
     data_type = "bfloat16"
 
