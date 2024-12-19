@@ -1,3 +1,4 @@
+tensorrt==10.5.0
 av
 numpy==1.24.3
 requests==2.32.3
@@ -6,7 +7,7 @@ transformers>=4.45.0
 cachetools>=5.4.0
 six
 tiktoken
-openai==1.52.2
+openai>=1.56.2
 shortuuid
 fastapi
 pydantic_settings
