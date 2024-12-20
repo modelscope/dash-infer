@@ -1555,8 +1555,8 @@ void ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_spli
                                             grid_z, alpha, stream);
 }
 
-static constexpr int WARP_SIZE = 32;
 
+// Rearrange B to facilitate Ampere Tensor Core load data
 // reorder B from (K, N) to (N_32align / 4, K * 4)
 // K % 16 == 0, N % 16 == 0, N_32align % 32 == 0
 template <typename FType>
@@ -1816,6 +1816,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
                                          const uint32_t, void*, const int,
                                          const SplitKParams, const float,
                                          cudaStream_t);
+
 
 template void rearrange_kn_weight_as_n32k16_order_ldg16<half>(
     const int8_t* B, const half* B_scale, const half* B_zero, int8_t* B_result,

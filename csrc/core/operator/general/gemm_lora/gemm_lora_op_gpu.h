@@ -37,15 +37,7 @@ class GemmLoraOpGPU : public GemmOpGPU {
   OperatorProto quant_op_proto_;
   // quant END
 
-  /*
-  int64_t lora_m_;
-  int64_t lora_n_;
-  int64_t lora_k_;
-  int64_t lora_batch_;
-  int lora_lda_;
-  int lora_ldb_;
-  int lora_ldc_;
-  */
+  dim_t q_outdim_size_{0}, k_outdim_size_{0}, v_outdim_size_{0};
 };
 }  // namespace allspark
 #endif

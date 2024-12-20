@@ -224,10 +224,10 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
     tensor_map_->at(out_names_[3])->SetDataType(dtype_);
   }
   presence_penalty_list = std::make_unique<AsTensor>(
-      "repetition_penalty_list", backend, DataType::FLOAT32, DataMode::DENSE,
+      "presence_penalty_list", backend, DataType::FLOAT32, DataMode::DENSE,
       Shape{max_batch});
   repetition_penalty_list = std::make_unique<AsTensor>(
-      "presence_penalty_list", backend, DataType::FLOAT32, DataMode::DENSE,
+      "repetition_penalty_list", backend, DataType::FLOAT32, DataMode::DENSE,
       Shape{max_batch});
   frequency_penalty_list = std::make_unique<AsTensor>(
       "frequency_penalty_list", backend, DataType::FLOAT32, DataMode::DENSE,

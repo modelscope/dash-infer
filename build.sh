@@ -8,6 +8,7 @@ with_platform="${AS_PLATFORM:-cuda}"
 cuda_version="${AS_CUDA_VERSION:-12.4}"
 cuda_sm="${AS_CUDA_SM:-80;86;90a}"
 NCCL_VERSION="${AS_NCCL_VERSION:-2.23.4}"
+build_folder="${AS_BUILD_FOLDER:-build}"
 
 ## NCCL Version Map:
 ## the corresponding pre-build nccl will download on oss.
@@ -22,9 +23,9 @@ build_type="${AS_BUILD_TYPE:-Release}"
 cuda_static="${AS_CUDA_STATIC:-OFF}"
 build_package="${AS_BUILD_PACKAGE:-ON}"
 enable_glibcxx11_abi="${AS_CXX11_ABI:-OFF}"
+build_hiednn="${AS_BUILD_HIEDNN:-ON}"
 enable_span_attn="${ENABLE_SPAN_ATTENTION:-ON}"
 enable_multinuma="${ENABLE_MULTINUMA:-OFF}"
-
 function clone_pull {
   GIT_URL=$1
   DIRECTORY=$2
@@ -42,11 +43,11 @@ function clone_pull {
 }
 
 if [ "$clean" == "ON" ]; then
-    rm -rf build
+    rm -rf ${build_folder}
 fi
 
-if [ ! -d "./build"  ]; then
-    mkdir build && cd build
+if [ ! -d "./${build_folder}"  ]; then
+    mkdir ${build_folder} && cd ${build_folder}
 
     conan profile new dashinfer_compiler_profile --detect --force
     conanfile=../conan/conanfile.txt
@@ -74,7 +75,7 @@ if [ ! -d "./build"  ]; then
     cd ../
 fi
 
-cd build
+cd ${build_folder}
 source ./activate.sh
 export PATH=`pwd`/bin:$PATH
 
@@ -94,6 +95,7 @@ if [ "${with_platform,,}" == "cuda" ]; then
       -DBUILD_PYTHON=OFF \
       -DALWAYS_READ_LOAD_MODEL=OFF \
       -DENABLE_SPAN_ATTENTION=${enable_span_attn} \
+      -DBUILD_HIEDNN=${build_hiednn} \
       -DENABLE_MULTINUMA=OFF
 elif [ "${with_platform,,}" == "x86" ]; then
   cmake .. \

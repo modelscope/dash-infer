@@ -72,7 +72,7 @@ void GemmA8W8GPU::GetWeightPaddedDispatch(const DataType ftype,
           get_weight_padded_n_align<half, int8_t>(weights_buffer);
           is_npad_ = true;
         }
-        // Special case: if sm8x and group_size_ = -1,
+        // Special case: if sm8x and group_size_ = -1
         // reorder B as N32K16 order for use with Ampere_A16W8_GEMM_PERC_16816
         // kernel
         if (sm_version_ >= 0x0800 && group_size_ == -1) {
@@ -97,7 +97,7 @@ void GemmA8W8GPU::GetWeightPaddedDispatch(const DataType ftype,
           get_weight_padded_n_align<hie::bfloat16, int8_t>(weights_buffer);
           is_npad_ = true;
         }
-        // Special case: if sm8x and group_size_ = -1,
+        // Special case: if sm8x and group_size_ = -1
         // reorder B as N32K16 order for use with Ampere_A16W8_GEMM_PERC_16816
         // kernel
         if (sm_version_ >= 0x0800 && group_size_ == -1) {

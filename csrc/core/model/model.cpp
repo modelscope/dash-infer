@@ -81,7 +81,7 @@ AsModel::AsModel(const std::string& model_type)
   gen_ctx_ = std::make_unique<GenerateContext>();
   runtime_ctx_ = std::make_unique<RuntimeContext>();
 
-   // pre-alloc enough request space.
+  // pre-alloc enough request space.
   all_request_map_.reserve(1000);
 }
 
@@ -143,12 +143,12 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   AS_CHECK_STATUS(
       weight_manager_->LoadWeightForModel(ctx, weight_handler_, rankInfo));
   // load LoRA
-  lora_manager_ =
-      LoraManager::Create(rankInfo);  // 每个卡上的AsModel都拥有一批LoRA
   auto& model_cfg = weight_handler_->GetModelConfig();
-  for (auto& lora_name_or_path : model_cfg.lora_names) {
-    LoadLoraByName(lora_name_or_path);
-    // lora_manager_->SwapOutWeight(lora_weight_handle, RankInfo());
+  lora_manager_ = LoraManager::Create(
+      model_cfg.lora_max_num, rankInfo);  // 每个卡上的AsModel都拥有一批LoRA
+  if (model_cfg.lora_names.size() > 0) {
+    LOG(WARNING)
+        << "Config item 'lora_names' is not any longer supported and ignored!";
   }
 
 #if ENABLE_SPAN_ATTENTION
@@ -169,9 +169,11 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
       int num_cache_heads = ctx.GetNumberGroups() > 0 ? ctx.GetNumberGroups()
                                                       : ctx.GetNumberHeads();
 
+#ifdef ENABLE_CUDA
       if (device_type == DeviceType::CUDA) {
         cache_allocator_ = std::make_shared<CudaCacheAllocator>(ctx_);
       }
+#endif
 
 #ifdef CONFIG_CONCURRENT_SPAN
       if (ctx.GetCacheSpanNumGrow() != 0) {
@@ -756,7 +758,7 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
       StopRequest(request->request_id);
       request->status = AsEngine::GenerateRequestStatus::GenerateFinished;
       request->finish = true;
-      return AsStatus::ALLSPARK_LORA_NOT_LOADED;
+      return AsStatus::ALLSPARK_LORA_NOT_FOUND;
     }
   }
 
@@ -1567,9 +1569,15 @@ AsStatus AsModel::Warmup(int64_t bytes_available, int64_t bytes_runtime) {
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
 
-  constexpr float runtime_mem_ratio = 1.1;
+  float runtime_mem_ratio = 1.1;
+  // sgmv op在load、unload时仍有cuda mem小幅波动，多留些余量以免波动出OOM
+  // 波动的原因与BFC释放和重新回收mem有关
+  if (ctx_->GetLoraEnabled()) {
+    runtime_mem_ratio = 1.5;
+  }
   LOG(INFO) << "warm-up: runtime memory reservation ratio: "
             << runtime_mem_ratio;
+
   const int64_t bytes_cache = std::max(
       0L, bytes_available - static_cast<int64_t>(
                                 std::ceil(bytes_runtime * runtime_mem_ratio)));
@@ -1730,6 +1738,11 @@ AsStatus AsModel::LoadLoraByName(const std::string& lora_name_or_path) {
          nullptr);  // 必须AsModel::Init()之后才能调用LoadLoraByName
   AsModelConfig lora_cfg =
       weight_handler_->GetModelConfig();  // copy cfg from base-model
+
+  if (lora_manager_->GetNumLoras() >= lora_cfg.lora_max_num) {
+    LOG(ERROR) << "lora number exceeds limit: " << lora_cfg.lora_max_num;
+    return AsStatus::ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR;
+  }
   auto lora_path_obj = util::Path(lora_cfg.weights_path);
   auto lora_dir = lora_path_obj.parent_path();
   auto lora_name = lora_name_or_path;
@@ -1752,14 +1765,17 @@ AsStatus AsModel::LoadLoraByName(const std::string& lora_name_or_path) {
   lora_cfg.model_name = lora_name;
   lora_cfg.weights_path = lora_path;
   lora_cfg.model_path = "";  // lora不使用该字段, (no graph for lora)
-  lora_cfg.is_lora = true;
+  lora_cfg.is_lora_cfg = true;
   lora_cfg.lora_names.clear();  // lora should NOT have any sub-loras...
   auto& lora_weight_handle = lora_manager_->RegisterLora(lora_cfg);
   WeightSwapConfig swap_config;
-  swap_config.enable = true;
+  swap_config.enable =
+      false;  // 由调用方来显式load_lora/unload_lora，所以对于lora禁用swap，来提升加载速度
   lora_manager_->SetSwapConfig(lora_weight_handle, swap_config);
   RankInfo rank_info = GetRankInfo();
-  lora_manager_->LoadWeightForModel(*ctx_, lora_weight_handle, rank_info);
+  ret = lora_manager_->LoadWeightForModel(*ctx_, lora_weight_handle, rank_info);
+  if (ret != AsStatus::ALLSPARK_SUCCESS)
+    lora_manager_->UnRegisterLora(lora_name);  // rollback
   return ret;
 }
 

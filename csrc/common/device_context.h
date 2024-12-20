@@ -23,6 +23,7 @@ class DeviceContext {
  public:
   DeviceContext() = default;
   virtual ~DeviceContext() {}
+  virtual void Init() = 0;
   virtual DeviceType GetDeviceType() const = 0;
   virtual int GetRank() const = 0;
   virtual int GetNranks() const = 0;
@@ -68,6 +69,9 @@ class DeviceContext {
   void SetDecoderLayer(int dec_layer) { dec_layer_ = dec_layer; }
   void SetSizePerHead(int size_per_head) { size_per_head_ = size_per_head; }
   void SetNumberGroups(int num_groups) { num_groups_ = num_groups; }
+  void SetIntermediateSize(int intermediate_size) {
+    intermediate_size_ = intermediate_size;
+  }
   void SetUseTorchSample(bool use_torch_sample) {
     use_torch_sample_ = use_torch_sample;
   }
@@ -127,6 +131,7 @@ class DeviceContext {
   int GetDecoderLayer() const { return dec_layer_; }
   int GetSizePerHead() const { return size_per_head_; }
   int GetNumberGroups() const { return num_groups_; }
+  int GetIntermediateSize() const { return intermediate_size_; }
   int GetMaxTopLogprobs() const { return engine_max_top_logprobs; }
   bool GetUseTorchSample() const { return use_torch_sample_; }
   AsMHAPrefill GetPrefillMode() const { return prefill_mode_; }
@@ -134,6 +139,12 @@ class DeviceContext {
   AsSchedulingStrategy GetSchedulingStrategy() const {
     return scheduling_strategy_;
   }
+  int GetLoraMaxNum() const { return lora_max_num_; }
+  void SetLoraMaxNum(int lora_max_num) { lora_max_num_ = lora_max_num; }
+  int GetLoraMaxRank() const { return lora_max_rank_; }
+  void SetLoraMaxRank(int lora_max_rank) { lora_max_rank_ = lora_max_rank; }
+  bool GetLoraEnabled() const { return lora_enabled_; }
+  void SetLoraEnabled(bool enabled) { lora_enabled_ = enabled; }
   // decoder fallback weight only which is used in A8W8
   bool GetFallbackDecoderWeightOnly() const { return decoder_weight_only_; }
   void CopyFromOther(const DeviceContext* other_ctx) {
@@ -146,6 +157,7 @@ class DeviceContext {
     SetDecoderLayer(other_ctx->GetDecoderLayer());
     SetSizePerHead(other_ctx->GetSizePerHead());
     SetNumberGroups(other_ctx->GetNumberGroups());
+    SetIntermediateSize(other_ctx->GetIntermediateSize());
     SetUseTorchSample(other_ctx->GetUseTorchSample());
     SetKVcacheSize(other_ctx->GetKVcacheSize());
     SetModelMaxLength(other_ctx->GetModelMaxLength());
@@ -157,6 +169,9 @@ class DeviceContext {
     SetEvictionStrategy(other_ctx->GetEvictionStrategy());
     SetFallbackDecoderWeightOnly(other_ctx->GetFallbackDecoderWeightOnly());
     SetSparsityMatmulMode(other_ctx->GetSparsityMatmulMode());
+    SetLoraMaxNum(other_ctx->GetLoraMaxNum());
+    SetLoraMaxRank(other_ctx->GetLoraMaxRank());
+    SetLoraEnabled(other_ctx->GetLoraEnabled());
   }
 
  private:
@@ -171,6 +186,7 @@ class DeviceContext {
   int dec_layer_ = 0;
   int size_per_head_ = 0;
   int num_groups_ = 0;
+  int intermediate_size_ = 0;
   bool use_torch_sample_ = false;
   // fallback to A16Wx in decoder phase for A8WX or AF8Wx quantized gemm if
   // decoder_weight_only_ is true.
@@ -178,12 +194,15 @@ class DeviceContext {
   int precision_ = PrecisionLevel::HIGHEST;
 #ifdef ENABLE_CUDA
   AsMHAPrefill prefill_mode_ = AsMHAPrefill::AsPrefillXformer;
-#else
+#else   // ENABLE_CUDA
   AsMHAPrefill prefill_mode_ = AsMHAPrefill::AsPrefillDefault;
-#endif
+#endif  // ENABLE_CUDA
   AsEvictionStrategy eviction_strategy_ = AsEvictionStrategy::MaxLength;
   AsSchedulingStrategy scheduling_strategy_ =
       AsSchedulingStrategy::ContextPriority;
+  bool lora_enabled_ = false;
+  int lora_max_num_ = 2;
+  int lora_max_rank_ = 64;
 
  protected:
   DataType dtype = DataType::DATATYPE_UNDEFINED;

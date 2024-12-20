@@ -6,11 +6,6 @@
 #pragma once
 
 #include <core/operator/operator.h>
-#if 0  // def ENABLE_CUDA
-#include <core/kernel/cuda/flashv2/flashv2.h>
-#include <core/kernel/cuda/trivial_mha/trivial_mha.h>
-#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
-#endif  // ENABLE_CUDA
 
 #include "env_config.h"
 

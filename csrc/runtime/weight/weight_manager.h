@@ -20,7 +20,6 @@ namespace allspark {
 
 class RankInfo;
 class TransformerProto;
-// class ModelWeightHandler;
 
 enum class SwapStatus {
   SwapInit = 0,  // initial state.
@@ -185,6 +184,12 @@ class WeightManager {
       std::shared_ptr<ModelWeightHandler> weight_handler);
 
   virtual void RegisterWeightEventListener(WeightEventCallback callback);
+  virtual AsStatus ValidateWeight(
+      std::shared_ptr<ModelWeightHandler>& weight_handler,
+      const ModelWeightAccessInfo& weight_info,
+      const DeviceContext& device_ctx) {
+    return AsStatus::ALLSPARK_SUCCESS;
+  }
 
  protected:
   WeightManager();

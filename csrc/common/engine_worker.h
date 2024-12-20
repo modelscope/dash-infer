@@ -18,6 +18,8 @@ class Worker {
       : rank_(rank), nranks_(nranks), device_id_(device_id) {}
   virtual ~Worker() {}
 
+  virtual void Init() = 0;
+
   virtual AsStatus InitCCL(int rank, int nranks) = 0;
   virtual void SetWorkerDeviceId(int device_id) = 0;
 
@@ -100,16 +102,20 @@ class Worker {
 class CudaWorker : public Worker {
  public:
   CudaWorker(int rank, int nranks, const ncclUniqueId& id, int device_id);
+  virtual ~CudaWorker();
   void SetWorkerDeviceId(int device_id) override;
+  void Init() override;
   AsStatus InitCCL(int rank, int nranks) override;
 
  private:
   const ncclUniqueId nccl_id_;
+  thread_local static int last_device_id_of_this_thread_;
 };
 #endif
 class CpuWorker : public Worker {
  public:
   CpuWorker(int rank, int nranks, int device_id);
+  void Init() override;
   void SetWorkerDeviceId(int device_id) override{};
   AsStatus InitCCL(int rank, int nranks) override;
   AsStatus SetNumThreads(int nums) override;

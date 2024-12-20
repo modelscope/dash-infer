@@ -16,10 +16,11 @@
 #include "allspark.h"
 #include "core/tensor/tensor.h"
 #include "engine_control_message.h"
+#include "utility/blockingconcurrentqueue.h"
 #include "utility/concurrentqueue.h"
 
 /// @brief if defined, user input span size will be ignored
-#define FIXED_SPAN_SIZE 128
+// #define FIXED_SPAN_SIZE 128
 
 /// @brief if defined, span managers run concurrently
 #define CONFIG_CONCURRENT_SPAN
@@ -44,9 +45,9 @@ class ModelControlState final {
  public:
   std::string model_name;
 
-  moodycamel::ConcurrentQueue<EngineControlMessage> msg_queue;
+  moodycamel::BlockingConcurrentQueue<EngineControlMessage> msg_queue;
+  std::atomic<int> msg_queue_size;
 
-  std::unique_ptr<std::mutex> lock;
   std::unique_ptr<std::condition_variable> cond_var;
 
   std::unordered_map<std::string, std::shared_ptr<RequestHandle>>
@@ -55,8 +56,9 @@ class ModelControlState final {
       result_queue_map;
   std::queue<std::shared_ptr<RequestHandle>> release_request_handle;
   std::queue<std::shared_ptr<AsEngine::ResultQueue>> release_request_queue;
-  bool model_stopping = false;  // after GracefulStopModel called...
-  bool model_stopped = false;   // after GracefulStopModel is done.
+  std::atomic<bool> model_stopping =
+      false;                                // after GracefulStopModel called...
+  std::atomic<bool> model_stopped = false;  // after GracefulStopModel is done.
   std::shared_ptr<ModelWeightHandler> weight_handler_;
 
   explicit ModelControlState(const std::string& name);
@@ -68,6 +70,11 @@ class ModelControlState final {
   }
 
   void StopLoop();
+
+ private:
+  // 将拷贝构造函数和拷贝赋值运算符声明为私有
+  ModelControlState(const ModelControlState&);
+  ModelControlState& operator=(const ModelControlState&);
 };
 
 class AsTensor;

@@ -53,6 +53,9 @@ runtime_cfg_builder = model_loader.create_reference_runtime_config_builder(safe_
 # like change to engine max length to a smaller value
 runtime_cfg_builder.max_length(2048)
 
+# if you want to change kv cache span size, valid value is 16, 32, 64, 128; default is 32
+# runtime_cfg_builder.kv_cache_span_size(128)
+
 # like enable int8 kv-cache or int4 kv cache rather than fp16 kv-cache
 # runtime_cfg_builder.kv_cache_mode(AsCacheMode.AsCacheQuantI8)
 

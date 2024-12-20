@@ -6,6 +6,10 @@
 #include "operator.h"  // NOLINT
 #ifdef ENABLE_CUDA
 #include <cuda/cuda_context.h>
+#include <cuda/cuda_util.h>
+#ifdef ENABLE_BF16
+#include <cuda_bf16.h>
+#endif
 #endif
 #include <common/engine_runtime.h>
 #include <cpu/cpu_context.h>
@@ -14,6 +18,21 @@
 
 #include <fstream>
 namespace allspark {
+
+#ifdef ENABLE_CUDA
+void ValidateNumeric(const AsTensor* tensor_ptr) {
+  void* p = tensor_ptr->GetDataPtr();
+  size_t size = tensor_ptr->GetSizeInByte();
+  if (tensor_ptr->GetDeviceType() == DeviceType::CUDA) {
+    if (tensor_ptr->GetDataType() == DataType::FLOAT16)
+      cuda_util::CheckInfNan<__half>((half*)p, size);
+#ifdef ENABLE_BF16
+    else if (tensor_ptr->GetDataType() == DataType::BFLOAT16)
+      cuda_util::CheckInfNan<__nv_bfloat16>((__nv_bfloat16*)p, size);
+#endif
+  }
+}
+#endif
 
 std::map<UnaryType, dnnl::algorithm> DNNLOpContext::unary_algo_map_ = {
     {UnaryType::TANH, dnnl::algorithm::eltwise_tanh},
@@ -71,14 +90,29 @@ void AsOperator::PrintInformation() {
   std::cout << "op_inputs:" << std::endl;
   for (auto& v : in_names_) {
     std::cout << tensor_map_->at(v)->ToString() << std::endl;
+#ifdef ENABLE_CUDA
+    if (backend == DeviceType::CUDA) {
+      ValidateNumeric(tensor_map_->at(v).get());
+    }
+#endif
   }
   std::cout << "op_weights:" << std::endl;
   for (auto& v : weights_) {
     std::cout << v->ToString() << std::endl;
+#ifdef ENABLE_CUDA
+    if (backend == DeviceType::CUDA) {
+      ValidateNumeric(v);
+    }
+#endif
   }
   std::cout << "op_outputs:" << std::endl;
   for (auto& v : out_names_) {
     std::cout << tensor_map_->at(v)->ToString() << std::endl;
+#ifdef ENABLE_CUDA
+    if (backend == DeviceType::CUDA) {
+      ValidateNumeric(tensor_map_->at(v).get());
+    }
+#endif
   }
   std::cout << std::endl;
 }
@@ -268,6 +302,7 @@ AsStatus AsOperator::Init(const OperatorProto& op_proto,
       tensor_map_->insert(std::make_pair(
           t_name, std::make_unique<AsTensor>(t, ctx.GetDeviceType())));
     }
+    if (is_lora_op_ && out_names_.size() > 0) continue;
     out_names_.emplace_back(t_name);
   }
   for (auto& t : op_proto.weights()) {
@@ -276,10 +311,9 @@ AsStatus AsOperator::Init(const OperatorProto& op_proto,
       // only in order to make it can be run by GemmOpBase::Init && Reshape,
       // which is called by GemmLora
       weight_names_.emplace_back(t_name);
-      fake_weight_ = std::make_unique<AsTensor>(
+      weights_.emplace_back(new AsTensor(  // 这里不能使用智能指针
           t_name, DeviceType::CUDA, DataType::INT8, DataMode::DENSE,
-          Shape({1, 3}));  // 3 for qkv shape check
-      weights_.emplace_back(fake_weight_.get());
+          Shape({1, 3})));  // 3 for qkv shape check
     } else if (weight_manager_) {
       auto weight_tensor_p =
           weight_manager_->GetWeightTensor(weight_handler_, rank_info_, t_name);

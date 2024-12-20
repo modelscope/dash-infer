@@ -38,7 +38,6 @@ function repair_wheel {
     else
         # TODO: add lib path to build lib path
         auditwheel repair "$wheel" --plat "$PLAT" -w ${REPO_ROOT}/python/wheelhouse/ --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcudart.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12 --exclude libcuda.so.1 --exclude libnccl.so.2 --exclude libnvidia-ml.so.1 --exclude libcudart.so.12
-
     fi
 }
 

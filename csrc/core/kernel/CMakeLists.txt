@@ -1,12 +1,12 @@
-set(KERNEL_INC_DIR
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${THREAD_INCLUDE}
-  ${PROJECT_SOURCE_DIR}/csrc
-  ${PROJECT_SOURCE_DIR}/csrc/common
-  ${PROJECT_SOURCE_DIR}/csrc/device
-  ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass/include
-  ${CMAKE_BINARY_DIR}/csrc
-)
+    set(KERNEL_INC_DIR
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${THREAD_INCLUDE}
+      ${PROJECT_SOURCE_DIR}/csrc
+      ${PROJECT_SOURCE_DIR}/csrc/common
+      ${PROJECT_SOURCE_DIR}/csrc/device
+      ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass/include
+      ${CMAKE_BINARY_DIR}/csrc
+    )
 
 if(NOT ALLSPARK_CBLAS MATCHES "NONE")
   list(APPEND KERNEL_INC_DIR ${CBLAS_INCLUDE_DIR})
@@ -115,8 +115,8 @@ if (ENABLE_CUDA)
     )
     list(APPEND CUDA_COMMON_KERNEL_SRC ${CUDA_COMMON_KERNEL_SRC_TMP})
 
-    file(GLOB_RECURSE CUDA_XFORMER_SRC cuda/xformer_mha/*)
-    file(GLOB_RECURSE CUDA_MOE_SRC cuda/moe/*.cu)
+      file(GLOB_RECURSE CUDA_XFORMER_SRC cuda/xformer_mha/*)
+      file(GLOB_RECURSE CUDA_MOE_SRC cuda/moe/*.cu)
 
     list(APPEND KERNEL_SRC ${CUDA_COMMON_KERNEL_SRC} ${CUDA_XFORMER_SRC} ${CUDA_MOE_SRC})
 endif()
@@ -138,6 +138,7 @@ message(STATUS "ALLSPARK_PUBLIC_DEFINITIONS:${ALLSPARK_PUBLIC_DEFINITIONS}")
 add_library(allspark_kernel STATIC ${KERNEL_SRC})
 set_target_properties(allspark_kernel PROPERTIES CXX_STANDARD ${CXX_STD})
 
+
 target_compile_definitions(
     allspark_kernel
     PRIVATE ${ALLSPARK_PUBLIC_DEFINITIONS}
@@ -149,4 +150,10 @@ add_dependencies(allspark_kernel protobuf_target)
 target_compile_options(allspark_kernel PUBLIC $<$<COMPILE_LANGUAGE:CXX>:${ALLSPARK_CXX_FLAGS}>)
 if(ALLSPARK_CBLAS MATCHES "BLIS")
     add_dependencies(allspark_kernel project_blis)
+endif()
+
+if (ENABLE_CUDA)
+  if(${CUDA_VERSION} VERSION_GREATER_EQUAL "11.8")
+    add_dependencies(allspark_kernel project_flashattn)
+  endif()
 endif()

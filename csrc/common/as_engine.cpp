@@ -5,10 +5,8 @@
 
 #include "engine_worker.h"
 #include "interface/allspark_check.h"
-#include "thread_pool.h"
 #include "thread_pool_with_id.h"
 #include "thread_utils.h"
-#include "utility/timer.h"
 #include "weight/weight_loader.h"
 #include "weight/weight_manager.h"
 #ifdef ENABLE_CUDA
@@ -26,14 +24,18 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
 #include <mutex_wrapper.h>
+#include <unistd.h>
 #include <utility/allspark_logging.h>
+#include <utility/allsparkz_util.h>
 #include <utility/check.h>
 #include <utility/file_util.h>
 #include <utility/mem_registry.h>
+#include <utility/timer.h>
 #include <utility/uuid.h>
 
 #include <common/as_param_check.hpp>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <memory>
@@ -76,13 +78,15 @@ const int warmup_input = 5;
 // stopping.
 #define CHECK_MODEL_STOPPING(model_state)              \
   do {                                                 \
-    if (model_state->model_stopping) {                 \
+    if (model_state->model_stopping.load()) {          \
       LOG(INFO) << "model is stopping, access denied"; \
       return AsStatus::ALLSPARK_REQUEST_DENIED;        \
     }                                                  \
   } while (0)
 
+namespace fs = std::filesystem;
 namespace allspark {
+
 class AsEngineImpl final {
  public:
   AsEngineImpl();
@@ -100,13 +104,16 @@ class AsEngineImpl final {
 
   AsStatus LoadLoraByName(const char* model_name, const char* lora_name);
   AsStatus UnloadLoraByName(const char* model_name, const char* lora_name);
+  std::vector<std::string> LoadFakeLoras(const char* model_name);
+  void UnloadFakeLoras(const char* model_name,
+                       const std::vector<std::string>& fake_lora_names);
 
   AsStatus GetModelInformation(const char* model_name, std::string* model_info);
 
   AsFileInfo GetFileInformation(const char* as_model_path,
                                 const char* as_param_path);
 
-  AsStatus StartModel(const char* model_name, bool do_warmup = true);
+  AsStatus StartModel(const char* model_name);
   AsStatus TunePrefixCache(const char* model_name);
   AsStatus StopModel(const char* model_name);
   AsStatus ReleaseModel(const char* model_name);
@@ -142,11 +149,15 @@ class AsEngineImpl final {
   AsStatus BuildModel(const char* model_name, const std::string& model_proto,
                       std::shared_ptr<ModelWeightHandler> weight_handler,
                       const std::map<std::string, int>& model_limits = {});
-  AsStatus WarmupModel(const char* model_name, int64_t min_bytes_available);
+  AsStatus WarmupModelInternal_(const char* model_name,
+                                int64_t min_bytes_available,
+                                std::vector<std::string>& fake_lora_names);
+  AsStatus WarmupModel(const char* model_name);
 
   AsStatus SetNumThreads(int num_threads);
   AsStatus SetDeviceIds(const std::vector<int>& device_ids);
   AsStatus CreateDeviceContext(const std::string& compute_unit);
+  void DestroyDeviceContext();
   AsStatus SetMatmulPrecision(const std::string& precision);
 #if ENABLE_SPAN_ATTENTION
   AsStatus setSpanCacheConfig(AsCacheMode mode, int span_size,
@@ -211,8 +222,10 @@ class AsEngineImpl final {
       model_state_map_;
 
   // TODO: engine needs support two or model can running within one engine.
-  std::mutex engine_lock_;  // for async decoder lock
-  std::mutex lora_lock_;    // mutex for load/unload lora
+  std::mutex engine_lock_;      // for async decoder lock
+  std::mutex lora_lock_;        // mutex for lora WeightManager
+  std::mutex lora_usage_lock_;  // mutex for loras_in_use_
+  fs::path fake_lora_temp_dir_;
   int engine_max_length_ = 0;
   int engine_max_batch_ = 0;
   int engine_max_prefill_length_ = 0;
@@ -225,17 +238,18 @@ class AsEngineImpl final {
   std::mt19937 random_engine;
 
   std::shared_ptr<WeightManager> weight_manager_;
-  std::map<std::string, std::set<std::string>> loras_in_use_;
+  std::unordered_map<std::string, std::multiset<std::string>> loras_in_use_;
+  std::atomic<int> lora_use_count_;
 
   PrefixCacheCoordinator::Ptr prefix_cache_coordinator_;
 };
 
 ModelControlState::ModelControlState(const std::string& name)
-    : model_name(name) {
-  lock = std::make_unique<std::mutex>();
+    : model_name(name), msg_queue(1000) {
   cond_var = std::make_unique<std::condition_variable>();
   request_handle_map.reserve(1000);
   result_queue_map.reserve(1000);
+  msg_queue_size.store(0);
 }
 
 static bool ReadProtoFromTextFile(const char* filename, Message* proto) {
@@ -282,12 +296,17 @@ static std::pair<DeviceType, std::vector<int>> ParseDeviceType(
 AsEngineImpl::AsEngineImpl()
     : device_ctx_(std::make_unique<CPUContext>()),
       is_multi_nodes_(false),
-      threadpool_size_(1) {
+      threadpool_size_(1),
+      lora_use_count_(0) {
   util::as_init_log();
   // set threadpool_size_ to 1 for default to avoid additional overhead,
   // such as thread switching and lock contention in CPU streaming mode.
   threadpool_ = std::make_unique<ThreadPoolWithID>(threadpool_size_);
+
+  device_ctx_->Init();
+
   weight_manager_ = WeightManager::Create();
+
   weight_manager_->RegisterWeightEventListener(
       [&](const std::shared_ptr<ModelWeightHandler>& handler,
           WeightEvent event) {
@@ -299,6 +318,7 @@ AsEngineImpl::AsEngineImpl()
           }
         }
       });
+
   std::random_device rand_dev;
   random_engine.seed(rand_dev());
   LOG(INFO) << "AllSpark Init with Version: " << GetVersionFull();
@@ -309,7 +329,6 @@ AsEngineImpl::~AsEngineImpl() {
   // exception.
   LOG(INFO) << "~AsEngine called";
   for (auto& model_state : model_state_map_) {
-    std::unique_lock<std::mutex> lock(*(model_state.second->lock));
     if (!model_state.second && model_state.second->model_stopped) {
       LOG(INFO) << "Stopping model " << model_state.first;
       StopModel(model_state.first.c_str());
@@ -417,14 +436,12 @@ AsStatus AsEngineImpl::SetDeviceIds(const std::vector<int>& device_ids) {
   }
   // 所有device inferer都走worker线程
   workers_.resize(nranks_);
-
 #ifdef ENABLE_CUDA
   ncclUniqueId id;
   if (backend == DeviceType::CUDA) {
     ncclGetUniqueId(&id);
   }
 #endif
-
   std::vector<std::thread> vthreads(nranks_);
   LOG(INFO) << "Start create " << nranks_ << " Device: " << backend
             << " workers.";
@@ -450,6 +467,7 @@ AsStatus AsEngineImpl::SetDeviceIds(const std::vector<int>& device_ids) {
       }
       // cuda require multiple nccl client init in parallel, otherwise
       // will wait for other device.
+      workers_[i]->Init();
       workers_[i]->InitCCL(i, nranks_);
       workers_[i]->SetWeightManager(weight_manager_);
     });
@@ -497,6 +515,11 @@ AsStatus AsEngineImpl::CreateDeviceContext(const std::string& compute_unit) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+void AsEngineImpl::DestroyDeviceContext() {
+  is_device_id_set_ = false;
+  DestroyBFCAllocator();
+}
+
 static void CheckAndOverridePrefillMode(AsModelConfig& model_config) {
   try {
     DeviceType device_type = DeviceType::CUDA;
@@ -518,7 +541,6 @@ static void CheckAndOverridePrefillMode(AsModelConfig& model_config) {
           device_ids.size() > 0 ? device_ids[0] : 0);
       LOG(INFO) << "Auto Prefill selection, CUDA Detected, SM: " << std::hex
                 << sm_version;
-
       if (sm_version >= CUDASMDef::SM_Ampere && CUDA_VERSION >= 11080) {
         model_config.prefill_mode = AsMHAPrefill::AsPrefillFlashV2;
         LOG(INFO) << "Prefill Auto Select: Ampler GPU detected, choose "
@@ -701,17 +723,35 @@ AsStatus AsEngineImpl::BuildModel(
     std::shared_ptr<ModelWeightHandler> weight_handler,
     const std::map<std::string, int>& model_limits) {
   DLOG(INFO) << "AsEngineImpl::BuildModel()" << std::endl;
+  AsModelConfig model_config = weight_handler->GetModelConfig();
   std::unique_ptr<TransformerProto> model_ir =
       std::make_unique<TransformerProto>();
   model_ir->ParseFromString(model_proto);
   // LOG(INFO)<<model_ir->model_conf().num_heads()<<"
   // "<<model_ir->model_conf().size_per_head()<<"
   // "<<model_ir->model_conf().dec_layer();
+  auto& graph = model_ir->graphs();
+  device_ctx_->SetLoraEnabled(false);
+  for (auto& g_name : model_ir->graph_names()) {  // search for LoRA op
+    for (auto& op_proto : graph.at(g_name).ops()) {
+      if (op_proto.op_type() == "GemmLoraCapsule") {
+        device_ctx_->SetLoraEnabled(true);
+        break;
+      }
+    }
+  }
+  if (device_ctx_->GetLoraEnabled()) {
+    LOG(INFO) << "lora enabled";
+  }
+
   device_ctx_->SetNumberHeads(model_ir->model_conf().num_heads());
   device_ctx_->SetNumberGroups(model_ir->model_conf().multi_query_group_num());
   device_ctx_->SetSizePerHead(model_ir->model_conf().size_per_head());
+  device_ctx_->SetIntermediateSize(model_ir->model_conf().intermediate_size());
   device_ctx_->SetDecoderLayer(model_ir->model_conf().dec_layer());
   device_ctx_->SetDtype(model_ir->model_conf().dtype());
+  device_ctx_->SetLoraMaxNum(model_config.lora_max_num);
+  device_ctx_->SetLoraMaxRank(model_config.lora_max_rank);
   for (auto& item : model_limits) {
     if (item.second < 0) {
       LOG(ERROR) << "invalid engine limit param, should >= 0" << std::endl;
@@ -797,24 +837,11 @@ AsStatus AsEngineImpl::BuildModel(
           std::max(warmup_single_batch_spans, warmup_multi_batch_spans);
       int num_spans = kv_cache_count * device_ctx_->GetDecoderLayer() *
                       (num_spans_per_seq + 1);
-      bool reserve_for_lora = false;
-      auto& graph = model_ir->graphs();
-      for (auto& g_name : model_ir->graph_names()) {  // search for LoRA op
-        for (auto& op_proto : graph.at(g_name).ops()) {
-          if (op_proto.op_type() == "GemmLoraCapsule") {
-            reserve_for_lora = true;
-            break;
-          }
-        }
-      }
-      if (reserve_for_lora) num_spans *= device_ctx_->GetModelMaxBatch();
-      DLOG(INFO) << "reserve_for_lora=" << reserve_for_lora
-                 << " num_spans=" << num_spans;
       // reset cache config
       AS_CHECK_STATUS(this->setSpanCacheConfig(device_ctx_->GetCacheMode(),
                                                device_ctx_->GetCacheSpanSize(),
                                                num_spans, 0));
-      use_adaptive_cache_ = reserve_for_lora ? false : true;
+      use_adaptive_cache_ = true;
     }
   }
 #endif
@@ -993,14 +1020,15 @@ AsStatus AsEngineImpl::TunePrefixCache(const char* model_name) {
 
       float duration_in_ms[2] = {0};
       for (int j = 0; j < 2; j++) {
-        std::string uuid = "warmup_request_" + std::to_string(request_id) +
-                           "_" + std::to_string(j);
+        warmup_req->config.uuid = "warmup_request_" +
+                                  std::to_string(request_id) + "_" +
+                                  std::to_string(j);
         RequestHandle* warmup_handle{nullptr};
         AsEngine::ResultQueue* warmup_queue{nullptr};
 
         auto start_time_point = std::chrono::steady_clock::now();
-        AS_CHECK_STATUS(this->StartRequest(
-            model_name, warmup_req, &warmup_handle, &warmup_queue, uuid));
+        AS_CHECK_STATUS(this->StartRequest(model_name, warmup_req,
+                                           &warmup_handle, &warmup_queue));
         AS_CHECK_STATUS(this->SyncRequest(model_name, warmup_handle));
         AS_CHECK_STATUS(this->ReleaseRequest(model_name, warmup_handle));
         auto end_time_point = std::chrono::steady_clock::now();
@@ -1029,13 +1057,174 @@ AsStatus AsEngineImpl::TunePrefixCache(const char* model_name) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+std::vector<std::string> AsEngineImpl::LoadFakeLoras(const char* model_name) {
+  std::vector<std::string> ret;
+  if (!device_ctx_->GetLoraEnabled()) {
+    return ret;
+  }
+
+  char temp_dir[] = "/tmp/allspark_fake_lora-XXXXXX";
+  AS_ENFORCE(mkdtemp(temp_dir) != nullptr);
+  fake_lora_temp_dir_ = temp_dir;
+  LOG(INFO) << "Successfully created fake lora temp dir: "
+            << fake_lora_temp_dir_;
+
+  auto num_heads = device_ctx_->GetNumberHeads();
+  auto size_per_head = device_ctx_->GetSizePerHead();
+  auto hidden_size = num_heads * size_per_head;
+  auto num_groups = device_ctx_->GetNumberGroups();
+  auto kv_size = num_groups * size_per_head;
+  auto num_hidden_layers = device_ctx_->GetDecoderLayer();
+  auto intermediate_size = device_ctx_->GetIntermediateSize();
+  auto lora_max_num = device_ctx_->GetLoraMaxNum();
+  auto lora_max_rank = device_ctx_->GetLoraMaxRank();
+  auto dtype = device_ctx_->GetDtype();
+
+  // create fake loras
+  const std::string lora_base_name = "fake-lora-";
+  fs::path aslora_path = fake_lora_temp_dir_ / (lora_base_name + "0.aslora");
+  TensorMap tensor_map;
+  char dtype_ch = dtype == DataType::FLOAT16 ? 'f' : 'b';
+  std::map<std::string, TensorAttribute> attr_map{
+      {"decoder.layer.__LAYER__.attention.self.lora_A.weight",
+       {0,
+        SplitMode::NOSPLIT,
+        {hidden_size, 3 * lora_max_rank},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.attention.self.lora_B.weight",
+       {0,
+        SplitMode::GROUP_VSPLIT,
+        {lora_max_rank, hidden_size + 2 * kv_size},
+        {hidden_size, kv_size, kv_size},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.attention.output.dense.lora_A.weight",
+       {0,
+        SplitMode::HSPLIT,
+        {hidden_size, lora_max_rank},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.attention.output.dense.lora_B.weight",
+       {0,
+        SplitMode::NOSPLIT,
+        {lora_max_rank, hidden_size},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.intermediate.dense.lora_A.weight",
+       {0,
+        SplitMode::NOSPLIT,
+        {hidden_size, lora_max_rank},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.intermediate.dense.lora_B.weight",
+       {0,
+        SplitMode::VSPLIT,
+        {lora_max_rank, intermediate_size},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.linear.dense.lora_A.weight",
+       {0,
+        SplitMode::NOSPLIT,
+        {hidden_size, lora_max_rank},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.linear.dense.lora_B.weight",
+       {0,
+        SplitMode::VSPLIT,
+        {lora_max_rank, intermediate_size},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.output.dense.lora_A.weight",
+       {0,
+        SplitMode::HSPLIT,
+        {intermediate_size, lora_max_rank},
+        {},
+        dtype_ch,
+        2,
+        0}},
+      {"decoder.layer.__LAYER__.ffn.output.dense.lora_B.weight",
+       {0,
+        SplitMode::NOSPLIT,
+        {lora_max_rank, hidden_size},
+        {},
+        dtype_ch,
+        2,
+        0}},
+  };
+  std::ofstream fout(aslora_path.string(), std::ios::out);  // 清空文件
+  for (int layer = 0; layer < num_hidden_layers; layer++) {
+    for (auto& [tensor_pattern, tensor_info] : attr_map) {
+      std::string t_name = tensor_pattern;
+      t_name.replace(t_name.find("__LAYER__"), strlen("__LAYER__"),
+                     std::to_string(layer));
+      auto nbytes = 1;
+      for (auto size : tensor_info.shape) {
+        nbytes *= size;
+      }
+      nbytes *= tensor_info.word_size;
+      std::vector<char> bin_data(nbytes, 0);
+      util::save_allsparky_tofile(aslora_path.string(), t_name, bin_data.data(),
+                                  nbytes, tensor_info);
+    }
+  }
+  util::set_global_header(aslora_path.string());  // 结束
+
+  // load fake loras
+  ret.emplace_back(lora_base_name + "0");
+  AS_ENFORCE(AS_STATUS_OK(LoadLoraByName(model_name, aslora_path.c_str())));
+  for (int i = 1; i < lora_max_num; i++) {
+    auto lora_name = lora_base_name + std::to_string(i);
+    auto symlink_path = fake_lora_temp_dir_ / (lora_name + ".aslora");
+    symlink(aslora_path.c_str(), symlink_path.c_str());
+    ret.emplace_back(lora_name);
+    AS_ENFORCE(AS_STATUS_OK(LoadLoraByName(model_name, symlink_path.c_str())));
+  }
+  return ret;
+}
+
+void AsEngineImpl::UnloadFakeLoras(
+    const char* model_name, const std::vector<std::string>& fake_lora_names) {
+  if (!device_ctx_->GetLoraEnabled()) {
+    return;
+  }
+  for (auto& lora_name : fake_lora_names) {
+    AS_ENFORCE(AS_STATUS_OK(UnloadLoraByName(model_name, lora_name.c_str())));
+  }
+  try {
+    fs::remove_all(fake_lora_temp_dir_);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to remove fake lora temp dir: " << fake_lora_temp_dir_
+               << ", reason: " << e.what();
+  } catch (...) {
+    LOG(ERROR) << "Failed to remove fake lora temp dir: " << fake_lora_temp_dir_
+               << ", unknown exception!";
+  }
+}
+
 /*
  * send fake request to warm up engine, allocate necessary resources, like gpu
  * tensor, etc. send one max_length request, and N (max_engine_batch_size) times
  * request to make sure the coverage.
  */
-AsStatus AsEngineImpl::WarmupModel(const char* model_name,
-                                   int64_t min_bytes_available) {
+AsStatus AsEngineImpl::WarmupModelInternal_(
+    const char* model_name, int64_t min_bytes_available,
+    std::vector<std::string>& fake_lora_names) {
   //* step 1: record memory usage before warmup
   std::vector<int64_t> bytes_limit(nranks_);
   std::vector<int64_t> bytes_before_warmup(nranks_);
@@ -1056,6 +1245,9 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
   warmup_cfg->max_length = engine_max_length_;
   warmup_cfg->top_k = 0;
   warmup_cfg->top_p = 0.5;
+  if (device_ctx_->GetLoraEnabled()) {
+    warmup_cfg->lora_name = fake_lora_names[0];
+  }
 
   std::shared_ptr<AsEngine::RequestContent> warmup_req =
       std::make_shared<AsEngine::RequestContent>();
@@ -1073,8 +1265,9 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
   AS_CHECK_STATUS(this->SyncRequest(model_name, warmup_handle));
   if (warmup_queue->GenerateStatus() !=
       AsEngine::GenerateRequestStatus::GenerateFinished) {
-    LOG(ERROR) << "AsEngineImpl::WarmupModel: warmup failed! Please check "
-                  "engine_max_length & engine_max_batch";
+    LOG(ERROR)
+        << "AsEngineImpl::WarmupModelInternal_: warmup failed! Please check "
+           "engine_max_length & engine_max_batch";
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
   AS_CHECK_STATUS(this->ReleaseRequest(model_name, warmup_handle));
@@ -1120,6 +1313,10 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
     warmup_cfg->top_k = 0;
     warmup_cfg->top_p = 0.5;
     warmup_cfg->early_stopping = false;
+    if (device_ctx_->GetLoraEnabled()) {
+      warmup_cfg->lora_name = fake_lora_names[i % fake_lora_names.size()];
+    }
+
     std::shared_ptr<AsEngine::RequestContent> warmup_req =
         std::make_shared<AsEngine::RequestContent>();
     warmup_req->config = *(warmup_cfg);
@@ -1141,8 +1338,9 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
     AsEngine::ResultQueue* warmup_queue = warmup_queue_list[i];
     if (warmup_queue->GenerateStatus() !=
         AsEngine::GenerateRequestStatus::GenerateFinished) {
-      LOG(ERROR) << "AsEngineImpl::WarmupModel: warmup failed! Please check "
-                    "engine_max_length & engine_max_batch";
+      LOG(ERROR)
+          << "AsEngineImpl::WarmupModelInternal_: warmup failed! Please check "
+             "engine_max_length & engine_max_batch";
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
     }
     AS_CHECK_STATUS(this->ReleaseRequest(model_name, warmup_handle));
@@ -1211,7 +1409,7 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
             try {
               return workers_[i]->Warmup(_bytes_available, _bytes_runtime);
             } catch (std::exception& e) {
-              LOG(ERROR) << "AsEngineImpl::WarmupModel: worker " << i
+              LOG(ERROR) << "AsEngineImpl::WarmupModelInternal_: worker " << i
                          << " warmup failed: " << e.what();
               if (std::string(e.what()) == "ALLSPARK_MEMORY_ERROR" ||
                   std::string(e.what()) == "ALLSPARK_CACHE_MEMORY_OUT") {
@@ -1235,42 +1433,25 @@ AsStatus AsEngineImpl::WarmupModel(const char* model_name,
     if (ret == AsStatus::ALLSPARK_SUCCESS) {
       LOG(INFO) << "warm-up: all workers successfully finished!";
     }
+
     return ret;
   } else {
     LOG(WARNING) << "warm-up: invalid memory usage, min_bytes_available="
                  << min_bytes_available
                  << ", max_bytes_runtime=" << max_bytes_runtime
                  << ", worker warm-up is skipped";
+
     return AsStatus::ALLSPARK_SUCCESS;
   }
 }
 
-AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
-  util::as_init_log();
-
-  // start model
-  DLOG(INFO) << "[" << model_name << "] "
-             << "AsEngineImpl::StartModel";
-  // create a new model
-  {
-    auto name = std::string(model_name);
-    as_stat_ = std::make_unique<AsEngineStat>(name);
-    model_state_map_[name] = std::make_shared<ModelControlState>(name);
-    model_state_map_[name]->StartLoop(&AsEngineImpl::ModelRunningThread, this,
-                                      name, model_state_map_[name]);
+AsStatus AsEngineImpl::WarmupModel(const char* model_name) {
+  if (EnvVarConfig::GetInt("ALLSPARK_DISABLE_WARMUP", 0) == 1) {
+    return AsStatus::ALLSPARK_SUCCESS;
   }
 
-#if ENABLE_SPAN_ATTENTION
-  if (device_ctx_->GetDeviceType() == DeviceType::CUDA) {
-    if (device_ctx_->GetCacheSpanSize() == 0) {
-      LOG(INFO) << "StartModel: span cache is disabled, skip warm-up";
-      return AsStatus::ALLSPARK_SUCCESS;
-    }
-  }
-#endif
-
-  // start the thread pool
-  ExpandRankThreadPool();
+  // generate and load fake loras upto limit
+  auto fake_lora_names = LoadFakeLoras(model_name);
 
   // collect mem stats from all workers
   int64_t min_bytes_available = std::numeric_limits<int64_t>::max();
@@ -1299,6 +1480,8 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
     }
 
     if (failed_ret != AsStatus::ALLSPARK_SUCCESS) {
+      UnloadFakeLoras(model_name,
+                      fake_lora_names);  // just free fake loras if failed
       return failed_ret;
     } else {
       LOG(INFO) << "StartModel: min available device memory in MB"
@@ -1307,14 +1490,44 @@ AsStatus AsEngineImpl::StartModel(const char* model_name, bool do_warmup) {
     }
   }
 
-  int env_disable_warmup =
-      EnvVarConfig::GetInt("ALLSPARK_DISABLE_WARMUP", 0) == 1;
-  if (!do_warmup || env_disable_warmup) {
-    return AsStatus::ALLSPARK_SUCCESS;
-  } else {
-    return WarmupModel(model_name, min_bytes_available);
-  }
+  auto ret =
+      WarmupModelInternal_(model_name, min_bytes_available, fake_lora_names);
+  UnloadFakeLoras(model_name, fake_lora_names);
+  return ret;
 }
+
+AsStatus AsEngineImpl::StartModel(const char* model_name) {
+  util::as_init_log();
+
+  // start model
+  DLOG(INFO) << "[" << model_name << "] "
+             << "AsEngineImpl::StartModel";
+  // create a new model
+  {
+    auto name = std::string(model_name);
+    as_stat_ = std::make_unique<AsEngineStat>(name);
+    model_state_map_[name] = std::make_shared<ModelControlState>(name);
+    model_state_map_[name]->StartLoop(&AsEngineImpl::ModelRunningThread, this,
+                                      name, model_state_map_[name]);
+  }
+
+#if ENABLE_SPAN_ATTENTION
+  if (device_ctx_->GetDeviceType() == DeviceType::CUDA) {
+    if (device_ctx_->GetCacheSpanSize() == 0) {
+      LOG(INFO) << "StartModel: span cache is disabled, skip warm-up";
+      return AsStatus::ALLSPARK_SUCCESS;
+    }
+  }
+#endif
+
+  // start the thread pool
+  ExpandRankThreadPool();
+
+  // warmup
+  auto ret = WarmupModel(model_name);
+  return ret;
+}
+
 void AsEngineImpl::ExpandRankThreadPool() {
   if (nranks_ > threadpool_size_) {
     threadpool_size_ = nranks_ * 2;
@@ -1331,17 +1544,22 @@ AsStatus AsEngineImpl::StopModel(const char* model_name) {
   // TODO: this check is strange
   assert(model_state_map_[model_name].get() != nullptr);
   auto& model_state = model_state_map_[model_name];
+
   CHECK_MODEL_STOPPING(model_state);
   {
-    std::unique_lock<std::mutex> lock(*(model_state->lock));
+    model_state->model_stopping = true;
     auto msg = EngineControlMessage(EngineControlMessageId::GracefulStopModel,
                                     reply_promise);
-    model_state->msg_queue.enqueue(std::move(msg));
+
+    LOG(INFO) << "AsEngineImpl:: send model stop message.";
+    bool succ = model_state->msg_queue.enqueue(std::move(msg));
+    if (!succ) {
+      LOG(ERROR) << "push message queue failed.";
+    }
   }
   model_state->cond_var->notify_all();
 
   auto ret = reply_promise->get_future().get();
-  model_state->model_stopping = true;
 
   if (ret != AsStatus::ALLSPARK_SUCCESS) {
     LOG(ERROR) << "[" << model_name << "] "
@@ -1391,8 +1609,7 @@ AsStatus AsEngineImpl::ReleaseModel(const char* model_name) {
     model_state_map_.erase(model_name);
   }
   // bfc can reclaim all gpu memory that not in use.
-  // SweepBFCAllocator();
-  DestroyBFCAllocator();
+  DestroyDeviceContext();
   return AsStatus::ALLSPARK_SUCCESS;
 
   // TODO;
@@ -1526,6 +1743,20 @@ AsStatus AsEngineImpl::StartRequest(
                << "StartRequest failed with rich input varify error"
                << (int)ret;
     return ret;
+  }
+  auto lora_name = request_info->config.lora_name;
+  if (!lora_name.empty()) {
+    LOG(INFO) << "req lora_name=" << lora_name;
+    if (!workers_[0]->GetModel()->GetLoraManager()->IsLoraExists(lora_name)) {
+      LOG(ERROR) << "LoRA " << lora_name << " not found, cannot StartRequest!";
+      return AsStatus::ALLSPARK_LORA_NOT_FOUND;
+    }
+
+    std::lock_guard<std::mutex> lora_guard(lora_usage_lock_);
+    if (!lora_name.empty()) {
+      lora_use_count_++;
+      loras_in_use_[model_name].insert(lora_name);
+    }
   }
 
   auto reply_promise = std::make_shared<std::promise<AsStatus>>();
@@ -1721,7 +1952,6 @@ AsStatus AsEngineImpl::SyncRequest(const char* model_name,
 #endif
   if (request_handle) {
     // sync one request
-    std::unique_lock<std::mutex> lock(*(model_state->lock));
     uuid = request_handle->request_uuid;
     auto msg = EngineControlMessage(EngineControlMessageId::SyncRequest,
                                     reply_promise, uuid);
@@ -1733,7 +1963,6 @@ AsStatus AsEngineImpl::SyncRequest(const char* model_name,
     uuid = "<ALL>";
     auto msg = EngineControlMessage(EngineControlMessageId::SyncAllRequest,
                                     reply_promise, uuid);
-    std::unique_lock<std::mutex> lock(*(model_state->lock));
     model_state->msg_queue.enqueue(std::move(msg));
   }
   model_state->cond_var->notify_one();
@@ -1760,9 +1989,10 @@ AsStatus AsEngineImpl::SyncRequest(const char* model_name,
 
 AsStatus AsEngineImpl::LoadLoraByName(const char* model_name,
                                       const char* lora_name) {
-  DLOG(INFO) << "[" << model_name << "] "
-             << "LoadLoraByName: " << model_name << "::" << lora_name;
   std::lock_guard<std::mutex> lora_guard(lora_lock_);
+  DLOG(INFO) << "before load_lora " << lora_name
+             << ", free space=" << workers_[0]->GetAvailableMemoryBytes();
+
   if (!lora_name || strlen(lora_name) == 0) {
     LOG(ERROR) << "[" << model_name << "] "
                << "LoadLoraByName: Invalid lora_name ";
@@ -1770,12 +2000,15 @@ AsStatus AsEngineImpl::LoadLoraByName(const char* model_name,
   }
   if (workers_[0]->GetModel()->GetLoraManager()->IsLoraExists(lora_name)) {
     LOG(ERROR) << "LoRA " << lora_name << " already loaded, unload it first!";
-    return AsStatus::ALLSPARK_REQUEST_DENIED;
+    return AsStatus::ALLSPARK_LORA_ALREADY_LOADED;
   }
-  if (loras_in_use_.count(model_name) &&
-      loras_in_use_[model_name].count(lora_name)) {
-    LOG(ERROR) << "LoRA " << lora_name << " in use, cannot load!";
-    return AsStatus::ALLSPARK_REQUEST_DENIED;
+  {
+    std::lock_guard<std::mutex> lora_guard(lora_usage_lock_);
+    if (loras_in_use_.count(model_name) &&
+        loras_in_use_[model_name].count(lora_name)) {
+      LOG(ERROR) << "LoRA " << lora_name << " in use, cannot load!";
+      return AsStatus::ALLSPARK_LORA_IN_USE;
+    }
   }
 
   assert(model_state_map_[model_name].get() != nullptr);
@@ -1794,7 +2027,9 @@ AsStatus AsEngineImpl::LoadLoraByName(const char* model_name,
     ret = result[i].get();
     AS_CHECK_STATUS(ret);
   }
-
+  LOG(INFO) << "after load_lora " << lora_name
+            << ", free space=" << workers_[0]->GetAvailableMemoryBytes();
+  workers_[0]->GetModel()->GetLoraManager()->PrintLoras();
   return ret;
 }
 
@@ -1803,6 +2038,10 @@ AsStatus AsEngineImpl::UnloadLoraByName(const char* model_name,
   DLOG(INFO) << "[" << model_name << "] "
              << "UnloadLoraByName: " << model_name << "::" << lora_name;
   std::lock_guard<std::mutex> lora_guard(lora_lock_);
+  LOG(INFO) << "before unload_lora " << lora_name
+            << ", free space=" << workers_[0]->GetAvailableMemoryBytes();
+  workers_[0]->GetModel()->GetLoraManager()->PrintLoras();
+
   if (!lora_name || strlen(lora_name) == 0) {
     LOG(ERROR) << "[" << model_name << "] "
                << "UnloadLoraByName: Invalid lora_name ";
@@ -1810,15 +2049,16 @@ AsStatus AsEngineImpl::UnloadLoraByName(const char* model_name,
   }
   if (!workers_[0]->GetModel()->GetLoraManager()->IsLoraExists(lora_name)) {
     LOG(ERROR) << "LoRA " << lora_name << " not found, cannot unload!";
-    return AsStatus::ALLSPARK_REQUEST_DENIED;
+    return AsStatus::ALLSPARK_LORA_NOT_FOUND;
   }
-  /*  Parallel control logic has moved to the caller framework, by YuChu
-  if (loras_in_use_.count(model_name) &&
-      loras_in_use_[model_name].count(lora_name)) {
-    LOG(ERROR) << "LoRA " << lora_name << " in use, cannot unload!";
-    return AsStatus::ALLSPARK_REQUEST_DENIED;
+  {
+    std::lock_guard<std::mutex> lora_guard(lora_usage_lock_);
+    if (loras_in_use_.count(model_name) &&
+        loras_in_use_[model_name].count(lora_name)) {
+      LOG(ERROR) << "LoRA " << lora_name << " in use, cannot unload!";
+      return AsStatus::ALLSPARK_LORA_IN_USE;
+    }
   }
-  */
 
   assert(model_state_map_[model_name].get() != nullptr);
   auto& model_state = model_state_map_[model_name];
@@ -1841,6 +2081,9 @@ AsStatus AsEngineImpl::UnloadLoraByName(const char* model_name,
     AS_CHECK_STATUS(ret);
   }
 
+  workers_[0]->GetModel()->GetLoraManager()->PrintLoras();
+  LOG(INFO) << "after unload_lora " << lora_name
+            << ", free space=" << workers_[0]->GetAvailableMemoryBytes();
   return ret;
 }
 
@@ -2232,13 +2475,13 @@ AsStatus AsEngineImpl::StartRequestImpl(
     DLTensorMap* outputs, GenerateConfig& gen_cfg) {
   DLOG(INFO) << "[" << model_name << "] "
              << "AsEngineImpl::RunTextGeneration" << std::endl;
-
   lock_guard_wrapper<std::mutex> guard(engine_lock_);
   DLOG(INFO) << "[" << model_name << "] "
              << "AsEngineImpl::RunTextGeneration mutex lock passed"
              << std::endl;
 
   TensorMap out_tensors;
+  // TODO: alloc generated_ids on CPU
   std::string out_name = "generated_ids";
   out_tensors.insert(
       {out_name, std::make_shared<AsTensor>(out_name, DeviceType::CPU,
@@ -2471,13 +2714,16 @@ void AsEngineImpl::UpdateResult(
     }
 
     // release lora_name from loras_in_use_
-    //if (request->status == AsEngine::GenerateRequestStatus::GenerateFinished) {
-    //  auto lora_name = request->gen_cfg.lora_name;
-    //  std::lock_guard<std::mutex> lora_guard(lora_usage_lock_);
-    //  if (loras_in_use_.count(model_name) and !lora_name.empty()) {
-    //    loras_in_use_[model_name].extract(lora_name);
-    //  }
-    // }
+    if (request->status == AsEngine::GenerateRequestStatus::GenerateFinished) {
+      if (lora_use_count_.load() > 0) {
+        auto lora_name = request->gen_cfg.lora_name;
+        std::lock_guard<std::mutex> lora_guard(lora_usage_lock_);
+        if (loras_in_use_.count(model_name) and !lora_name.empty()) {
+          loras_in_use_[model_name].extract(lora_name);
+          lora_use_count_--;
+        }
+      }
+    }
   }
 }
 
@@ -2563,16 +2809,21 @@ void AsEngineImpl::ModelRunningThread(
 
     // decoupling message decoding phase and model execution phase
     bool no_execution = false;
-    int process_msg_size = 0;
     // Phase 1: message decoding
     // Pick one control message, handle control message, return control
     // message promise.
     // If synchronizing, block any message until finished.
 
+    util::Timer t_msg_handle;
+
+#ifndef ENABLE_CUDA
+    // this message counter is only for multi-numa syncing.
+    long processed_msg_counter = 0;
+#endif
+
     if (!synchronizing) {
       TracerLog t(device_ctx_->GetDeviceType(), "LoopHandleMsg", 3);
-      std::unique_lock<std::mutex> lock(*(model_state->lock));
-      int cur_msg_size = model_state->msg_queue.size();
+      int cur_msg_size = model_state->msg_queue.size_approx();
       // XXX: don't check message size, after change to concurrent queue, this
       // may not accurate.
 
@@ -2580,16 +2831,52 @@ void AsEngineImpl::ModelRunningThread(
         // NOTE: the front is moved, do not use it anymore
 
         EngineControlMessage msg;
-        bool have_msg = model_state->msg_queue.try_dequeue(msg);
 
-        if (!have_msg) {
-          // skip messasge process stage.
-          break;
+        // When there are new messages, take them out, and if the size is
+        // greater than 0, process the new messages again. If there are no new
+        // messages, and sync_pending_set equals 0, and it is not in the middle
+        // of stop model, then skip message processing and continue executing
+        // the main loop. If there are no new messages and the above check
+        // fails, then enter the wait queue.
+
+        if (model_state->msg_queue.size_approx() > 0) {
+          bool got_new_message = model_state->msg_queue.try_dequeue(msg);
+          if (!got_new_message) {
+            LOG(ERROR) << "queue size > 0, but not no message";
+            goto skip_message_process;
+          } else {
+            DLOG(INFO) << "[" << model_name << "] "
+                       << "ModelRunningThread: receive message: "
+                       << ToString(msg.msg);
+          }
+        } else {
+          // message queue size == 0
+          // TODO: add handle of gracefully stop.
+          if (sync_pending_set.size() != 0) {
+            LOG(INFO) << " pending syncing request, skip message process..";
+            goto skip_message_process;
+          }
+
+          // Note: get unfinished request will require one model running to
+          // change, so check the current management request too.
+          if (!graceful_stop_phase &&
+              workers_[0]->GetUnFinishedRequest() == 0 &&
+              model_state->request_handle_map.size() == 0 &&
+              !model_state->model_stopping.load()) {
+            LOG(INFO) << "ModelRunningThread: EventLoop is going to suspend.";
+
+            model_state->msg_queue.wait_dequeue(msg);
+
+            LOG(INFO) << "ModelRunningThread: EventLoop is going to  resume.";
+
+          } else {
+            goto skip_message_process;
+          }
         }
 
-        DLOG(INFO) << "[" << model_name << "] "
-                   << "ModelRunningThread: receive message: "
-                   << ToString(msg.msg);
+        LOG(INFO) << "[" << model_name << "] "
+                  << "ModelRunningThread: receive message: "
+                  << ToString(msg.msg);
 
         // dispatch message
         switch (msg.msg) {
@@ -2644,6 +2931,10 @@ void AsEngineImpl::ModelRunningThread(
                                        nullptr, msg.request->config);
             DLOG(INFO) << "[" << model_name << "] "
                        << "RunTextGeneration finish " << t1.elapsed() << " ms";
+            if (ret != AsStatus::ALLSPARK_SUCCESS) {
+              LOG(ERROR) << "ModelRunningThread: Start Request return failed: "
+                         << " uuid: " << msg.request_uuid << " " << (int)ret;
+            }
             // start request don't wait for reply from client side code.
             // msg.promise->set_value(ret);
 
@@ -2689,8 +2980,7 @@ void AsEngineImpl::ModelRunningThread(
 
           case EngineControlMessageId::ReleaseRequest: {
             LOG(INFO) << "[" << model_name << "]"
-                      << "Release Request received: "
-                      << msg.request_uuid;
+                      << "Release Request received: " << msg.request_uuid;
             // before release , stop request
             // auto ret1 = this->StopRequestByRequestID(model_name.c_str(),
             //                                          handle_ptr->request_uuid);
@@ -2723,7 +3013,7 @@ void AsEngineImpl::ModelRunningThread(
             // check if it's the final msg
             if (graceful_stop_phase &&
                 workers_[0]->GetUnFinishedRequest() == 0 &&
-                model_state->msg_queue.size() == 0) {
+                model_state->msg_queue.size_approx() == 0) {
               LOG(INFO) << "graceful_stop_phase: no unfinished request";
               graceful_final_released = true;
             }
@@ -2745,16 +3035,33 @@ void AsEngineImpl::ModelRunningThread(
                          << (int)msg.msg;
           }
         }
+
+#ifndef ENABLE_CUDA
+        processed_msg_counter++;
+#endif
       }
-      process_msg_size = cur_msg_size - model_state->msg_queue.size();
     } else {
       DLOG(INFO) << "[" << model_name << "] "
                  << "skipping message handling due to synchronization";
     }
 
+  skip_message_process:
+
+    util::Timer t_msg_handle_finish;
+
+    auto msg_handle_time_ms =
+        util::Timer::duration_ms(t_msg_handle, t_msg_handle_finish);
+
+    if (msg_handle_time_ms > 1) {
+      // usually message handle cost around 0.01-0.1 ms
+      LOG(INFO)
+          << "ModelRunningThread: message handle cost too much, time(ms): "
+          << msg_handle_time_ms;
+    }
+
 #ifndef ENABLE_CUDA
     no_execution = workers_[0]->GetDeviceContext()->SemWaitMsgSynInterProcess(
-        process_msg_size);
+        processed_msg_counter);
 #endif
 
     // Phase 2: model execution
@@ -2859,7 +3166,6 @@ void AsEngineImpl::ModelRunningThread(
     // Step 2.2: get every running request and put result to the queue.
     {
       TracerLog t(device_ctx_->GetDeviceType(), "Loop:Update", 4);
-      std::unique_lock<std::mutex> lock(*(model_state->lock));
       // LOG(INFO) << "[" << model_name << "] "
       //           << "now handle_size = "
       //           << model_state->request_handle_map.size();
@@ -2887,8 +3193,11 @@ void AsEngineImpl::ModelRunningThread(
         // thread will wait on the cond var if the msg queue size is 0.
       }
     }
+
+    // if there is no message unfinished task, check whether can enter stop
+    // state.
     if (workers_[0]->GetUnFinishedRequest() == 0 &&
-        model_state->msg_queue.size() == 0) {
+        model_state->msg_queue.size_approx() == 0) {
       // check if in GracefulStopModel phase
       if (graceful_stop_phase) {
         LOG(INFO) << "Enter graceful stop phase.";
@@ -2910,28 +3219,17 @@ void AsEngineImpl::ModelRunningThread(
                  "!!!";
           graceful_stop_msg.promise->set_value(
               AsStatus::ALLSPARK_RUNTIME_ERROR);
-          std::unique_lock<std::mutex> lock(*(model_state->lock));
           model_state->model_stopped = true;
           goto loop_end;  // use goto is more clear going to end of loop.
         }
         if (graceful_final_released) {
           graceful_stop_msg.promise->set_value(AsStatus::ALLSPARK_SUCCESS);
-          std::unique_lock<std::mutex> lock(*(model_state->lock));
           model_state->model_stopped = true;
           DLOG(INFO) << "All done, gracefully stopped!";
           goto loop_end;
         }
       }
       // there is no running task , put our thread into wait.
-      std::unique_lock<std::mutex> lock(*(model_state->lock));
-      LOG(INFO) << "[" << model_name << "] "
-                << "No Running Request, No Control Message, main thread put "
-                   "into sleep: unfnished task: "
-                << workers_[0]->GetUnFinishedRequest();
-      model_state->cond_var->wait(lock, [this, model_state]() {
-        return this->workers_[0]->GetUnFinishedRequest() != 0 ||
-               model_state->msg_queue.size() > 0;
-      });
     }
     // if no control message and no running task, wait on task.
   }
@@ -3119,11 +3417,11 @@ bool AsEngine::IsAllSparkWorkAsService() {
 AsModelConfig::AsModelConfig() {
 #ifdef ENABLE_CUDA
   prefill_mode = AsMHAPrefill::AsPrefillXformer;
-#else
+#else   // ENABLE_CUDA
   prefill_mode = AsMHAPrefill::AsPrefillDefault;
-#endif
+#endif  // ENABLE_CUDA
 
-  cache_span_size = 16;
+  cache_span_size = default_span_size;
 }
 
 AsModelConfig::AsModelConfig(
@@ -3137,7 +3435,8 @@ AsModelConfig::AsModelConfig(
     bool enable_prefix_cache, int prefix_cache_ttl,
     AsMHAPrefill in_prefill_mode, AsCacheMode in_cache_mode,
     AsEvictionStrategy in_eviction_strategy,
-    AsSchedulingStrategy in_scheduling_strategy, bool enable_sparsity_matmul)
+    AsSchedulingStrategy in_scheduling_strategy, bool enable_sparsity_matmul,
+    int lora_max_rank, int lora_max_num)
     : model_name(std::move(in_model_name)),
       model_path(std::move(in_model_path)),
       weights_path(std::move(in_weights_path)),
@@ -3159,14 +3458,16 @@ AsModelConfig::AsModelConfig(
       eviction_strategy(in_eviction_strategy),
       text_graph(in_text_graph),
       scheduling_strategy(in_scheduling_strategy),
-      enable_sparsity_matmul(enable_sparsity_matmul) {
+      enable_sparsity_matmul(enable_sparsity_matmul),
+      lora_max_rank(lora_max_rank),
+      lora_max_num(lora_max_num) {
   // replace the defualt setting in header.
   if (in_prefill_mode == AsMHAPrefill::AsPrefillDefault) {
 #ifdef ENABLE_CUDA
     prefill_mode = AsMHAPrefill::AsPrefillXformer;
-#else
+#else   // ENABLE_CUDA
     prefill_mode = AsMHAPrefill::AsPrefillDefault;
-#endif
+#endif  // ENABLE_CUDA
   }
 }
 
@@ -3231,12 +3532,11 @@ std::string AsModelConfig::ToString() const {
 #else
   result += std::string("\tcache_span_size = ") +
             std::to_string(cache_span_size) + "\n";
-
+#endif  // FIXED_SPAN_SIZE
   result += std::string("\tcache_span_num_init = ") +
             std::to_string(cache_span_num_init) + "\n";
   result += std::string("\tcache_span_num_grow = ") +
             std::to_string(cache_span_num_grow) + "\n";
-#endif  // FIXED_SPAN_SIZE
   result += std::string("\tenable_prefix_cache = ") +
             std::to_string(enable_prefix_cache) + "\n";
   result += std::string("\tprefix_cache_ttl = ") +
@@ -3246,6 +3546,10 @@ std::string AsModelConfig::ToString() const {
             std::to_string(swap_threshold) + "\n";
   result += std::string("\tenable_sparsity_matmul = ") +
             std::to_string(enable_sparsity_matmul) + "\n";
+  result +=
+      std::string("\tlora_max_rank= ") + std::to_string(lora_max_rank) + "\n";
+  result +=
+      std::string("\tlora_max_num= ") + std::to_string(lora_max_num) + "\n";
 
   return result;
 }

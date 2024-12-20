@@ -20,11 +20,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
                                       const TensorMap& weights_map,
                                       TensorMap& weights_buffer,
                                       TensorMap* tensor_map) {
-  // DLOG(INFO) << "GemmLoraCapsuleOpGPU::InitV2" << std::endl;
-  // for easily checking if lora op is available in model
-  static std::once_flag lora_enabled_print_once;
-  std::call_once(lora_enabled_print_once,
-                 [] { LOG(INFO) << "lora enabled!" << std::endl; });
+  DLOG(INFO) << "GemmLoraCapsuleOpGPU::InitV2" << std::endl;
 
   //  Capsule's special Init
   //  taken from AsOperator::Init
@@ -51,7 +47,8 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   // taken from AsOperator::Init END
 
   std::string act_str = "";
-  OperatorProto mutable_op_proto = op_proto;
+  OperatorProto mutable_op_proto;
+  mutable_op_proto.CopyFrom(op_proto);
 
   const auto& orig_attr_map = op_proto.attr();
   if (orig_attr_map.count("InnerGemmType")) {
@@ -59,6 +56,8 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   }
 
   // 组装Lora op_list
+  std::string op_name_pattern =
+      util::StringUtil::RemoveLayerNumber(op_proto.op_name());
   // base
   auto op = OpFactory::getInstance().GetOperator(
       {inner_gemm_type_, ctx.GetDeviceType()})();
@@ -66,7 +65,9 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   auto& attr_map = *mutable_op_proto.mutable_attr();
   auto input = mutable_op_proto.mutable_inputs(0);
   auto output = mutable_op_proto.mutable_outputs(0);
-  base_out_name_ = output->name();
+  capsule_out_name_ = std::string(output->name());
+  base_out_name_ = op_name_pattern + ".base_gemm.out";
+  output->set_name(base_out_name_);
   if (attr_map.count("activation")) {
     activation_ = *(UnaryType*)(attr_map.at("activation").c_str());
     act_str = attr_map.at("activation");
@@ -76,6 +77,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
                rank_info_, tensor_map, profiler_);
   lora_op_list_.emplace_back(std::move(op));
 
+#if 0  // 老算子
   // Lora_A
   op =
       OpFactory::getInstance().GetOperator({"GemmLora", ctx.GetDeviceType()})();
@@ -88,7 +90,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   }
   auto weight = mutable_op_proto.mutable_weights(0);
   weight->set_name(mutable_op_proto.op_name() + ".weight");
-  output->set_name(mutable_op_proto.op_name() + ".out");
+  output->set_name(op_name_pattern + ".lora_A.out");
   attr_map.erase("alpha");  // loraA 没有伸缩
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
                lora_manager_, rank_info_, tensor_map, profiler_);
@@ -101,11 +103,36 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   mutable_op_proto.set_op_name(op_proto.op_name() + ".lora_B");
   input->set_name(output->name());
   weight->set_name(mutable_op_proto.op_name() + ".weight");
-  output->set_name(mutable_op_proto.op_name() + ".out");
+  output->set_name(op_name_pattern + ".lora_B.out");
   attr_map.erase("alpha");  // 优化aslora后，使用默认1.0
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
                lora_manager_, rank_info_, tensor_map, profiler_);
   lora_op_list_.emplace_back(std::move(op));
+#endif
+
+#if 1
+  // 采用新算子
+  op =
+      OpFactory::getInstance().GetOperator({"SgmvLora", ctx.GetDeviceType()})();
+  mutable_op_proto.set_op_type("SgmvLora");
+  mutable_op_proto.set_op_name(op_proto.op_name() + ".sgmv");
+  auto weights = mutable_op_proto.mutable_weights();
+  if (weights->size() == 1) {
+    // sgmv需要lora_A、lora_B两个weight
+    TensorProto weight2;
+    weight2.set_name(op_proto.op_name());  // basic name
+    weight2.set_data("");
+    mutable_op_proto.mutable_weights()->AddAllocated(new TensorProto(weight2));
+  }
+  mutable_op_proto.mutable_weights(0)->set_name(op_proto.op_name() +
+                                                ".lora_A.weight");
+  mutable_op_proto.mutable_weights(1)->set_name(op_proto.op_name() +
+                                                ".lora_B.weight");
+  output->set_name(op_name_pattern + ".sgmv.out");
+  op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
+               lora_manager_, rank_info_, tensor_map, profiler_);
+  lora_op_list_.emplace_back(std::move(op));
+#endif
 
   // Binary-Add
   op = OpFactory::getInstance().GetOperator({"Binary", ctx.GetDeviceType()})();
@@ -116,10 +143,9 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   input2.set_name(base_out_name_);
   input2.set_data("");
   mutable_op_proto.mutable_inputs()->AddAllocated(new TensorProto(input2));
-  auto output_name = activation_ == UNARYTYPE_UNDEFINED
-                         ? op_proto.op_name()
-                         : mutable_op_proto.op_name();
-  bin_add_out_name_ = output_name + ".out";
+  bin_add_out_name_ = activation_ == UNARYTYPE_UNDEFINED
+                          ? capsule_out_name_
+                          : op_name_pattern + ".base_add_lora.out";
   output->set_name(bin_add_out_name_);
   mutable_op_proto.clear_weights();
   attr_map.clear();
@@ -138,8 +164,8 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
     mutable_op_proto.mutable_inputs()->DeleteSubrange(
         1,
         mutable_op_proto.mutable_inputs()->size() - 1);  // 恢复成1个输入
-    input->set_name(output->name());
-    output->set_name(op_proto.op_name() + ".out");
+    input->set_name(bin_add_out_name_);
+    output->set_name(capsule_out_name_);
     attr_map.clear();
     attr_map["unary_type"] = act_str;
     op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
@@ -151,12 +177,23 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
 }
 
 void GemmLoraCapsuleOpGPU::SwitchLoraGraph(bool use_std_gemm_graph) {
-  if (use_std_gemm_graph) {
-    if (activation_ != UNARYTYPE_UNDEFINED)
+  if (activation_ == UNARYTYPE_UNDEFINED) {  // 无act
+    if (use_std_gemm_graph) {  // 无lora 标准gemm，没有act：
+                               // 最后一个op是bin_add.  只call 标准gemm
+      // base_gemm 输出到最终结果。
+      lora_op_list_.front()->UpdateOutName(0, capsule_out_name_);
+    } else {  // lora：最后一个op是bin_add
+      // base_gemm 输出到base_out_name
+      lora_op_list_.front()->UpdateOutName(0, base_out_name_);
+    }
+  } else {                     // 有act
+    if (use_std_gemm_graph) {  // 无lora，最后一个op是act，会被call
+      // act 从base_out_name 获取输入， (输出一定是到最终结果)
       lora_op_list_.back()->UpdateInName(0, base_out_name_);
-  } else {
-    if (activation_ != UNARYTYPE_UNDEFINED)
+    } else {  // lora：最后一个op是act
+      // act从bin_add_out_name 获取输入(act输出一定是到最终结果)
       lora_op_list_.back()->UpdateInName(0, bin_add_out_name_);
+    }
   }
 }
 
@@ -169,8 +206,9 @@ AsStatus GemmLoraCapsuleOpGPU::Reshape(RuntimeContext* runtime_ctx) {
     SwitchLoraGraph(true);
     // TODO: use unified graph, ditto
     AS_CHECK_STATUS(lora_op_list_.front()->CallReshape(runtime_ctx));
-    if (activation_ != UNARYTYPE_UNDEFINED)
+    if (activation_ != UNARYTYPE_UNDEFINED) {
       AS_CHECK_STATUS(lora_op_list_.back()->CallReshape(runtime_ctx));
+    }
     return AsStatus::ALLSPARK_SUCCESS;
   }
 
@@ -186,7 +224,6 @@ AsStatus GemmLoraCapsuleOpGPU::Reshape(RuntimeContext* runtime_ctx) {
     }
   }
   if (!lora_name.empty()) {
-    DLOG(INFO) << "lora=" << lora_name << std::endl;
     has_lora_in_batch_ = true;
   }
 
@@ -207,14 +244,17 @@ AsStatus GemmLoraCapsuleOpGPU::Reshape(RuntimeContext* runtime_ctx) {
 }
 
 AsStatus GemmLoraCapsuleOpGPU::Forward(RuntimeContext* runtime_ctx) {
-  // DLOG(INFO) << "GemmLoraCapsuleOpGPU::Forward" << std::endl;
+  DLOG(INFO) << "GemmLoraCapsuleOpGPU::Forward" << std::endl;
   AsStatus ret = AsStatus::ALLSPARK_SUCCESS;
 
   if (lora_manager_->IsEmpty()) {
     SwitchLoraGraph(true);
     AS_CHECK_STATUS(lora_op_list_.front()->CallForward(runtime_ctx));
-    if (activation_ != UNARYTYPE_UNDEFINED)
+    // lora_op_list_.front()->PrintInformation();
+    if (activation_ != UNARYTYPE_UNDEFINED) {
       AS_CHECK_STATUS(lora_op_list_.back()->CallForward(runtime_ctx));
+      // lora_op_list_.back()->PrintInformation();
+    }
     return AsStatus::ALLSPARK_SUCCESS;
   }
 
@@ -223,15 +263,18 @@ AsStatus GemmLoraCapsuleOpGPU::Forward(RuntimeContext* runtime_ctx) {
     for (auto& op : lora_op_list_) {
       ret = op->CallForward(runtime_ctx);
       // op->PrintInformation();
-      // DO_ARBITRATE(0, 1, 0, op);
+      //   DO_ARBITRATE(0, 1, 0, op);
       AS_CHECK_STATUS(ret);
     }
     return ret;
   } else {
     SwitchLoraGraph(true);
     AS_CHECK_STATUS(lora_op_list_.front()->CallForward(runtime_ctx));
-    if (activation_ != UNARYTYPE_UNDEFINED)
+    // lora_op_list_.front()->PrintInformation();
+    if (activation_ != UNARYTYPE_UNDEFINED) {
       AS_CHECK_STATUS(lora_op_list_.back()->CallForward(runtime_ctx));
+      // lora_op_list_.back()->PrintInformation();
+    }
     return AsStatus::ALLSPARK_SUCCESS;
   }
 }

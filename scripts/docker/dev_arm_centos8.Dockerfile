@@ -75,9 +75,5 @@ RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz &
     cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
 RUN pip3 install auditwheel==6.1.0
 
-RUN wget "https://xxxxxx/conan_allspark_source_arm_20241119.tar" && \
-    tar -xvf conan_allspark_source_arm_20241119.tar && \
-    mv conan_allspark_source_arm_20241119 /root/.conan && \
-    rm -rf conan_allspark_source_arm_20241119.tar
 
 WORKDIR /root/

@@ -64,6 +64,7 @@ class Qwen_v20_MOE(Model):
         cfg.kv_channels = int(cfg.hidden_size / cfg.num_heads)
         cfg.activation = get_activation(torch_cfg.get('hidden_act', "silu"))
         cfg.size_per_head = torch_cfg.get('size_per_head', 128)
+        cfg.intermediate_size = torch_cfg.get('intermediate_size', 0)
         cfg.is_generate = self.is_generate
 
         # daoxian added for span version

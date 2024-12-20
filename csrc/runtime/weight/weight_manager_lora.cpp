@@ -5,53 +5,54 @@
 
 #include "weight_manager_lora.h"
 
+#include <sys/stat.h>
+
 namespace allspark {
 
-std::shared_ptr<LoraManager> LoraManager::Create(const RankInfo& rank_info) {
-  return std::make_shared<LoraManager>(rank_info);
+std::shared_ptr<LoraManager> LoraManager::Create(const int lora_max_num,
+                                                 const RankInfo& rank_info) {
+  return std::make_shared<LoraManager>(lora_max_num, rank_info);
 }
 
 // currently, only support 1 base-model for each LoraManager
 std::shared_ptr<ModelWeightHandler>& LoraManager::RegisterLora(
     const AsModelConfig& lora_config) {
-  DLOG(INFO) << "enter LoraManager::RegisterLora " << lora_config.model_name;
   rw_write_lock lk(lora_lock_,
                    "RegisterLora");  // 每个AsModel有自己的LoraManager，
   // 无需锁
-  size_t new_id = weight_handler_store_.size();
+  // 寻找空闲slot
+  size_t i = 0;
+  for (i = 0; i < lora_max_num_; i++) {
+    if (weight_handler_store_[i] == nullptr) break;
+  }
+  size_t new_id = i;
+  AS_ENFORCE(new_id < lora_max_num_);
   auto fake_proto = std::make_shared<TransformerProto>();
-  weight_handler_store_.emplace_back(std::make_shared<ModelWeightHandler>(
+  auto weight_handle_ptr = std::make_shared<ModelWeightHandler>(
       new_id, lora_config,
-      fake_proto));  // nullptr: lora只有权重，没有对应的子图
+      fake_proto);  // nullptr: lora只有权重，没有对应的子图
+  weight_handler_store_[new_id] = weight_handle_ptr;  // 复用 handle slot
   lora_name_idx_map_[lora_config.model_name] = new_id;
-  LOG(INFO) << "LoraManager::RegisterLora " << lora_config.model_name << " "
-            << weight_handler_store_.back() << " done!";
-  return weight_handler_store_.back();
+  DLOG(INFO) << "LoraManager::RegisterLora " << lora_config.model_name
+             << ", handle ptr=" << weight_handler_store_[new_id].get()
+             << " done!";
+  return weight_handler_store_[new_id];
 }
 
 void LoraManager::UnRegisterLora(const std::string& lora_name) {
   rw_write_lock lk(lora_lock_,
                    "UnRegisterLora");  // 每个AsModel有自己的LoraManager，
   // 无需锁
-  DLOG(INFO) << "enter LoraManager::UnRegisterLora " << lora_name;
   auto idx = lora_name_idx_map_.at(lora_name);
   auto& lora_weight_handle = weight_handler_store_.at(idx);
-  SwapOutWeight(lora_weight_handle, rank_info_);  // free cuda mem
+  AS_ENFORCE(handler_is_avalibile(lora_weight_handle));
+  LOG(INFO) << "UnRegisterLora " << lora_name
+            << " handle id=" << lora_weight_handle->GetId();
+  weight_storage_[lora_weight_handle].erase(rank_info_);  // 释放cuda mem
+  // 让该lora handle彻底消失
+  weight_storage_.erase(lora_weight_handle);
   weight_handler_store_[idx] = nullptr;
   lora_name_idx_map_.erase(lora_name);
-
-  // 因为weight_handler_store_设计成vector， 删掉某个lora后,
-  // weight_handler_store_概念上会产生"空洞"，需要重新compact: compact
-  // weight_handler_store_
-  std::vector<std::shared_ptr<ModelWeightHandler>> tmp_weight_handler_store;
-  for (auto& item : lora_name_idx_map_) {
-    auto& lora_name = item.first;
-    auto& idx = item.second;
-    tmp_weight_handler_store.emplace_back(weight_handler_store_[idx]);
-    idx = tmp_weight_handler_store.size() - 1;
-  }
-  // std::swap(weight_handler_store_, tmp_weight_handler_store);
-  weight_handler_store_ = tmp_weight_handler_store;
   LOG(INFO) << "LoraManager::UnRegisterLora " << lora_name << " done!";
 }
 
@@ -59,6 +60,7 @@ std::shared_ptr<AsTensor> LoraManager::GetLoraTensorByName(
     const std::string& lora_name, const std::string& tensor_name) {
   rw_write_lock lk(lora_lock_,
                    "GetLoraTensorByName");  // 每个AsModel有自己的LoraManager，
+  AS_ENFORCE(lora_name_idx_map_.count(lora_name) > 0);
   auto& lora_weight_handle =
       weight_handler_store_.at(lora_name_idx_map_.at(lora_name));
   return GetWeightTensor(lora_weight_handle, rank_info_, tensor_name);
@@ -87,11 +89,9 @@ bool LoraManager::HasLoraBias(const std::string& lora_name,
                               const std::string& lora_weight_name) {
   rw_write_lock lk(lora_lock_,
                    "HasLoraBias");  // 每个AsModel有自己的LoraManager，
-  DLOG(INFO) << "enter LoraManager::HasLoraBias " << lora_name << " "
-             << lora_weight_name;
+  AS_ENFORCE(lora_name_idx_map_.count(lora_name) > 0);
   auto& lora_weight_handle =
       weight_handler_store_.at(lora_name_idx_map_.at(lora_name));
-  DLOG(INFO) << "gethandler:" << lora_weight_handle;
   std::string lora_bias_name = lora_weight_name;
   std::string weight_suffix = ".weight";
   std::string bias_suffix = ".bias";
@@ -127,17 +127,47 @@ std::shared_ptr<ModelWeightHandler> LoraManager::GetHandleByName(
     const std::string& lora_name) {
   rw_write_lock lk(lora_lock_,
                    "GetHandleByName");  // 每个AsModel有自己的LoraManager，
+  AS_ENFORCE(lora_name_idx_map_.count(lora_name) > 0);
   return weight_handler_store_.at(lora_name_idx_map_.at(lora_name));
+}
+
+AsStatus LoraManager::ValidateWeight(
+    std::shared_ptr<ModelWeightHandler>& weight_handler,
+    const ModelWeightAccessInfo& weight_info, const DeviceContext& device_ctx) {
+  auto inference_dtype = device_ctx.GetDtype();
+  auto lora_dtype = weight_info.info.dtype;
+  if (lora_dtype != inference_dtype) {
+    LOG(ERROR) << "lora " << weight_handler->GetModelConfig().model_name
+               << " dtype mismatch!"
+               << " dtype for inference is " << DataType_Name(inference_dtype)
+               << " lora's dtype is " << DataType_Name(lora_dtype);
+    return AsStatus::ALLSPARK_PARAM_ERROR;
+  }
+  if (weight_info.name.find(".lora_B") != std::string::npos &&
+      weight_info.info.shape[0] >
+          weight_handler->GetModelConfig().lora_max_rank)
+    return AsStatus::ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR;
+  return AsStatus::ALLSPARK_SUCCESS;
 }
 
 void LoraManager::PrintLoras() {
   LOG(INFO) << "loraStorage size=" << weight_handler_store_.size() << " "
             << lora_name_idx_map_.size();
+  LOG(INFO) << "loras in map:";
   for (auto& item : lora_name_idx_map_) {
     LOG(INFO)
         << item.first << " : " << item.second << ", "
-        << weight_handler_store_.at(item.second)->GetModelConfig().model_name;
+        << weight_handler_store_.at(item.second)->GetModelConfig().model_name
+        << ", addr=" << &(weight_handler_store_.at(item.second))
+        << ", ptr=" << weight_handler_store_.at(item.second).get();
   }
+  LOG(INFO) << "loras in vector:";
+  for (int i = 0; i < weight_handler_store_.size(); i++) {
+    if (weight_handler_store_.at(i) == nullptr) continue;
+    LOG(INFO) << i << " : "
+              << weight_handler_store_.at(i)->GetModelConfig().model_name;
+  }
+
   LOG(INFO) << "-----lora print done";
 }
 

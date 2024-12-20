@@ -32,6 +32,14 @@ AsStatus GemmLoraOpGPU::InitV2(const OperatorProto& op_proto,
   op_proto_.CopyFrom(op_proto);
   AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto, ctx, weights_map, weights_buffer,
                                      tensor_map));
+
+  // 计算QKV相关维度信息
+  int nslice = ctx.GetNranks();
+  assert(ctx.GetNumberHeads() * ctx.GetSizePerHead() % nslice == 0);
+  assert(ctx.GetNumberGroups() * ctx.GetSizePerHead() % nslice == 0);
+  q_outdim_size_ = ctx.GetNumberHeads() * ctx.GetSizePerHead() / nslice;
+  k_outdim_size_ = ctx.GetNumberGroups() * ctx.GetSizePerHead() / nslice;
+  v_outdim_size_ = k_outdim_size_;
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -59,13 +67,6 @@ AsStatus GemmLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
     auto lora_weight_handle = lora_manager_->GetHandleByName(lora_name);
     DLOG(INFO) << "done lora_manager_->GetHandleByName lora " << lora_name
                << std::endl;
-    SwapStatus swap_status = lora_manager_->GetSwapStatus(lora_weight_handle);
-    if (swap_status == SwapStatus::SwapOut) {
-      DLOG(INFO) << " lora " << lora_name
-                 << " has been swapped out, prepare to swap in" << std::endl;
-      lora_manager_->SwapInWeight(lora_weight_handle, rank_info_);
-      DLOG(INFO) << " lora " << lora_name << " swapped in" << std::endl;
-    }
     auto& t_name = weight_names_[0];
     auto weight_tensor_p =
         lora_manager_->GetLoraTensorByName(lora_name, t_name);
@@ -88,10 +89,6 @@ AsStatus GemmLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
   assert(lora_manager_);
   // assumes that key-names are identical between different LoRAs
   auto lora_weight_handle = lora_manager_->GetHandleByName(lora_name_of_max_r);
-  SwapStatus swap_status = lora_manager_->GetSwapStatus(lora_weight_handle);
-  if (swap_status == SwapStatus::SwapOut) {
-    lora_manager_->SwapInWeight(lora_weight_handle, rank_info_);
-  }
   weights_.clear();
   auto& t_name = weight_names_[0];
   DLOG(INFO) << "It's a real lora weight for lora " << lora_name_of_max_r
@@ -140,8 +137,10 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
   auto batch_out_stride = batch_out_tensor->GetShape().Count(1) *
                           SizeofType(batch_out_tensor->GetDataType());
   auto out_size_per_batch = batch_out_tensor->GetSizeInByte() / input_batchsize;
+
+  auto in_bytes_per_data = SizeofType(batch_in_tensor->GetDataType());
   for (auto i = 0; i < input_batchsize; i++) {
-    void* in_ptr = (char*)batch_in_tensor->GetDataPtr() + i * batch_in_stride;
+    char* in_ptr = (char*)batch_in_tensor->GetDataPtr() + i * batch_in_stride;
     void* out_ptr =
         (char*)batch_out_tensor->GetDataPtr() + i * batch_out_stride;
     // GemmLora 不使用weights_, 使用lora_weight
@@ -196,8 +195,8 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
           iter++;
       }
 
-      // TODO: 支持GROUP_VSPLIT
-      assert(shape_w[1] % 3 == 0);
+      // 已支持GROUP_VSPLIT
+      assert(shape_w[1] == q_outdim_size_ + k_outdim_size_ + v_outdim_size_);
       assert(shape_w[1] == max_shape_out[2]);
       auto lora_r = shape_w[0];
       // shape_in[2] is not accurate (due to padding for LoRAs with different r
@@ -207,10 +206,15 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
       // 复原成qkv 3个输入
       auto m = shape_in[1];
       auto k = lora_r;
-      auto n = shape_w[1] / 3;
-      auto lda = k;
-      auto ldb = transB_ ? k : n;
-      auto ldc = n;
+      using QKV_DimType = dim_t[3];
+      QKV_DimType n = {q_outdim_size_, k_outdim_size_,
+                       v_outdim_size_};  // 支持MHA、QGA、MQA
+      QKV_DimType n_prefix_sum = {0, q_outdim_size_,
+                                  q_outdim_size_ + k_outdim_size_};
+      auto lda = k * 3;
+      QKV_DimType ldb = {n[0], n[1], n[2]};
+      if (transB_) ldb[0] = ldb[1] = ldb[2] = k;
+      QKV_DimType& ldc = n;
 
       std::vector<std::shared_ptr<AsTensor>> output_parts;
       for (int qkv_idx = 0; qkv_idx < 3; qkv_idx++) {
@@ -219,9 +223,9 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
           weight_t_part = std::make_shared<AsTensor>(
               lora_weight->GetName() + "." + std::to_string(qkv_idx),
               lora_weight->GetDeviceType(), lora_weight->GetDataType(),
-              lora_weight->GetDataMode(), Shape{k, n});
+              lora_weight->GetDataMode(), Shape{k, n[qkv_idx]});
           TensorUtils::DeepCopyMatrix2D(*weight_t_part, *lora_weight,
-                                        qkv_idx * n, 0, ctx_);
+                                        n_prefix_sum[qkv_idx], 0, ctx_);
           qkv_weight_cache_[std::make_pair(lora_name, qkv_idx)] = weight_t_part;
         }
         weight_t_part = qkv_weight_cache_.at({lora_name, qkv_idx});
@@ -232,9 +236,9 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
             bias_t_part = std::make_shared<AsTensor>(
                 lora_bias->GetName() + "." + std::to_string(qkv_idx),
                 lora_bias->GetDeviceType(), lora_bias->GetDataType(),
-                lora_bias->GetDataMode(), Shape{n});
-            TensorUtils::DeepCopyMatrix2D(*bias_t_part, *lora_bias, qkv_idx * n,
-                                          0, ctx_);
+                lora_bias->GetDataMode(), Shape{n[qkv_idx]});
+            TensorUtils::DeepCopyMatrix2D(*bias_t_part, *lora_bias,
+                                          n_prefix_sum[qkv_idx], 0, ctx_);
             qkv_bias_cache_[std::make_pair(lora_name, qkv_idx)] = bias_t_part;
           }
           bias_t_part = qkv_bias_cache_.at({lora_name, qkv_idx});
@@ -243,18 +247,19 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
         auto out_t_part = std::make_shared<AsTensor>(
             batch_out_tensor->GetName() + "." + std::to_string(qkv_idx),
             batch_out_tensor->GetDeviceType(), batch_out_tensor->GetDataType(),
-            batch_out_tensor->GetDataMode(), Shape{m, n});
+            batch_out_tensor->GetDataMode(), Shape{m, n[qkv_idx]});
         if (!use_quant_) {  // fp16, fp32
           DLOG(INFO) << lora_weight_name << " alpha_=" << alpha_ << std::endl;
-          kernel_launcher(batch_in_tensor->GetDataType(),
-                          out_t_part->GetDataPtr(), in_ptr, bias,
-                          weight_t_part.get(), m, n, k, lda, ldb, ldc, false,
-                          transB_, 1, alpha_ /* aka. lora_scaling */, nullptr,
-                          UNARYTYPE_UNDEFINED, ctx_);
+          kernel_launcher(
+              batch_in_tensor->GetDataType(), out_t_part->GetDataPtr(), in_ptr,
+              bias, weight_t_part.get(), m, n[qkv_idx], k, lda, ldb[qkv_idx],
+              ldc[qkv_idx], false, transB_, 1, alpha_ /* aka. lora_scaling */,
+              nullptr, UNARYTYPE_UNDEFINED, ctx_);
         } else {  // use quantization
           throw AsException("lora quant not implemented");
         }
         output_parts.emplace_back(out_t_part);
+        in_ptr += lora_r * in_bytes_per_data;
       }
 
       TensorUtils::ConcatMatrix2DColWise(*batch_out_tensor, i, output_parts,

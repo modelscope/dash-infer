@@ -80,6 +80,7 @@ struct SM8x_GEMM_A16W8_Params {
   TileSchedule schedule_mn;
 };
 
+
 template <typename FType, typename QType>
 struct GEMM_A16W8_Params {
   const FType* A_ptr;

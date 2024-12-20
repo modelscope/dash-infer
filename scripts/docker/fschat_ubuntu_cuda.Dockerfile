@@ -1,4 +1,4 @@
-FROM dashinfer/dev-ubuntu-22.04-x86:v1_py310
+FROM dashinfer/test-ubuntu-cu124:v1
 
 WORKDIR /workspace
 
@@ -15,7 +15,8 @@ RUN pip install \
 RUN pip uninstall pydantic -y \
     && pip install -i https://mirrors.aliyun.com/pypi/simple pydantic==1.10.13
 
-RUN pip install 'dashinfer==2.0.0'
+RUN wget https://github.com/modelscope/dash-infer/releases/download/v2.0.0-rc2/dashinfer-2.0.0rc2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
+    && pip install dashinfer-2.0.0rc2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 RUN chmod +x ./fschat_entrypoint.sh
 

@@ -44,6 +44,7 @@ class Qwen_v15(Model):
         cfg.kv_channels = int(hidden_size_ / cfg.num_heads)
         cfg.activation = get_activation(torch_cfg.get('hidden_act', "silu"))
         cfg.size_per_head = torch_cfg.get('size_per_head', 128)
+        cfg.intermediate_size = torch_cfg.get('intermediate_size', 0)
         cfg.is_generate = self.is_generate
         rope_scaling = torch_cfg.get('rope_scaling',{})
         if rope_scaling is None:

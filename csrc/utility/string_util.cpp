@@ -483,5 +483,30 @@ std::string StringUtil::ToUpper(const std::string& s) {
   return rc;
 }
 
+std::string StringUtil::RemoveLayerNumber(const std::string& input) {
+  std::string result;
+  const std::string pattern = ".layer.";
+  std::size_t pos = input.find(pattern);
+
+  if (pos != std::string::npos) {
+    // 复制pattern前部分
+    result = input.substr(0, pos);
+    // 找到 pattern 后的部分
+    std::size_t start = pos + std::string(pattern).length();
+    std::size_t end = input.find('.', start);
+
+    // 复制 pattern后 部分
+    if (end != std::string::npos) {
+      result += input.substr(end);
+    } else {
+      result += input.substr(start);  // 如果没有点，复制到末尾
+    }
+  } else {
+    // 如果没有pattern，返回原始字符串
+    result = input;
+  }
+  return result;
+}
+
 }  // namespace util
 }  // namespace allspark

@@ -112,9 +112,5 @@ RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz &
     cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
 RUN pip3 install auditwheel==6.1.0
 
-RUN wget "https://xxxxxx/conan_allspark_source_cuda124_20241203_verbose.tar" && \
-    tar -xvf conan_allspark_source_cuda124_20241203_verbose.tar && \
-    mv conan_allspark_source_cuda124_20241203_verbose /root/.conan && \
-    rm -rf conan_allspark_source_cuda124_20241203_verbose.tar
 
 WORKDIR /root/

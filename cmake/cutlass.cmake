@@ -7,8 +7,8 @@ set(CUTLASS_NVCC_ARCHS ${CMAKE_CUDA_ARCHITECTURES} CACHE STRING "The SM architec
 set(CUTLASS_INSTALL ${INSTALL_LOCATION}/cutlass/install)
 message(STATUS "CUTLASS_INSTALL: ${CUTLASS_INSTALL}")
 
-message(STATUS "Use cutlass from submodule")
-set(CUTLASS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass)
+  message(STATUS "Use cutlass from submodule")
+  set(CUTLASS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass)
 
 include(ExternalProject)
 

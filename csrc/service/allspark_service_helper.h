@@ -292,9 +292,7 @@ void makeInputCfgAsFromProto(
   PROTO_CONFIG(gen_cfg_proto, max_length, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, no_repeat_ngram_size, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, eos_token_id, gen_cfg);
-
   gen_cfg.user_request_id = gen_cfg_proto.uuid();
-
   PROTO_CONFIG(gen_cfg_proto, presence_penalty, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, suppress_repetition_in_generation, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, input_len, gen_cfg);
@@ -350,7 +348,7 @@ void makeModelStructConfigProtoFromAs(
   model_struct_proto.set_weights_path(model_config.weights_path);
   model_struct_proto.set_compute_unit(model_config.compute_unit);
   model_struct_proto.set_matmul_precision(model_config.matmul_precision);
-  model_struct_proto.set_is_lora(model_config.is_lora);
+  model_struct_proto.set_is_lora_cfg(model_config.is_lora_cfg);
   model_struct_proto.set_swap_threshold(model_config.swap_threshold);
   model_struct_proto.set_engine_max_length(model_config.engine_max_length);
   model_struct_proto.set_engine_max_batch(model_config.engine_max_batch);
@@ -440,10 +438,7 @@ void makeGenCfgProtoFromAs(allspark_service::GenerateConfig& gen_cfg_proto,
   PROTO_CONFIG(gen_cfg_proto, max_length, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, no_repeat_ngram_size, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, eos_token_id, gen_cfg);
-
   gen_cfg_proto.set_uuid(gen_cfg.user_request_id);
-
-//  PROTO_CONFIG(gen_cfg_proto, uuid, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, presence_penalty, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, suppress_repetition_in_generation, gen_cfg);
   PROTO_CONFIG(gen_cfg_proto, input_len, gen_cfg);

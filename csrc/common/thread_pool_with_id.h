@@ -21,42 +21,44 @@
 #include <thread>
 #include <vector>
 
+#include "../utility/blockingconcurrentqueue.h"
 #include "thread_utils.h"
+
+// #define THREAD_POOL_FEATURE_NO_BLOCK
+
 namespace allspark {
 
+// spin lock version for faster execute.
 class ThreadPoolWithID {
+  constexpr static bool feature_use_spin_queue = true;
+
  public:
-  ThreadPoolWithID(size_t threads)
-      : task_queues(threads),
-        cond_vec(threads),
-        mutex_vec(threads),
-        stop(false) {
+  ThreadPoolWithID(size_t threads) : queues(threads), stop(false) {
     for (size_t i = 0; i < threads; ++i)
+
       workers.emplace_back([this, i] {
-        setThreadName(i, "ASThreadPool");
+        setThreadName(i, "ASWorker");
         for (;;) {
           std::function<void()> task;
-          {
-            unique_lock_wrapper<std::mutex> lock(this->mutex_vec[i],
-                                                 "cond.wait");
 
-            this->cond_vec[i].wait(lock.unique_lock_, [this, i] {
-              return this->stop || !this->task_queues[i].empty();
-            });
-
-            if (this->stop && this->task_queues[i].empty()) {
-              LOG(INFO) << "Thread Pool with id: " << i << " Exit!!!";
-              return;
-            }
-
-            {
-              // need lock?
-              task = std::move(this->task_queues[i].front());
-
-              this->task_queues[i].pop();
-            }
+          if (this->stop.load()) {
+            LOG(INFO) << "Thread Pool with id: " << i << " Exit!!!";
+            return;
           }
+
+#ifdef THREAD_POOL_FEATURE_NO_BLOCK
+          bool have_new_value = this->queues[i].try_dequeue(task);
+          if (!have_new_value)
+            continue;
+          else {
+            task();
+          }
+
+#else
+          this->queues[i].wait_dequeue(task);
+
           task();
+#endif
         }
       });
   }
@@ -65,7 +67,8 @@ class ThreadPoolWithID {
   auto enqueue(size_t worker_id, F&& f, Args&&... args)
       -> std::future<typename std::result_of<F(Args...)>::type> {
     using return_type = typename std::result_of<F(Args...)>::type;
-    if (worker_id >= this->task_queues.size())
+
+    if (worker_id >= this->queues.size())
       throw std::runtime_error("worker submit exceeds thread pool size.");
 
     auto task = std::make_shared<std::packaged_task<return_type()>>(
@@ -76,18 +79,16 @@ class ThreadPoolWithID {
       if (stop) {
         throw std::runtime_error("enqueue on stopped ThreadPool");
       }
-      unique_lock_wrapper<std::mutex> lock(this->mutex_vec[worker_id]);
-      this->task_queues[worker_id].emplace([task]() { (*task)(); });
+      this->queues[worker_id].enqueue([task]() { (*task)(); });
     }
-    cond_vec[worker_id].notify_all();
     return res;
   }
 
   ~ThreadPoolWithID() {
-    stop = true;
+    stop.store(true);
 
-    for (auto& cond : cond_vec) {
-      cond.notify_all();
+    for (auto& q : queues) {
+      q.enqueue([]() { LOG(INFO) << "dummy message for wake up."; });
     }
 
     for (std::thread& worker : workers) {
@@ -96,13 +97,14 @@ class ThreadPoolWithID {
   }
 
  private:
+#ifdef THREAD_POOL_FEATURE_NO_BLOCK
+  std::vector<moodycamel::ConcurrentQueue<std::function<void()>>> queues;
+#else
+  std::vector<moodycamel::BlockingConcurrentQueue<std::function<void()>>>
+      queues;
+#endif
+
   std::vector<std::thread> workers;
-  std::vector<std::queue<std::function<void()>>> task_queues;
-
-  std::vector<std::condition_variable> cond_vec;
-  std::vector<std::mutex> mutex_vec;
-
-  std::mutex queue_mutex;  // mutex put task into queue.
   std::atomic<bool> stop;
 };
 

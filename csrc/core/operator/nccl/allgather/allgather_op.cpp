@@ -35,6 +35,8 @@ void nccl_allgather_launcher(DataType dtype, void* out, void* in,
 
   if (nranks > 1) {
     ncclDataType_t nccl_dtype = GetNcclType(dtype);
+    // sync to fix hang issue in some devices, no impact on performance
+    cuda_ctx->Synchronize();
     AS_CHECK_NCCL(ncclAllGather(in, tmp_data, count, nccl_dtype,
                                 cuda_ctx->GetNCCLComm(),
                                 cuda_ctx->GetStream()));
@@ -46,6 +48,8 @@ void nccl_allgather_launcher(DataType dtype, void* out, void* in,
                                              cuda_ctx->GetStream());
     };
     DispatchCUDA(dtype, functor);
+    // sync to fix hang issue in some devices, no impact on performance
+    cuda_ctx->Synchronize();
   } else {
     AS_CHECK_CUDA(cudaMemcpyAsync(out, in, count * SizeofType(dtype),
                                   cudaMemcpyDeviceToDevice,

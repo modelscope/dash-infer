@@ -132,21 +132,17 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::Get() {
   return ret;
 }
 
-static
-void drainAllElements(moodycamel::ConcurrentQueue<AsEngine::GeneratedElements> &queue,
-                      ResultQueueImpl::GenerateElementPtr output) {
-
+static void drainAllElements(
+    moodycamel::ConcurrentQueue<AsEngine::GeneratedElements>& queue,
+    ResultQueueImpl::GenerateElementPtr output) {
   bool have_ele = false;
 
   while (true) {
     AsEngine::GeneratedElements one_new_token;
     have_ele = queue.try_dequeue(one_new_token);
-    if (!have_ele)
-      break;
+    if (!have_ele) break;
     output->AppendNewSingleElementToEnd(one_new_token);
   }
-
-
 }
 
 // wait for new data or new status.
@@ -189,7 +185,6 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetWithTimeout(
       }
       drainAllElements(store_queue_, total_elements);
     } else {
-
       // no new token.
       if (status_ == AsEngine::GenerateRequestStatus::GenerateFinished ||
           status_ == AsEngine::GenerateRequestStatus::GenerateInterrupted ||
@@ -197,18 +192,17 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetWithTimeout(
         // return nullptr, or throw exception?
         get_user--;
 
-        // if state changed, we should drain the queue in case some missing token.
-        // since user may not check the queue again.
-        // sometimes lockless queue don't return all write in one fetch.
+        // if state changed, we should drain the queue in case some missing
+        // token. since user may not check the queue again. sometimes lockless
+        // queue don't return all write in one fetch.
         drainAllElements(store_queue_, total_elements);
         return total_elements;
       } else {
-
         // if in generating state, return token now.
         if (total_elements && total_elements->ids_from_generate.size() > 0) {
           get_user--;
           return total_elements;
-      }
+        }
 
         spin_count++;
 

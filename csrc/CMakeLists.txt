@@ -41,7 +41,7 @@ set(ALLSPARK_INC_DIR
     ${CMAKE_BINARY_DIR}/csrc
 )
 
-list(APPEND ALLSPARK_INC_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass/include)
+    list(APPEND ALLSPARK_INC_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass/include)
 
 set(ALLSPARK_3RD_LIBS
     ${THREAD_LIB}

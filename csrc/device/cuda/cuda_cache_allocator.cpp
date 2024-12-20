@@ -12,7 +12,7 @@
 #include "device/bfc_allocator.h"
 #include "utility/check.h"
 
-#define NVML_USE_V2_API
+// #define NVML_USE_V2_API
 
 namespace allspark {
 

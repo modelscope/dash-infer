@@ -104,6 +104,7 @@ message ConfigProto {
     int32 hidden_size = 19;
     int32 num_experts = 20;
     int32 num_experts_per_tok = 21;
+    int32 intermediate_size = 22;
 }
 
 message BuildVersion {

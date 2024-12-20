@@ -10,7 +10,7 @@ SCRIPT=$(readlink -f "$0")
 SCRIPTPATH=$(dirname "$SCRIPT")
 TARGET_BRANCH=$1
 
-# check that we are in a clean state in order to prevent accidential
+# check that we are in a clean state in order to prevent accidental
 # changes
 if [ ! -z "$(git status --untracked-files=no  --porcelain)" ]; then
   echo "Script must be applied on a clean git state"
@@ -111,7 +111,7 @@ done
 notcorrectlist=`git status --porcelain | grep '^ M' | cut -c4-`
 # if nothing changed ok
 if [[ -z $notcorrectlist ]]; then
-  # send a negative message to gitlab
+  # send a negative message to git
   echo "Excellent. **VERY GOOD FORMATTING!** :thumbsup:"
   exit 0;
 else

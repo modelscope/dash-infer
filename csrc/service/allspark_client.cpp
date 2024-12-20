@@ -27,7 +27,8 @@ AsModelConfig::AsModelConfig(
     bool enable_prefix_cache, int prefix_cache_ttl,
     AsMHAPrefill in_prefill_mode, AsCacheMode in_cache_mode,
     AsEvictionStrategy in_eviction_strategy,
-    AsSchedulingStrategy in_scheduling_strategy, bool enable_sparsity_matmul)
+    AsSchedulingStrategy in_scheduling_strategy, bool enable_sparsity_matmul,
+    int lora_max_rank, int lora_max_num)
     : model_name(std::move(in_model_name)),
       model_path(std::move(in_model_path)),
       weights_path(std::move(in_weights_path)),
@@ -48,6 +49,8 @@ AsModelConfig::AsModelConfig(
       prefill_mode(in_prefill_mode),
       eviction_strategy(in_eviction_strategy),
       enable_sparsity_matmul(enable_sparsity_matmul),
+      lora_max_rank(lora_max_rank),
+      lora_max_num(lora_max_num),
       text_graph(in_text_graph) {}
 
 static std::vector<std::string> g_errors;
@@ -176,12 +179,12 @@ AsStatus AsClientEngine::SyncRequest(const char* model_name,
 
 AsStatus AsClientEngine::LoadLoraByName(const char* model_name,
                                         const char* lora_name) {
-  return AsStatus::ALLSPARK_LORA_NOT_LOADED;
+  return AsStatus::ALLSPARK_LORA_NOT_FOUND;
 }
 
 AsStatus AsClientEngine::UnloadLoraByName(const char* model_name,
                                           const char* lora_name) {
-  return AsStatus::ALLSPARK_LORA_NOT_LOADED;
+  return AsStatus::ALLSPARK_LORA_NOT_FOUND;
 }
 
 AsEngineStat AsClientEngine::GetAsEngineStat(const char* model_name) {

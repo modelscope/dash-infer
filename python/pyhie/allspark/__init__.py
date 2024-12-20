@@ -15,7 +15,6 @@ from ._allspark import *
 __all__ = [
     "AsStatus",
     "AsModelConfig",
-    "ModelRuntimeConfig",
     "Engine",
     "GenerateRequestStatus",
     "MultiMediaInfo",

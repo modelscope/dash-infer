@@ -47,8 +47,8 @@ void PrefixCacheManager::init_cpu_union(const int nranks,
   size_t cache_mem_bytes = (size_t)(available_memory * ratio);
   size_t frame_size = gpu_union_->span_manager->GetSpanSize();
   size_t frame_per_node =
-      kv_cnt *
-      layer_num_;  // number of frames needed per FIXED_SPAN_SIZE tokens
+      kv_cnt * layer_num_;  // number of frames needed per
+                            // SpanCacheConfig::span_size tokens
   size_t max_frame_num = 0;
   int capacity = 0;
 

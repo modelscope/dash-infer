@@ -35,7 +35,9 @@ class DNNLEngine {
 
 class CPUContext : public DeviceContext {
  public:
-  CPUContext() : cpu_id_(0), stream_(DNNLEngine::GetInstance().GetEngine()) {
+  CPUContext() : cpu_id_(0), stream_(DNNLEngine::GetInstance().GetEngine()) {}
+
+  virtual void Init() override {
     int nthread = cpu::get_max_threads();
     SetNumThreads(nthread);
   }

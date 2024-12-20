@@ -105,6 +105,19 @@ void bindAsStatus(py::module& m) {
                       "throw if meets error.")
       .value("ALLSPARK_SUCCESS", AsStatus::ALLSPARK_SUCCESS)
       .value("ALLSPARK_PARAM_ERROR", AsStatus::ALLSPARK_PARAM_ERROR)
+      .value("ALLSPARK_EXCEED_LIMIT_ERROR",
+             AsStatus::ALLSPARK_EXCEED_LIMIT_ERROR)
+      .value("ALLSPARK_ALLSPARK_INVALID_CALL_ERROR",
+             AsStatus::ALLSPARK_INVALID_CALL_ERROR)
+      .value("ALLSPARK_REQUEST_DENIED", AsStatus::ALLSPARK_REQUEST_DENIED)
+      .value("ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR",
+             AsStatus::ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR)
+      .value("ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR",
+             AsStatus::ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR)
+      .value("ALLSPARK_LORA_NOT_FOUND", AsStatus::ALLSPARK_LORA_NOT_FOUND)
+      .value("ALLSPARK_LORA_ALREADY_LOADED",
+             AsStatus::ALLSPARK_LORA_ALREADY_LOADED)
+      .value("ALLSPARK_LORA_IN_USE", AsStatus::ALLSPARK_LORA_IN_USE)
       .value("ALLSPARK_STREAMING", AsStatus::ALLSPARK_STREAMING);
 }
 

@@ -462,6 +462,7 @@ int main(int argc, char** argv) {
   std::string model_type = std::string("Qwen_v20");
   AsMHAPrefill prefill_mode = AsMHAPrefill::AsPrefillDefault;
   AsCacheMode kv_cache_mode = AsCacheMode::AsCacheDefault;
+  int kv_cache_span_size = AsModelConfig::default_span_size;
   int enable_flash_attention = 1;
   int device_num = 8;
   float top_k = 0;
@@ -473,7 +474,7 @@ int main(int argc, char** argv) {
   std::string device_type = "CUDA";
   std::string matmul_precision = "highest";
   while ((opt = getopt(argc, argv,
-                       "ht:f:r:b:d:l:m:M:F:P:N:k:p:w:C:a:c:o:s:n:")) != -1) {
+                       "ht:f:r:b:d:l:m:M:F:P:N:k:p:w:C:a:c:z:o:s:n:")) != -1) {
     switch (opt) {
       case 'h':
         std::cout << "\nDESCRIPTION:\n"
@@ -497,6 +498,8 @@ int main(int argc, char** argv) {
                   << "-------------------\n"
                   << "  -C <0/1> run model on cpu, default 0\n"
                   << "  -c <default/int8> set span kv cache mode\n"
+                  << "  -z <int> set kv cache span size, valid value is 16, "
+                     "32, 64, 128; default: 32\n"
                   << "  -M <String> model type. e.g. [m6_7b, m6_14b, "
                      " m6_50b, m6_72b, m6_200b], only support m6_7b and "
                      " m6_200b for now, default is m6_200b \n"
@@ -560,6 +563,9 @@ int main(int argc, char** argv) {
       case 'c':
         kv_cache_mode = GetCacheMode(std::string(optarg));
         break;
+      case 'z':
+        kv_cache_span_size = atoi(optarg);
+        break;
       case 'a':
         if (atoi(optarg) == 1)
           matmul_precision = "high";
@@ -617,7 +623,7 @@ int main(int argc, char** argv) {
           .withPrefillMode(prefill_mode)
           .withCacheSpanNumGrow(0)
           .withCacheSpanNumInit(0)
-          .withCacheSpanSize(16)
+          .withCacheSpanSize(kv_cache_span_size)
           .withCacheMode(kv_cache_mode)
           .build();
 

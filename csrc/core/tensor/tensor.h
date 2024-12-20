@@ -352,6 +352,15 @@ class TensorUtils {
       std::vector<std::shared_ptr<AsTensor>>& src_arr,
       const DeviceContext* ctx = nullptr);
 
+  static void ConcatMatrix2DColWiseBatched(
+      AsTensor& dst, std::vector<std::shared_ptr<AsTensor>>& src_arr,
+      const DeviceContext* ctx = nullptr);
+
+  static void ConcatMatrix2DColWiseBatchedRawPtr(
+      AsTensor& dst, std::vector<void*>& src_ptr_arr,
+      DeviceType src_device_type, std::vector<Shape>& src_shapes,
+      DataType src_dtype, const DeviceContext* ctx = nullptr);
+
   static void DeepCopyVectorPartAsync(AsTensor& dst, size_t dst_col_offset,
                                       const AsTensor& src,
                                       size_t src_col_offset, size_t len,

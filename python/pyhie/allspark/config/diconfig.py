@@ -43,6 +43,8 @@ runtime_cfg_comments_dict = {
    - AsCacheQuantI8 - int8 KV-Cache
    - AsCacheQuantU4 - uint4 KV-Cache""",
 
+    "kv_cache_span_size":               "number of tokens that a KV cache span (i.e., page) can contain, valid value is 16, 32, 64, and 128; default: 32",
+
     "eviction_strategy":                "how to choose eviction request  when kv-cache is full for GPU choose between(default : MaxLength): [MaxLength, Random]",
 
     "enable_prefix_cache":              "prefill prefix caching function related settings, if you have lots of common prefix in prompts, this function is strongly suggested, default : TRUE, [TRUE, FALSE] ",
@@ -161,6 +163,7 @@ class DIConfigBuilder:
         self.runtime_config_dict['compute_unit']['compute_thread_in_device'] = as_runtime_cfg.num_threads
 
         self.runtime_config_dict['kv_cache_mode'] = to_cache_mode_str(as_runtime_cfg.cache_mode)
+        self.runtime_config_dict['kv_cache_span_size'] = as_runtime_cfg.cache_span_size
         self.runtime_config_dict['enable_prefix_cache'] = as_runtime_cfg.enable_prefix_cache
         self.runtime_config_dict['prefix_cache_ttl'] = as_runtime_cfg.prefix_cache_ttl
         self.runtime_config_dict['cuda_mem'] = {}

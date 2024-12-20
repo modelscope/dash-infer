@@ -71,11 +71,17 @@ enum class AsStatus : int {
   ALLSPARK_EMPTY_REQUEST = 9,        // 无有效请求
   ALLSPARK_ILLEGAL_REQUEST_ID = 10,  // 没有找到有效的request_id
   ALLSPARK_CACHE_MEMORY_OUT = 11,
-  ALLSPARK_REQUEST_DENIED = 12,   // 停服务状态，拒绝服务
-  ALLSPARK_LORA_NOT_LOADED = 13,  // 用户指定的lora没加载
-  ALLSPARK_CHUNK_PREFILL = 14,    // 长请求首包分割进行
-  ALLSPARK_DEPRECATED = 20,       // 触发过时接口
-  ALLSPARK_STREAMING = 200,       // 流式返回
+  ALLSPARK_REQUEST_DENIED = 12,  // 停服务状态，拒绝服务
+  // ALLSPARK_LORA_NOT_LOADED = 13,  // 用户指定的lora没加载.
+  // 已经停用，ALLSPARK_LORA_NOT_FOUND 代替
+  ALLSPARK_CHUNK_PREFILL = 14,                 // 长请求首包分割进行
+  ALLSPARK_DEPRECATED = 20,                    // 触发过时接口
+  ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR = 21,   // lora数量超限
+  ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR = 22,  // lora rank超限
+  ALLSPARK_LORA_NOT_FOUND = 23,                // lora 没找到
+  ALLSPARK_LORA_ALREADY_LOADED = 24,           // lora 已加载
+  ALLSPARK_LORA_IN_USE = 25,                   // lora 使用中
+  ALLSPARK_STREAMING = 200,                    // 流式返回
 };
 
 const std::string AsGetErrorByCode(AsStatus error_code);

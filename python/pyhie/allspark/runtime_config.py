@@ -28,6 +28,8 @@ class AsModelRuntimeConfigBuilder:
         self.engine_max_length = 2048
 
         self.new_runtime_cfg = AsModelConfig()
+        self.new_runtime_cfg.lora_max_rank = 64
+        self.new_runtime_cfg.lora_max_num = 5
 
     """
     The Runtime config, such as max batch, max length, and runtime feature like kv-cache quantization, etc.
@@ -133,8 +135,24 @@ class AsModelRuntimeConfigBuilder:
             self.new_runtime_cfg.engine_max_batch = batch
         elif isinstance(batch, str):
             self.new_runtime_cfg.engine_max_batch = int(batch)
-
         return self
+
+    def lora_max_rank(self, rank: int) -> 'AsModelRuntimeConfigBuilder':
+        """Sets the maximum sequence length for the engine."""
+        if isinstance(rank, int):
+            self.new_runtime_cfg.lora_max_rank = rank
+        elif isinstance(rank, str):
+            self.new_runtime_cfg.lora_max_rank = int(rank)
+        return self
+
+    def lora_max_num(self, num: int) -> 'AsModelRuntimeConfigBuilder':
+        """Sets the maximum sequence length for the engine."""
+        if isinstance(num, int):
+            self.new_runtime_cfg.lora_max_num = num
+        elif isinstance(num, str):
+            self.new_runtime_cfg.lora_max_num = int(num)
+        return self
+
     
     def max_prefill_length(self, length: int) -> 'AsModelRuntimeConfigBuilder':
         self.new_runtime_cfg.engine_max_prefill_length = length
@@ -161,6 +179,13 @@ class AsModelRuntimeConfigBuilder:
 
     def kv_cache_mode(self, cache_mode: AsCacheMode):
         self.new_runtime_cfg.cache_mode = cache_mode
+        return self
+    
+    def kv_cache_span_size(self, span_size: int):
+        """
+        Valid span_size is 16, 32, 64, and 128. Default is 32.
+        """
+        self.new_runtime_cfg.cache_span_size = span_size
         return self
 
     @staticmethod
@@ -205,9 +230,11 @@ class AsModelRuntimeConfigBuilder:
         if "enable_prefix_cache" in rfield:
             self.prefill_cache(bool(rfield['enable_prefix_cache']))
         if "prefix_cache_ttl" in rfield:
-            self.prefix_cache(rfield['prefix_cache_ttl'])
+            self.prefix_cache_ttl(int(rfield['prefix_cache_ttl']))
         if "kv_cache_mode" in rfield:
             self.kv_cache_mode(get_cache_mode_from_str(rfield['kv_cache_mode']))
+        if "kv_cache_span_size" in rfield:
+            self.kv_cache_span_size(int(rfield['kv_cache_span_size']))
         if "enable_sparsity_matmul" in rfield:
             self.enable_sparsity_matmul(bool(rfield['enable_sparsity_matmul']))
         if "cache_span_num_init" in rfield:

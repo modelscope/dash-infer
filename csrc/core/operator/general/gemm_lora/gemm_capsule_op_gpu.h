@@ -26,7 +26,7 @@ class GemmLoraCapsuleOpGPU : public AsOperator {
   std::unique_ptr<AsOperator> std_gemm_op_;
   std::vector<std::unique_ptr<AsOperator>> lora_op_list_;
   std::string inner_gemm_type_ = "Gemm";  // for quant
-  std::string base_out_name_, bin_add_out_name_;
+  std::string capsule_out_name_, base_out_name_, bin_add_out_name_;
   UnaryType activation_ = UnaryType::UNARYTYPE_UNDEFINED;
 };
 }  // namespace allspark

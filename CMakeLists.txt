@@ -45,6 +45,7 @@ set(CONFIG_HOST_CPU_TYPE "X86" CACHE STRING "host cpu type, like X86, ARMV9, etc
 ##
 option(ENABLE_NV_STATIC_LIB "build with static lib of nvidia" OFF)
 option(USE_SYSTEM_NV_LIB "use system nccl lib instead download binary." OFF)
+option(BUILD_HIEDNN "build HIE-DNN from source" OFF)
 option(ENABLE_CUDA_PINNED_WEIGHT_LOAD "enable cuda pinned memory for load weight" OFF)
 option(ENABLE_SPAN_ATTENTION "enable build with span attention" ON)
 option(ENABLE_MULTINUMA "enable multinuma, if on cpu multinuma service will be compiled" OFF)
@@ -174,18 +175,14 @@ if(LOCK_CHECK)
 endif()
 
 if (ENABLE_CUDA)
-    include(cuda)
     list(APPEND ALLSPARK_DEFINITION "-DENABLE_CUDA")
-
-    if (ENABLE_CUSPARSELT)
-      set(ENABLE_CUSPARSELT ON)
-      list(APPEND ALLSPARK_DEFINITION "-DENABLE_CUSPARSELT")
-    endif()
-
+        if (ENABLE_CUSPARSELT)
+        list(APPEND ALLSPARK_DEFINITION "-DENABLE_CUSPARSELT")
+        endif()
+    include(cuda)
     if (ENABLE_SPARSE)
-       list(APPEND ALLSPARK_DEFINITION "-DENABLE_SPARSE")
+        list(APPEND ALLSPARK_DEFINITION "-DENABLE_SPARSE")
     endif()
-
     if (ENABLE_FP8)
             list(APPEND ALLSPARK_DEFINITION "-DENABLE_FP8")
     endif()

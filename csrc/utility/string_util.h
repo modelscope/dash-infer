@@ -93,6 +93,8 @@ class StringUtil {
 
   static std::string ToLower(const std::string& s);
   static std::string ToUpper(const std::string& s);
+
+  static std::string RemoveLayerNumber(const std::string& s);
 };
 
 namespace notstd {

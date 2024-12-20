@@ -353,7 +353,9 @@ PYBIND11_MODULE(_allspark, m) {
       .def_property("num_experts", &ConfigProto::num_experts,
                     &ConfigProto::set_num_experts)
       .def_property("num_experts_per_tok", &ConfigProto::num_experts_per_tok,
-                    &ConfigProto::set_num_experts_per_tok);
+                    &ConfigProto::set_num_experts_per_tok)
+      .def_property("intermediate_size", &ConfigProto::intermediate_size,
+                    &ConfigProto::set_intermediate_size);
 
 // major, minor is polluted by macro introduced by sys/sysmacros.h
 #ifdef major
@@ -577,7 +579,8 @@ PYBIND11_MODULE(_allspark, m) {
            py::arg("swap_threshold") = -1, py::arg("text_graph") = false,
            py::arg("num_threads") = 0, py::arg("matmul_precision") = "highest",
            py::arg("lora_names") = std::vector<std::string>(),
-           py::arg("cache_span_size") = 16, py::arg("cache_span_num_init") = 0,
+           py::arg("cache_span_size") = AsModelConfig::default_span_size,
+           py::arg("cache_span_num_init") = 0,
            py::arg("cache_span_num_grow") = 0,
            py::arg("enable_prefix_cache") = true,
            py::arg("prefix_cache_ttl") = 300,
@@ -618,7 +621,9 @@ PYBIND11_MODULE(_allspark, m) {
       .def_readwrite("eviction_strategy", &AsModelConfig::eviction_strategy)
       .def_readwrite("scheduling_strategy", &AsModelConfig::scheduling_strategy)
       .def_readwrite("enable_sparsity_matmul",
-                     &AsModelConfig::enable_sparsity_matmul);
+                     &AsModelConfig::enable_sparsity_matmul)
+      .def_readwrite("lora_max_rank", &AsModelConfig::lora_max_rank)
+      .def_readwrite("lora_max_num", &AsModelConfig::lora_max_num);
 
   py::class_<AsEngineStat>(m, "AsEngineStat")
       .def(py::init<>())

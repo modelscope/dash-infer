@@ -110,7 +110,6 @@ class AsOperator {
 
   // for LoRA only:
   std::vector<std::string> weight_names_;  // currently only used by GemmLora
-  std::unique_ptr<AsTensor> fake_weight_;  // currently only used by GemmLora
   std::set<std::string>
       tainted_lora_names_;  // lora一旦被卸载过，就标记为tainted，因为有可能用户修改权重后以同样的名字重新加载
 

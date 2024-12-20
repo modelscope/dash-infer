@@ -95,7 +95,7 @@ class QuantizeConfig:
         #######################################
 
         if quant_settings is None:
-            self.init_with_config_derecated(quan_json, quantize_op_type)
+            self.init_with_config_deprecated(quan_json, quantize_op_type)
             return
         # use new setting to init.
 
@@ -135,7 +135,7 @@ class QuantizeConfig:
         # TODO: if some sub-channel kernel not supported, convert them into per-channel with TP-Split.from
         # weight process will be in model's init function
 
-    def init_with_config_derecated(self, quan_json, quantize_op_type):
+    def init_with_config_deprecated(self, quan_json, quantize_op_type):
         valid_extra_option = {
             "SubChannel": False,
             "GroupSize": 512,

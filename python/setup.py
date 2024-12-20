@@ -64,7 +64,6 @@ class CMakeBuild(build_ext):
         as_build_hiednn = os.getenv("AS_BUILD_HIEDNN", "ON")
         as_utest = os.getenv("BUILD_UTEST", "OFF")
         as_span_attn = os.getenv("ENABLE_SPAN_ATTENTION", "ON")
-        as_flash_attn = os.getenv("FLASHATTN_BUILD_FROM_SOURCE", "ON")
         py_pkg_name_prefix = py_pkg_name.split('-')[0]
 
         enable_glibcxx11_abi = os.getenv("AS_CXX11_ABI", "OFF")
@@ -92,7 +91,6 @@ class CMakeBuild(build_ext):
             "-DALWAYS_READ_LOAD_MODEL=OFF",
             "-DBUILD_HIEDNN=" + as_build_hiednn,
             "-DENABLE_SPAN_ATTENTION=" + as_span_attn,
-            "-DFLASHATTN_BUILD_FROM_SOURCE=" + as_flash_attn,
             "-DENABLE_JSON_MODE=ON",
             "-DENABLE_GLIBCXX11_ABI=" + enable_glibcxx11_abi,
             "-DENABLE_MULTINUMA=OFF",
@@ -175,6 +173,7 @@ class CMakeBuild(build_ext):
         third_party_subfolder = os.path.join(cwd.parent.absolute(),
                                              "third_party", "from_source")
 
+
         if as_build_hiednn == "ON":
             print(f"setup.py: build hiednn from source.")
             hiednn_src_folder = os.path.join(cwd.parent.absolute(), "HIE-DNN")
@@ -184,7 +183,6 @@ class CMakeBuild(build_ext):
                 os.chdir(cwd)
             else:
                 raise ValueError("not found HIE-DNN source code.")
-
 
         os.chdir(self.build_temp)
 
@@ -202,7 +200,6 @@ class CMakeBuild(build_ext):
         if is_arm:
             conanfile += "_arm"
         conanfile += ".txt"
-
 
         conan_install_arm = Template(
             "conan profile new dashinfer_compiler_profile --detect --force\n" +

@@ -159,6 +159,16 @@ AsStatus WeightManagerImpl::LoadWeightForModel(
     weight_info.size_bytes = SizeofType(info.dtype) * info.shape.Count();
     weight_info.weight_offset = ftell(fp);
     weight_info.info = info;
+
+    // before proceeding, we need validate the weight according some rules
+    AsStatus ret =
+        ValidateWeight(weight_handler, weight_info, target_device_ctx);
+    if (ret != AsStatus::ALLSPARK_SUCCESS) {
+      LOG(ERROR) << "ValidateWeight failed for tensor " << weight_info.name
+                 << ", fail reason=" << int(ret);
+      return ret;
+    }
+
     int fd = fileno(fp);
     struct stat sb;
     fstat(fd, &sb);
@@ -275,7 +285,7 @@ AsStatus WeightManagerImpl::LoadWeightForModel(
     // Note: because some aglinment op will modify weight's size, so we can
     // only store the tensor tensor after load, otherwise some shape logic
     // will be wrong.
-    if (weight_handler->GetModelConfig().is_lora) {
+    if (weight_handler->GetModelConfig().is_lora_cfg) {
       swap_status_[weight_handler][rank_info] = SwapStatus::SwapInit;
       LOG(INFO) << "finish load lora "
                 << weight_handler->GetModelConfig().model_name << " for rank "
@@ -323,7 +333,6 @@ std::shared_ptr<AsTensor> WeightManagerImpl::GetWeightTensor(
     std::shared_ptr<ModelWeightHandler>& handler, RankInfo& rank_info,
     const std::string& name) {
   rw_read_lock lk(lock_, "GetWeightTensor");
-
   if (!handler_is_avalibile(handler) ||
       !weight_on_rank_is_avalibile(handler, rank_info)) {
     LOG(ERROR) << "Try to find weight for non exist rank or handler "
@@ -353,7 +362,6 @@ std::shared_ptr<AsTensor> WeightManagerImpl::GetWeightTensor(
   // DLOG(INFO) << "Weight MD5: " << name << " "
   //            << weight_map->at(name)->ToString();
 #endif
-
   return weight_map->at(name);
 }
 

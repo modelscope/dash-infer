@@ -90,7 +90,7 @@ enum AS_STATUS {
     ALLSPARK_ILLEGAL_REQUEST_ID = 10; //没有找到有效的request_id
     ALLSPARK_CACHE_MEMORY_OUT = 11;
     ALLSPARK_REQUEST_DENIED = 12;  // 停服务状态，拒绝服务
-    ALLSPARK_LORA_NOT_LOADED = 13;  // 用户指定的lora没加载
+    //ALLSPARK_LORA_NOT_LOADED = 13;  // 用户指定的lora没加载， 已经停用
     ALLSPARK_STREAMING = 200;      // 流式返回
 }
 
@@ -213,7 +213,7 @@ message ModelStructConfig {
   string weights_path = 3;
   string compute_unit = 4;
   string matmul_precision = 5;
-  bool   is_lora = 6;
+  bool   is_lora_cfg = 6;
   int64  swap_threshold = 7;
   int32  engine_max_length = 8;
   int32  engine_max_batch = 9;

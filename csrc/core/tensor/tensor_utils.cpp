@@ -460,8 +460,8 @@ void TensorUtils::DeepCopyMatrix2DPartFromBatch(
       region_width + dst_col_offset > dst.shape_[1]) {
     char buf[1024];
     sprintf(buf,
-            "region_height:%ld region_width:%ld src_row_offset:%ld "
-            "src_col_offset:%ld dst_row_offset:%ld dst_col_offset:%ld "
+            "region_height:%d region_width:%d src_row_offset:%d "
+            "src_col_offset:%d dst_row_offset:%d dst_col_offset:%d "
             "src.shape(%ld,%ld) dst.shape(%ld,%ld)\n",
             region_height, region_width, src_row_offset, src_col_offset,
             dst_row_offset, dst_col_offset, src.shape_[1], src.shape_[2],
@@ -584,6 +584,81 @@ void TensorUtils::ConcatMatrix2DColWise(
       "CUDAs");
 #endif
 }
+
+void TensorUtils::ConcatMatrix2DColWiseBatched(
+    AsTensor& dst, std::vector<std::shared_ptr<AsTensor>>& src_arr,
+    const DeviceContext* ctx) {
+#ifdef ENABLE_CUDA
+  const auto& dst_shape = dst.GetShape();
+  AS_ENFORCE(dst_shape.Size() == 3);
+  AS_ENFORCE(dst.GetDeviceType() == DeviceType::CUDA);
+  auto dst_batch_stride = dst_shape.Count(1) * SizeofType(dst.GetDataType());
+  char* dst_ptr = (char*)dst.GetDataPtr();
+  auto dpitch = dst_shape.Count(2) * SizeofType(dst.GetDataType());
+  for (auto i = 0; i < src_arr.size(); i++) {
+    auto& src = *src_arr.at(i);
+    AS_ENFORCE(src.GetDeviceType() == DeviceType::CUDA);
+    cudaMemcpyKind kind =
+        GetCudaMemcpyKind(src.GetDeviceType(), dst.GetDeviceType());
+    const auto& src_shape = src.GetShape();
+    AS_ENFORCE(src_shape.Size() == 3);
+    auto region_height = src_shape[0] * src_shape[1];
+    auto region_width_nbytes = src.GetStrideInByte();
+    if (ctx)
+      AS_CHECK_CUDA(cudaMemcpy2DAsync(
+          dst_ptr, dpitch, src.GetDataPtr(), region_width_nbytes,
+          region_width_nbytes, region_height, kind,
+          static_cast<const CUDAContext*>(ctx)->GetStream()));
+    else
+      AS_CHECK_CUDA(cudaMemcpy2D(dst_ptr, dpitch, src.GetDataPtr(),
+                                 region_width_nbytes, region_width_nbytes,
+                                 region_height, kind));
+    dst_ptr += region_width_nbytes;
+  }
+#else
+  throw AsException(
+      "Currently, TensorUtils::ConcatMatrix2DColWise is only supported between "
+      "CUDAs");
+#endif
+}
+
+void TensorUtils::ConcatMatrix2DColWiseBatchedRawPtr(
+    AsTensor& dst, std::vector<void*>& src_ptr_arr, DeviceType src_device_type,
+    std::vector<Shape>& src_shapes, DataType src_dtype,
+    const DeviceContext* ctx) {
+#ifdef ENABLE_CUDA
+  const auto& dst_shape = dst.GetShape();
+  AS_ENFORCE(dst_shape.Size() == 3);
+  AS_ENFORCE(dst.GetDeviceType() == DeviceType::CUDA);
+  auto dst_batch_stride = dst_shape.Count(1) * SizeofType(dst.GetDataType());
+  char* dst_ptr = (char*)dst.GetDataPtr();
+  auto dpitch = dst_shape.Count(2) * SizeofType(dst.GetDataType());
+  for (auto i = 0; i < src_ptr_arr.size(); i++) {
+    void* src_ptr = src_ptr_arr.at(i);
+    auto& src_shape = src_shapes.at(i);
+    AS_ENFORCE(src_device_type == DeviceType::CUDA);
+    cudaMemcpyKind kind =
+        GetCudaMemcpyKind(src_device_type, dst.GetDeviceType());
+    AS_ENFORCE(src_shape.Size() == 3);
+    auto region_height = src_shape[0] * src_shape[1];
+    auto region_width_nbytes = src_shape[-1] * SizeofType(src_dtype);
+    if (ctx)
+      AS_CHECK_CUDA(
+          cudaMemcpy2DAsync(dst_ptr, dpitch, src_ptr, region_width_nbytes,
+                            region_width_nbytes, region_height, kind,
+                            static_cast<const CUDAContext*>(ctx)->GetStream()));
+    else
+      AS_CHECK_CUDA(cudaMemcpy2D(dst_ptr, dpitch, src_ptr, region_width_nbytes,
+                                 region_width_nbytes, region_height, kind));
+    dst_ptr += region_width_nbytes;
+  }
+#else
+  throw AsException(
+      "Currently, TensorUtils::ConcatMatrix2DColWise is only supported between "
+      "CUDAs");
+#endif
+}
+
 std::shared_ptr<TensorMap> TensorUtils::DeepCopyDLTensorMapToTensorMap(
     std::shared_ptr<DLTensorMap> in_map, const DeviceType target_device_type) {
   if (!in_map) return nullptr;

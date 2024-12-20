@@ -21,6 +21,8 @@
 
 namespace allspark {
 
+thread_local int CUDAContext::last_device_id_of_this_thread_ = -1;
+
 CUDAContext::~CUDAContext() {
   try {
     if (hiednn_handle_) {
@@ -44,10 +46,21 @@ CUDAContext::~CUDAContext() {
     // avoid the gcc warnning.
     LOG(ERROR) << "Exception in destroy cuda context.";
   }
+
+  // reset the thread local value, it's a static value.
+  last_device_id_of_this_thread_ = -1;
 }
 
 void CUDAContext::SetDeviceId(int device_id) {
   DLOG(INFO) << "CUDAContext::SetDeviceId()" << device_id << std::endl;
+
+  LOG(INFO) << "local id : " << last_device_id_of_this_thread_
+            << " setting value: " << device_id;
+  if (last_device_id_of_this_thread_ == device_id) {
+    LOG(INFO) << " CUDAContext::by pass thread id setting, since last thread "
+                 "have same value";
+    return;
+  }
 
   // if have old handler, destory the device id and handler.
   if (hiednn_handle_) {
@@ -87,6 +100,7 @@ void CUDAContext::SetDeviceId(int device_id) {
     cslt_handle_initialized_ = true;
   }
 #endif
+  last_device_id_of_this_thread_ = device_id_;
 }
 
 void CUDAContext::SetSparsityMatmulMode(bool enable_sparsity_matmul) {

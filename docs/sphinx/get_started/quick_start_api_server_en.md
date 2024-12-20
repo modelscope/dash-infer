@@ -24,9 +24,9 @@ docker run \
 - `-m`: Use Modelscope to download the model
 - `--model-path`: Path for loading or downloading the model
 - `--device-list`: List of CUDA devices used to run the model
- 
+
 For example:
- 
+
 ```shell
 docker run  \
     --shm-size=8g \

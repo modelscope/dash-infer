@@ -58,6 +58,16 @@ void StridedBatchGemmWraper(T* matrix_C, const T* matrix_A, const T* matrix_B,
                             bool transB, int lda, int ldb, int ldc, float alpha,
                             float beta, int batch, const T* bin_res,
                             cublasHandle_t handle, cudaStream_t stream);
+template <typename DType>
+bool SgmvCutlass(DType* y, const DType* x, const DType** w, const int32_t* s,
+                 const int32_t* ranks, void* tmp_d, bool is_k_tensor,
+                 bool is_n_tensor, int num_problems, int d_in, int d_out,
+                 bool unsplit, int unsplit_n, int max_rank, int CC,
+                 cudaStream_t stream);
+template <typename DType>
+bool SgmvSplitQKV(DType** out_ptrs, const DType* in, const int32_t* s,
+                  const int32_t* lora_B_ranks, int max_rank, int num_problems,
+                  cudaStream_t stream);
 template <typename T>
 void SoftmaxKernelLauncher(T* qk_buf, const float* mask, int batch_size,
                            int beam_size, int num_heads, int seq_len, int step,

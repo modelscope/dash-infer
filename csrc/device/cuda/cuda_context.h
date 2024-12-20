@@ -52,6 +52,8 @@ class CUDAContext : public DeviceContext {
 
   virtual ~CUDAContext() override;
 
+  virtual void Init() override{};
+
   DeviceType GetDeviceType() const override { return DeviceType::CUDA; }
 
   void SetNumThreads(int num_threads) override {
@@ -115,6 +117,7 @@ class CUDAContext : public DeviceContext {
 
  private:
   int device_id_ = 0;
+  thread_local static int last_device_id_of_this_thread_;
   cudaStream_t stream_;
   cublasHandle_t cublas_handle_;
   cublasLtHandle_t cublaslt_handle_;

@@ -15,6 +15,12 @@ import pandas as pd
 import re
 from tabulate import tabulate
 
+from queue import Queue, Empty
+
+
+import uuid
+import logging
+
 import signal
 import sys
 
@@ -69,6 +75,7 @@ class Request:
 class ProfilingData():
     def __init__(self, model_name, config):
         self.device_type = config.device_type
+        self.batch_size = config.engine_max_batch
         self.device_num_col_name = "NUMA_num" if self.device_type == "CPU" else "Device_num"
         self.num_dev = len(config.device_ids)
         self.model_name = model_name.replace(" ", "_")
@@ -99,6 +106,7 @@ class ProfilingData():
         self.avg_throughput = 0.0
         self.request_num = 0
         self.qps = 0.0
+        self.batch_size = 0
         self.df = self.df.iloc[0:0]
         self.detail_df = self.detail_df.iloc[0:0]
 
@@ -366,8 +374,11 @@ class BenchmarkConfig():
         self.test_random_input = args.test_random_input
         self.test_dataset_id = args.test_dataset_id
         self.prefix_cache_list = args.prefix_cache_rate_list
+        self.skip_unfinished_task = args.skip_unfinished
+        self.verbose = args.verbose
 
         self.guided_decode = args.guided_decode
+        self.dtype = args.dtype
 
         if self.engine_max_length - self.test_max_output <= 0:
             raise ValueError("engine max length too small, should at least largeer than test max output")
@@ -388,9 +399,23 @@ class BenchmarkConfig():
             if rate < 0 or rate > 1.0:
                 raise ValueError("prefix cache rate must between (0.0, 1.0]")
 
-def one_request(request, engine, model_loader, stream_mode):
+        import json
+
+        self.quant_config =json.loads(args.quant_config)
+
+        if len(self.quant_config) > 0:
+            self.enable_quant = True
+        else:
+            self.enable_quant = False
+
+        if self.was_weight_quant:
+            self.enable_quant = True
+
+        
+
+def one_request(request, engine, model_loader, stream_mode, uuid, config):
     torch_input = request.torch_input
-    print("one request\n")
+    print(f"one request: start {uuid}\n")
     print(f"### generation_config: {request.gen_cfg}")
 
     output_ids = []
@@ -419,9 +444,11 @@ def one_request(request, engine, model_loader, stream_mode):
         request.status = int(status)
 
         if status == allspark.GenerateRequestStatus.Init:
+            if config.verbose:
+                print(f"request in init state: {uuid}")
             pass
         elif status == allspark.GenerateRequestStatus.Generating or status == allspark.GenerateRequestStatus.GenerateFinished:
-        # new_ids = self.engine.get_wait(self.model_name, request.queue)
+            #generated_elem = request.queue.GetWithTimeout(10)
             generated_elem = request.queue.Get()
             if generated_elem is not None:
                 new_ids = generated_elem.ids_from_generate
@@ -442,6 +469,8 @@ def one_request(request, engine, model_loader, stream_mode):
                 request.out_text = model_loader.get_tokenizer().decode(request.out_tokens, skip_special_tokens=True)
                 #if stream_mode:
                     #yield request.out_text
+            else:
+                print("get empty output id.")
 
             if status == allspark.GenerateRequestStatus.GenerateFinished:
                 request.generate_time = time.time() - time_after_ctx
@@ -458,6 +487,10 @@ def one_request(request, engine, model_loader, stream_mode):
 
     engine.stop_request("model", request_handle)
     engine.release_request("model", request_handle=request.handle)
+
+    if config.verbose:
+        print(f"one request: finish {uuid}\n")
+
     return request
 
 def request_generator(freq, task_queue, request_list):
@@ -466,42 +499,150 @@ def request_generator(freq, task_queue, request_list):
         task_queue.put(request)
         time.sleep(time_interleave)
 
+
+def setup_logging(log_file_path=None):
+    """
+    Sets up the logging configuration.
+
+    Args:
+        log_file_path (str, optional): Path to the log file. If None, logs to console.
+    """
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+
+    if log_file_path:
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    else:
+        # Log to console
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
 def request_processor(engine, config, model_loader, task_queue, future_list, progress_bar, task_generator_thread):
-    def done_callback(f):
-        request = f.argument
-        f.result()
-        progress_bar.update(1)
-        # engine_helper.print_inference_result(request)
+    """
+    Processes requests using a thread pool executor. Assigns a unique UUID to each request,
+    logs the start and completion of each request, and monitors active tasks to continue
+    the stress test based on task stability.
 
-    # 创建线程池
+    Args:
+        engine: The engine to process requests.
+        config: Configuration object containing settings like max_batch.
+        model_loader: Loader for the model.
+        task_queue (Queue): Queue containing incoming tasks.
+        future_list (list): List to keep track of submitted futures.
+        progress_bar: Progress bar object to update progress.
+        task_generator_thread (Thread): Thread responsible for generating tasks.
+    """
+
+    def done_callback(future):
+        """
+        Callback function executed when a future is done. Logs completion and updates progress.
+
+        Args:
+            future: The future object that has completed.
+        """
+        try:
+            # Retrieve the result to catch any exceptions
+            result = future.result()
+            request_id = future.uuid
+            if config.verbose:
+                logging.info(f"[ReleaseRequest] Request {request_id} completed successfully.")
+            progress_bar.update(1)
+            # Optional: Uncomment to log the inference result
+            # logging.info(f"Inference result for {request_id}: {result}")
+        except Exception as e:
+            request_id = getattr(future, 'uuid', 'Unknown')
+            logging.error(f"[StopRequest] Request {request_id} failed with error: {e}")
+            progress_bar.update(1)
+
+    # Create a thread pool with a maximum number of workers specified in config
     executor = ThreadPoolExecutor(max_workers=config.engine_max_batch)
-    print(f"current level : {config.engine_max_batch}")
+    logging.info(f"Current engine_max_batch level: {config.engine_max_batch}")
 
-    # 使用线程池处理任务
+    # Variables to monitor task progression
+    last_active_count = 0            # Last recorded number of active tasks
+    last_change_time = time.time()   # Last time the active task count changed
+    stability_threshold = 5          # Seconds to wait before considering the task count stable
+
     while True:
-        if not task_queue.empty():
-            # 从队列获取任务，如果队列为空，会阻塞直到队列中有新的任务
-            # print("task not empty")
-            request = task_queue.get()
-        elif task_generator_thread.is_alive():
-            # 如果队列为空，判断是否还在生成任务，如果还在生成任务就继续
-            # print("task queue alive.")
-            continue
+        # Count the number of active (not yet completed) tasks
+        active_tasks = sum(1 for future in future_list if not future.done())
+
+        # Check if the number of active tasks has changed since the last check
+        if active_tasks != last_active_count:
+            # If change detected, update the count and reset the change timer
+            last_active_count = active_tasks
+            last_change_time = time.time()
         else:
-            # 如果队列为空，并且已经不在生成任务了，就跳出
-            # print("task empty")
-            break
+            # If no change, check if the stability threshold has been reached
+            elapsed_time = time.time() - last_change_time
+            if elapsed_time >= stability_threshold:
+                logging.info(f"No change in active tasks for {stability_threshold} seconds. Continuing stress test.")
+                # Reset the timer to allow for future stability detections
+                last_change_time = time.time()
 
-        def test_fun(one):
-            print("test fun", one)
-            return 1
-        # 将任务提交到线程池
-        kwargs = {'request': request, 'engine': engine, 'model_loader': model_loader, 'stream_mode': False}
+                # **Proceed with the stress test**
+                # Implement the logic to continue the stress test here.
+                # For example, add more tasks to the queue if needed
+                # new_tasks = generate_additional_tasks()
+                # for task in new_tasks:
+                #     task_queue.put(task)
 
-        f = executor.submit(one_request, **kwargs)
-        f.argument = request
-        f.add_done_callback(done_callback)
-        future_list.append(f)
+                if config.skip_unfinished_task:
+                    logging.info("!!!!! Skip unifinished task ")
+
+                    executor.shutdown(wait=False)
+                    return
+                else:
+                    logging.info("!!!!! unifinished task deteched, add --skip_unfinished to args to continue the test.")
+                    continue
+
+
+        try:
+            # Attempt to retrieve a task from the queue without blocking
+            request = task_queue.get_nowait()
+        except Empty:
+            if task_generator_thread.is_alive():
+                # If the queue is empty but the task generator is still running, wait briefly
+                time.sleep(1)
+                continue
+            else:
+                # If the queue is empty and the generator has finished, check active tasks
+                if active_tasks == 0:
+                    # All tasks have been processed; exit the loop
+                    break
+                else:
+                    # Wait for remaining active tasks to complete
+                    time.sleep(1)
+                    continue
+
+        if request is not None:
+            # Assign a unique UUID to the request
+            request_uuid = str(uuid.uuid4())
+            if config.verbose:
+                logging.info(f"[StartRequest] Starting request {request_uuid}.")
+
+            # Submit the task to the executor for processing
+            kwargs = {
+                'request': request,
+                'engine': engine,
+                'uuid': request_uuid,
+                'model_loader': model_loader,
+                'config' : config,
+                'stream_mode': False
+            }
+            future = executor.submit(one_request, **kwargs)
+            future.uuid = request_uuid  # Attach UUID to the future for reference in callback
+            future.add_done_callback(done_callback)
+            future_list.append(future)
+
+    # Shutdown the executor and wait for all tasks to complete
+    executor.shutdown(wait=True)
+    logging.info("All tasks have been processed. Exiting request processor.")
 
 def test_model_stress(config: BenchmarkConfig):
 
@@ -548,8 +689,7 @@ def test_model_stress(config: BenchmarkConfig):
 
     ## start engine.
 
-    in_memory = False
-    # 示例函数，用来运行模型
+    in_memory = True
 
     safe_model_name = str(config.model_path).replace("/", "_")
     model_real_path = config.model_path
@@ -560,13 +700,17 @@ def test_model_stress(config: BenchmarkConfig):
         # replace mmodel with path.
 
     model_loader = allspark.HuggingFaceModel(model_real_path, safe_model_name, in_memory_serialize=in_memory,
+                                             user_set_data_type=config.dtype,
                                              trust_remote_code=True)
 
 
     engine = allspark.Engine()
     (model_loader.load_model()
      .read_model_config()
-     .serialize(engine, model_output_dir=".", enable_quant=config.was_weight_quant, weight_only_quant=config.weight_only_quant)
+     .serialize(engine, model_output_dir=".",
+                enable_quant=config.enable_quant,
+                weight_only_quant=config.weight_only_quant,
+                customized_quant_config=config.quant_config)
      .free_model())
 
     runtime_cfg_builder = model_loader.create_reference_runtime_config_builder("model", config.device_type,
@@ -582,6 +726,7 @@ def test_model_stress(config: BenchmarkConfig):
     model_loader.free_memory_serialize_file()
 
     engine.start_model('model')
+
 
     # like change to engine max length
     tokenizer = model_loader.read_model_config().init_tokenizer().get_tokenizer()
@@ -676,7 +821,7 @@ def test_model_stress(config: BenchmarkConfig):
 
     engine.stop_model('model')
     engine.release_model('model')
-
+    print("benchmark done.")
     progress_bar.close()
  #   engine_helper.uninit_allspark_engine()
 
@@ -713,7 +858,11 @@ def parse_float_list(value):
 
 def signal_handler(sig, frame):
     global running
-    logging.info("signal received, exiting")
+    print("signal received, exiting")
+
+    pid = os.getpid()
+    os.kill(pid, signal.SIGKILL)
+
     running = False
 
 if __name__ == '__main__':
@@ -722,18 +871,19 @@ if __name__ == '__main__':
         return list(map(int, arg.split(',')))
     parser = argparse.ArgumentParser(description='Benchmark model with random data or provided data list.')
     parser.add_argument('--model_path', type=str, required=False, help='The name of the model to run', default="qwen/Qwen2-0.5B-Instruct")
-    parser.add_argument("--modelscope", type=bool, required=False, default=True, help="use modelscope download model")
+    parser.add_argument("--modelscope", action='store_true', required=False, default=True, help="use modelscope download model")
     parser.add_argument("--weight_quant", type=bool, required=False, default=False, help="use weight quant")
     parser.add_argument("--weight_only_quant", type=bool, required=False, default=False, help="do weight only quant")
     parser.add_argument("--cache_mode", type=str, required=False, default="default", help="kv cache mode : [defualt,8bit,4bit]")
-    parser.add_argument("--device_type", type=str, required=False, default="CUDA", help="device tyep [CUDA,CPU]")
+    parser.add_argument("--device_type", type=str, required=False, default="CUDA", help="device type [CUDA,CPU]")
     parser.add_argument("--device_ids", type=list_of_ints, required=False, default="0", help="device ids like 0,1")
-    parser.add_argument("--verbose", type=bool, required=False, default=False, help="verbose logging")
+    parser.add_argument("--verbose", action='store_true', required=False,  help="verbose logging")
+    parser.add_argument("--dtype", type=str, required=False, default="bfloat16", help="data type of model [bfloat16, float16, float32]")
 
-
+    parser.add_argument("--quant_config", type=str, required=False, default="{}", help="customized quant config for model.")
     parser.add_argument("--engine_max_length", type=int, required=False, default=8192, help="engine max length, dataset will be filtered by this length.")
     parser.add_argument("--engine_max_batch", type=int, required=False, default=32, help="engine max batch, this value same as test concurrency.")
-    parser.add_argument("--engine_enable_prefix_cache", type=bool, required=False, default=False, help="enable prefix cache.")
+    parser.add_argument("--engine_enable_prefix_cache", action='store_true', required=False, help="enable prefix cache.")
 
     parser.add_argument("--test_qps", type=float, required=True, help="send test request by seconds.")
     parser.add_argument("--test_sample_size", type=int, required=False, default=100, help="how many sample data should be tested.")
@@ -741,7 +891,8 @@ if __name__ == '__main__':
     parser.add_argument("--test_dataset_path", type=str, required=False, default=None, help="data set used in benchmark.")
     parser.add_argument("--test_dataset_id", type=int, required=False, default=None, help="dataset id choose between [0,1,2,3]")
     parser.add_argument("--test_random_input", action="store_true", default=False, help="use random data to benchmark")
-    parser.add_argument("--guided_decode", type=bool, required=False, default=False, help="enable guided decode for json object.")
+    parser.add_argument("--guided_decode", action="store_true", default=False, help="enable guided decode for json object.")
+    parser.add_argument("--skip_unfinished", action="store_true", default=False, help="skip unfinished task, processing the test.")
     parser.add_argument("--prefix_cache_rate_list", type=parse_float_list, required=False, default=[], help="add one cache running list, for benchmark different cache hit rate result, must be in decending order, like  0.99, 0.9, 0.6, 0.3, benchmark result will in multiple line, first line was total cache miss")
 
     parser.add_argument(
@@ -753,6 +904,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     print(f"test start with {args}")
+
+
+    setup_logging()
 
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)

@@ -924,6 +924,7 @@ TEST(GEMM_LOWP, FP16W8_NEW) {
   const int N_Range[2] = {8, 8192};
   const int K_Range[3] = {8, 2048, 8192};
   const int GS_Range[4] = {64, 128, 256, 512};
+
   // Test Ampere+ Fused PerC GEMV kernel and SubC GEMV kernel
   if (sm_version >= 0x0800) {
     float ave_diff_perc = 0.0f, ave_diff_perc_bf = 0.0f, ave_diff_subc = 0.0f;

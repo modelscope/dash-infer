@@ -16,26 +16,46 @@
 namespace allspark {
 
 #ifdef ENABLE_CUDA
+
+thread_local int CudaWorker::last_device_id_of_this_thread_ = -1;
+
 CudaWorker::CudaWorker(int rank, int nranks, const ncclUniqueId& id,
                        int device_id)
     : Worker(rank, nranks, device_id), nccl_id_(id) {
-  SetWorkerDeviceId(device_id_);
+  // don't call virtual function in constructor.
   device_ctx_ = std::make_unique<CUDAContext>();
   device_ctx_->SetDeviceId(device_id_);
 }
+
+void CudaWorker::Init() { SetWorkerDeviceId(device_id_); }
+
 AsStatus CudaWorker::InitCCL(int rank, int nranks) {
   CUDAContext* cu_ctx_ = (CUDAContext*)(device_ctx_.get());
   SetWorkerDeviceId(device_id_);
   cu_ctx_->InitNCCL(rank, nccl_id_, nranks_);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-void CudaWorker::SetWorkerDeviceId(int device_id) { cudaSetDevice(device_id); }
+void CudaWorker::SetWorkerDeviceId(int device_id) {
+  DLOG(INFO) << "set worker device id: " << device_id
+             << " local value: " << last_device_id_of_this_thread_;
+  if (last_device_id_of_this_thread_ == device_id) {
+    return;
+  } else {
+    cudaSetDevice(device_id);
+    last_device_id_of_this_thread_ = device_id;
+  }
+}
+
+CudaWorker::~CudaWorker() { last_device_id_of_this_thread_ = -1; }
 #endif
 
 CpuWorker::CpuWorker(int rank, int nranks, int device_id)
     : Worker(rank, nranks, device_id) {
   device_ctx_ = std::make_unique<CPUContext>();
 }
+
+void CpuWorker::Init() {}
+
 AsStatus CpuWorker::InitCCL(int rank, int nranks) {
 #ifdef ENABLE_MULTINUMA
   CPUContext* cpu_ctx = (CPUContext*)(device_ctx_.get());

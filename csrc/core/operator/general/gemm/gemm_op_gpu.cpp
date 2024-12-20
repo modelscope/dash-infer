@@ -42,6 +42,48 @@ AsStatus hgemm_32x128x16_simt_Aldg1_kernel_launcher(
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+AsStatus dense_gemm_rawptr(DataType dtype, void* out, const void* in,
+                           const void* bias, const void* weight, int m, int n,
+                           int k, int lda, int ldb, int ldc, bool transA,
+                           bool transB, int batch, float alpha,
+                           const void* binary_in, UnaryType activation,
+                           const DeviceContext* ctx) {
+  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx);
+  cublasHandle_t cublas_handle = gpu_ctx->GetCublasHandle();
+  cudaStream_t cu_stream = gpu_ctx->GetStream();
+  if (binary_in != nullptr && bias != nullptr) {
+    LOG(ERROR) << "binary_in and bias cannot be used at the same time";
+    AS_THROW(AsStatus::ALLSPARK_PARAM_ERROR);
+  }
+  if (gpu_ctx->GetMatmulPrecision() == PrecisionLevel::HIGH &&
+      dtype == FLOAT32) {
+    cublasSetMathMode(cublas_handle, CUBLAS_TF32_TENSOR_OP_MATH);
+  }
+  auto functor = [&]<typename T>() {
+    T* typed_out = static_cast<T*>(out);
+    const T* typed_input = static_cast<const T*>(in);
+    const T* typed_bias = static_cast<const T*>(bias);
+    const T* typed_weight = static_cast<const T*>(weight);
+    const T* typed_binary_in = static_cast<const T*>(binary_in);
+    if (batch == 1) {
+      cuda::GemmWraper<T>(typed_out, typed_input, typed_weight, typed_bias, m,
+                          n, k, transA, transB, lda, ldb, ldc, alpha, 0.0f,
+                          typed_binary_in, cublas_handle, cu_stream);
+    } else {
+      cuda::StridedBatchGemmWraper<T>(
+          typed_out, typed_input, typed_weight, typed_bias, m, n, k, false,
+          transB, lda, ldb, ldc, alpha, 0.0f, batch, typed_binary_in,
+          cublas_handle, cu_stream);
+    }
+    if (activation != UNARYTYPE_UNDEFINED) {
+      cuda::UnaryKernelLauncher(typed_out, typed_out, (int64_t)m * n * batch,
+                                activation, cu_stream);
+    }
+  };
+  DispatchCUDA(dtype, functor);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
 AsStatus dense_gemm(DataType dtype, void* out, const void* in, const void* bias,
                     const AsTensor* weight, int m, int n, int k, int lda,
                     int ldb, int ldc, bool transA, bool transB, int batch,

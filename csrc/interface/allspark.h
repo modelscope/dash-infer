@@ -148,7 +148,9 @@ struct GenerateConfig {
   std::map<std::string, int> vocab;  /// model tokenizer vocab
   VocabType vocab_type;              /// model tokenizer type
   // deprecated options
-
+  std::string uuid =
+      "Default-UUID(deprecated)";  ///< deprecated option, will filled by engine
+                                   ///< internally.
   std::string user_request_id =
       "Default-User-UUID";  /// This uuid should  only use for logging.
 
@@ -157,21 +159,25 @@ struct GenerateConfig {
 
 class AsModelConfig {
  public:
-  static const int default_engine_max_length = 2048;
-  static const int default_engine_max_batch = 32;
-  static const int default_engine_max_prefill_length = 0;
-  static const int default_swap_threshold = -1;
-  static const int default_num_thread = 0;
+  static constexpr int default_engine_max_length = 2048;
+  static constexpr int default_engine_max_batch = 32;
+  static constexpr int default_engine_max_prefill_length = 0;
+  static constexpr int default_swap_threshold = -1;
+  static constexpr int default_num_thread = 0;
   static constexpr const char* default_matmul_precision = "highest";
   static constexpr const char* default_compute_unit = "CUDA:0";
-  static const int default_span_size = 32;
-  static const AsMHAPrefill default_prefill_mode =
+  static constexpr int default_span_size = 32;
+  static constexpr AsMHAPrefill default_prefill_mode =
       AsMHAPrefill::AsPrefillDefault;
-  static const AsCacheMode default_kv_cache_mode = AsCacheMode::AsCacheDefault;
-  static const AsEvictionStrategy default_eviction_strategy =
+  static constexpr AsCacheMode default_kv_cache_mode =
+      AsCacheMode::AsCacheDefault;
+  static constexpr AsEvictionStrategy default_eviction_strategy =
       AsEvictionStrategy::MaxLength;
-  static const AsSchedulingStrategy default_scheduling_strategy =
+  static constexpr AsSchedulingStrategy default_scheduling_strategy =
       AsSchedulingStrategy::ContextPriority;
+  static constexpr int default_lora_max_rank = 64;
+  static constexpr int default_lora_max_num = 5;
+
   AsModelConfig();
   AsModelConfig(
       std::string in_model_name, std::string in_model_path,
@@ -190,7 +196,9 @@ class AsModelConfig {
       AsCacheMode in_cache_mode = default_kv_cache_mode,
       AsEvictionStrategy in_eviction_strategy = default_eviction_strategy,
       AsSchedulingStrategy in_scheduling_strategy = default_scheduling_strategy,
-      bool enable_sparsity_matmul = false);
+      bool enable_sparsity_matmul = false,
+      int lora_max_rank = default_lora_max_rank,
+      int lora_max_num = default_lora_max_num);
 
   bool operator==(const AsModelConfig& other) const {
     return model_name == other.model_name && model_path == other.model_path &&
@@ -202,8 +210,7 @@ class AsModelConfig {
            num_threads == other.num_threads &&
            matmul_precision == other.matmul_precision &&
            swap_threshold == other.swap_threshold &&
-           text_graph == other.text_graph &&
-           is_lora == other.is_lora &&  // TODO: compare lora_names ???
+           text_graph == other.text_graph && is_lora_cfg == other.is_lora_cfg &&
            cache_span_size == other.cache_span_size &&
            cache_span_num_init == other.cache_span_num_init &&
            cache_span_num_grow == other.cache_span_num_grow &&
@@ -212,7 +219,9 @@ class AsModelConfig {
            prefix_cache_ttl == other.prefix_cache_ttl &&
            prefill_mode == other.prefill_mode &&
            eviction_strategy == other.eviction_strategy &&
-           enable_sparsity_matmul == other.enable_sparsity_matmul;
+           enable_sparsity_matmul == other.enable_sparsity_matmul &&
+           lora_max_rank == other.lora_max_rank &&
+           lora_max_num == other.lora_max_num;
   }
 
   std::string ToString() const;  // detail see as_engine.cpp
@@ -224,7 +233,7 @@ class AsModelConfig {
   std::string compute_unit = default_compute_unit;
   std::string matmul_precision = default_matmul_precision;
   int num_threads = default_num_thread;
-  bool is_lora = false;
+  bool is_lora_cfg = false;  // 表示该配置的类型，是for基模的，还是for LoRA的
 
   int64_t swap_threshold =
       default_swap_threshold;  // -1: 不swap  0: swap全部tensors
@@ -232,10 +241,9 @@ class AsModelConfig {
   int engine_max_length = default_engine_max_length;
   int engine_max_batch = default_engine_max_batch;
   int engine_max_prefill_length = default_engine_max_prefill_length;
-  std::vector<std::string> lora_names;
-  int cache_span_size = default_span_size;  // deprecated
-  int cache_span_num_init = 0;              // deprecated
-  int cache_span_num_grow = 0;              // deprecated
+  int cache_span_size = default_span_size;
+  int cache_span_num_init = 0;  // deprecated
+  int cache_span_num_grow = 0;  // deprecated
   bool enable_prefix_cache = true;
   int prefix_cache_ttl = 300;
   AsCacheMode cache_mode = default_kv_cache_mode;
@@ -244,6 +252,9 @@ class AsModelConfig {
   AsSchedulingStrategy scheduling_strategy = default_scheduling_strategy;
   bool text_graph = false;
   bool enable_sparsity_matmul = false;
+  std::vector<std::string> lora_names;  // deprecated, not used any longer
+  int lora_max_rank = default_lora_max_rank;
+  int lora_max_num = default_lora_max_num;
 };
 
 /**

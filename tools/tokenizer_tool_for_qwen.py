@@ -2,7 +2,7 @@
  Copyright (c) Alibaba, Inc. and its affiliates.
  @file    tokenizer_tool_for_qwen.py
 '''
-from pyhie import allspark
+from dashinfer import allspark
 
 import modelscope
 import argparse

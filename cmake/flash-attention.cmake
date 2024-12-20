@@ -35,12 +35,9 @@ else()
   set(FLASHATTN_LIBRARY_NAME libflash-attn.so)
 endif()
 
-option(FLASHATTN_BUILD_FROM_SOURCE "build flash-attn from source or use prebuilt lib" ON)
-# make sure you copy prebuild and source code under csrc together, to avoid header aligment issue.
 
 include(ExternalProject)
 
-if (FLASHATTN_BUILD_FROM_SOURCE)
   message(STATUS "build flash-attention from source")
 
     message(STATUS "Use flash-attention from external project")
@@ -78,9 +75,6 @@ if (FLASHATTN_BUILD_FROM_SOURCE)
   ExternalProject_Get_Property(project_flashattn SOURCE_SUBDIR)
   set(FLASHATTN_INCLUDE_DIR ${SOURCE_DIR}/${SOURCE_SUBDIR})
 
-else() # FLASHATTN_BUILD_FROM_SOURCE
-    message(FATAL_ERROR "flash attention build only support source code build.")
-endif() # FLASHATTN_BUILD_FROM_SOURCE
 
 message(STATUS "FLASHATTN_LIBRARY_PATH: ${FLASHATTN_LIBRARY_PATH}")
 message(STATUS "FLASHATTN_INCLUDE_DIR: ${FLASHATTN_INCLUDE_DIR}")

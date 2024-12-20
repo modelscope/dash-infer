@@ -6,13 +6,13 @@
 #include "allspark_client_impl.h"
 
 #include <unistd.h>
+#include <utility/uuid.h>
 
 #include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
 #include <vector>
-#include <utility/uuid.h>
 
 #include "allspark_service_helper.h"
 #include "allspark_service_parallel.h"
