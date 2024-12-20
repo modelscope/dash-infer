@@ -17,8 +17,8 @@ RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
 RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
-RUN yum install devtoolset-7 -y --nogpgcheck
-RUN echo "source /opt/rh/devtoolset-7/enable" >> /root/.bashrc && source /root/.bashrc
+RUN yum install devtoolset-7 devtoolset-10 -y --nogpgcheck
+RUN echo "source /opt/rh/devtoolset-10/enable" >> /root/.bashrc && source /root/.bashrc
 ARG PY_VER=3.8
 
 RUN curl -LO https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-x86_64.sh \
@@ -96,7 +96,7 @@ RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz &
     cd patchelf-0.14.5 && \
     ./bootstrap.sh && \
     ./configure && \
-    source /opt/rh/devtoolset-7/enable && make install && \
+    source /opt/rh/devtoolset-10/enable && make install && \
     cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
 RUN pip3 install auditwheel==6.1.0
 
