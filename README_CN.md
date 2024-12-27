@@ -52,7 +52,7 @@ DashInfer 是一个高度优化的 LLM 推理引擎，具有以下核心特性�
 DashInfer 为 LLM 权重提供了多种量化技术，例如 int{8,4} 仅权重量化、int8 激活量化，还有许多定制的融合内核，以在指定设备上提供最佳性能。简而言之，使用 GPTQ 微调的模型将提供更好的准确性，而我们无需微调的 InstantQuant (IQ) 技术可提供更快的部署体验。IQ 量化的详细解释可以在本文末尾找到。
 
 在支持的量化算法方面，AllSpark 通过两种方式支持使用 GPTQ 微调的模型和使用 IQ 量化技术的动态量化：
-- **InstantQuant (IQ)**: AllSpark 提供了 InstantQuant (IQ) 动态量化技术，无需微调即可提供更快的部署体验。IQ 量化的详细解释可以在本文末尾找到。
+- **InstantQuant (IQ)**: DashInfer 提供了 InstantQuant (IQ) 动态量化技术，无需微调即可提供更快的部署体验。IQ 量化的详细解释可以在本文末尾找到。
 - **GPTQ**: 使用 GPTQ 微调的模型将提供更好的准确性，但它需要一个微调步骤。
 
 这里介绍的量化策略大致可以分为两类：
@@ -60,35 +60,91 @@ DashInfer 为 LLM 权重提供了多种量化技术，例如 int{8,4} 仅权重�
 - **激活量化**: 这种量化技术不仅以 int8 格式存储权重，还在计算阶段执行低精度量化计算（如 int8）。由于 Nvidia GPU 只有 int8 Tensor Core 容易保持精度，这种量化技术既能减少内存访问需求，又能提高计算性能，使其成为理想的量化方法。在准确性方面，它相比仅权重量化可能会有轻微下降，因此需要业务数据的准确性测试。
 
 在量化粒度方面，有两种类型：
-- **每通道量化**: AllSpark 的量化技术至少采用了每通道（也称为每 Token）量化粒度，有些还提供了子通道量化粒度。一般而言，每通道量化由于实现简单且性能最佳，通常能满足大多数准确性需求。只有当每通道量化的准确性不足时，才应考虑子通道量化策略。
-- **子通道量化**: 与每通道量化相比，子通道量化是指将一个通道划分为 N 组，并在每组内计算量化参数。这种量化粒度通常能提供更好的准确性，但由于实现复杂度增加，带来了许多限制。例如，性能可能比每通道量化稍慢，并且由于计算公式限制，激活量化难以实现子通道量化（AllSpark 的激活量化都是每通道量化）。
+- **每通道量化**: DashInfer 的量化技术至少采用了每通道（也称为每 Token）量化粒度，有些还提供了子通道量化粒度。一般而言，每通道量化由于实现简单且性能最佳，通常能满足大多数准确性需求。只有当每通道量化的准确性不足时，才应考虑子通道量化策略。
+- **子通道量化**: 与每通道量化相比，子通道量化是指将一个通道划分为 N 组，并在每组内计算量化参数。这种量化粒度通常能提供更好的准确性，但由于实现复杂度增加，带来了许多限制。例如，性能可能比每通道量化稍慢，并且由于计算公式限制，激活量化难以实现子通道量化（DashInfer的激活量化都是每通道量化）。
 
-# 示例代码
+# 依赖
+1. Python： DashInfer python package， 目前只依赖pytorch和huggingface(做safetensor模型权重加载），但是由于运行时转换得调用HF接口进行模型权重加载，所以各个模型可能有自己的依赖。
+2. C++: 目前C++ Package全部静态编译了第三方依赖库，并且做了符号隐藏，所以目前C++ Package 无任何第三方库的运行时依赖。
+
+
+# 文档和示例代码
+
+## 文档
+
+详细的用户手册请参考文档： [文档地址](https://dashinfer.readthedocs.io/en/latest/)。
+
+### Quick Start:
+
+1. API使用 [Python Quick Start](https://dashinfer.readthedocs.io/en/latest/get_started/quick_start_api_py_en.html)
+2. LLM OpenAI Server [Quick Start Guide for OpenAI API Server](https://dashinfer.readthedocs.io/en/latest/get_started/quick_start_api_server_en.html)
+3. VLM OpenAI Server [VLM Support)(https://dashinfer.readthedocs.io/en/latest/vlm/vlm_offline_inference_en.html)
+
+### Feature介绍：
+
+1. [Prefix Cache](https://dashinfer.readthedocs.io/en/latest/llm/prefix_caching.html)
+2. [Guided Decoding](https://dashinfer.readthedocs.io/en/latest/llm/guided_decoding.html)
+3. [Engine Config](https://dashinfer.readthedocs.io/en/latest/llm/runtime_config.html)
+
+### 开发相关：
+
+1. [Development Guide](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#)
+2. [Build From Source](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#build-from-source-code)
+3. [OP Profling](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#profiling)
+4. [Environment Variable](https://dashinfer.readthedocs.io/en/latest/get_started/env_var_options_en.html)
+ 
+##  代码示例
 
 在`<path_to_dashinfer>/examples`下提供了C++、python接口的调用示例，请参考`<path_to_dashinfer>/documents/CN`目录下的文档运行示例。
 
-- [基础Python示例](examples/python/0_basic/basic_example_qwen_v10_io.ipynb) [![Open In PAI-DSW](https://modelscope.oss-cn-beijing.aliyuncs.com/resource/Open-in-DSW20px.svg)](https://gallery.pai-ml.com/#/import/https://github.com/modelscope/dash-infer/blob/main/examples/python/0_basic/basic_example_qwen_v10_io.ipynb)
 - [所有Python示例文档](docs/CN/examples_python.md)
 - [C++示例文档](docs/CN/examples_cpp.md)
+- [Python Benchmark](https://github.com/modelscope/dash-infer/tree/main/examples/benchmark)
 
 ## 多模态模型支持
 
 [multimodal](multimodal/) 目录下是基于DashInfer实现的多模态模型推理工具，兼容OpenAI Chat Completion API，支持文字、图片、视频输入。
 
-# 未来规划
+# 性能
 
-- [x] GPU 支持
-- [x] 多模态模型支持
-- [x] 使用 Flash-Attention 加速注意力机制
-- [x] 将上下文长度扩展到超过 32k
-- [x] 支持 4 位量化
-- [x] 支持使用 GPTQ 微调的量化模型
-- [x] 支持 MoE 架构
-- [x] 引导输出：Json 模式
-- [x] 前缀缓存：支持 GPU 前缀缓存和 CPU 交换
-- [ ] 量化：CUDA 上的 Fp8 支持
-- [ ] LORA：持续批量 LORA 优化
+我们进行了一系列基准测试，以比较主流 LLM 推理引擎的性能。
 
+### 多模态模型 (VLMs)
+
+我们比较了不同规模模型下 Qwen-VL 与 vllm 的性能：
+
+![img_1.png](docs/resources/image/dashinfer-benchmark-vl.png)
+
+基准测试使用了 A100-80Gx1 测试 2B 和 7B 模型，使用 A100-80Gx4 测试 72B 模型。更多详情，请参考[基准文档](https://github.com/modelscope/dash-infer/blob/main/multimodal/tests/README.md)。
+
+## Prefix Cache
+
+我们评估了在不同缓存命中率下前缀缓存的性能：
+
+![dahsinfer-benchmark-prefix-cache.png](docs/resources/image/dahsinfer-benchmark-prefix-cache.png)
+
+上图显示了 DashInfer 中 TTFT（首次生成 Token 的时间）随着不同 PrefixCache 命中率的减少情况。
+
+![dashinfer-prefix-effect.png](docs/resources/image/dashinfer-prefix-effect.png)
+
+**测试设置：**  
+- **模型：** Qwen2-72B-Instruct  
+- **GPU：** 4x A100  
+- **运行次数：** 20  
+- **批处理大小：** 1  
+- **输入 Tokens：** 4000  
+- **输出 Tokens：** 1  
+
+## Guided Decode
+
+我们在相同请求下使用自定义 JSON 架构（A100x1 7B Qwen, 上下文长度：45，生成长度：63），比较了不同引擎的Guided Decode的性能，图中数据为整体RT ：
+
+![dashinfer-benchmark-json-mode.png](docs/resources/image/dashinfer-benchmark-json-mode.png)
+
+# 子项目
+
+1. [HIE-DNN](https://github.com/modelscope/dash-infer/tree/main/HIE-DNN) 为DashInfer所使用的计算库。
+2. [Span Attention](https://github.com/modelscope/dash-infer/tree/main/span-attention) 为DashInfer GPU实现的GPU PageAttention
 
 # License
 

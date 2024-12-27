@@ -1,5 +1,5 @@
 =====================================
-aaa Offline Inference with Python API
+Offline Inference with Python API
 =====================================
 
 We have presented a quick start example of LLM inference with Python API in

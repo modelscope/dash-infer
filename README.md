@@ -13,6 +13,13 @@
 
 </div>
 
+
+## News
+
+- [2024/12] 🔥 DashInfer: Announcing the release of v2.0, now with enhanced GPU (CUDA) support! This version includes features like prefix caching (with GPU & CPU swapping), guided decoding, optimized attention for GQA, a lockless reactor engine, and newly added support for the VLM model (Qwen-VL) and MoE Models. For more details, please refer to the [release notes](https://dashinfer.readthedocs.io/en/latest/index.html#v2-0-0).
+
+- [2024/06] DashInfer:  v1.0 release with x86 & ARMv9 CPU and CPU flash attention support.
+
 # Introduction
 
 Written in C++ runtime, DashInfer aims to deliver production-level implementations highly optimized for various hardware architectures, including CUDA, x86 and ARMv9.
@@ -55,9 +62,9 @@ DashInfer is a highly optimized LLM inference engine with the following core fea
 - **ARMv9 CPU**: Hardware support for SVE instruction set is required. DashInfer supports ARMv9 architecture processors such as Yitian710, corresponding to Aliyun's 8th generation ECS instances (e.g. g8y), and adopts SVE instruction to accelerate caculation.
 
 ## Data Types
-- **CUDA GPUs**: FP16, BF16, FP32, Int8(InstantQuant), Int4(InstantQuant)
+- **CUDA GPUs**: FP16, BF16, FP8, FP32, Int8(InstantQuant), Int4(InstantQuant)
 - **x86 CPU**: FP32, BF16
-- **ARM Yitian710 CPU**: FP32, BF16, InstantQuant
+- **ARM Yitian710 CPU**: FP32, BF16, Int8(InstantQuant)
 
 ### Quantization
 DashInfer provides various many quantization technology for LLM weight, such as, int{8,4} weight only quantization, int8 activate quantization, and many customized fused kernel to provide best performance on specified device.
@@ -66,10 +73,10 @@ To put it simply, models fine-tuned with GPTQ will provide better accuracy, but 
 which does not require fine-tuning, can offer a faster deployment experience.
 Detailed explanations of IQ quantization can be found at the end of this article.
 
-In terms of supported quantization algorithms, AllSpark supports models fine-tuned with GPTQ and dynamic quantization
+In terms of supported quantization algorithms, DashInfer supports models fine-tuned with GPTQ and dynamic quantization
 using the IQ quantization technique in two ways:
 
-- **IntantQuant(IQ)**: AllSpark provides the InstantQuant (IQ) dynamic quantization technique, which does not require fine-tuning and can offer a faster deployment experience. Detailed explanations of IQ quantization can be found at the end of this article.
+- **IntantQuant(IQ)**: DashInfer provides the InstantQuant (IQ) dynamic quantization technique, which does not require fine-tuning and can offer a faster deployment experience. Detailed explanations of IQ quantization can be found at the end of this article.
 - **GPTQ**: Models fine-tuned with GPTQ will provide better accuracy, but it requires a fine-tuning step.
 
 The quantization strategies introduced here can be broadly divided into two categories:
@@ -82,10 +89,35 @@ The quantization strategies introduced here can be broadly divided into two cate
 
 In terms of quantization granularity, there are two types:
 
-- **Per-Channel**: AllSpark's quantization techniques at least adopt the Per-Channel (also known as Per-Token) quantization granularity, and some also provide Sub-Channel quantization granularity. Generally speaking, Per-Channel quantization can meet most accuracy requirements due to its simple implementation and optimal performance. Only when the accuracy of Per-Channel quantization is insufficient should the Sub-Channel quantization strategy be considered.
-- **Sub-Channel**: Compared to Per-Channel quantization, Sub-Channel refers to dividing a channel into N groups, and calculating quantization parameters within each group. This quantization granularity typically provides better accuracy, but due to increased implementation complexity, it comes with many limitations. For example, performance may be slightly slower than Per-Channel quantization, and Activation quantization is difficult to implement Sub-Channel quantization due to computational formula constraints (AllSpark's Activation quantization is all Per-Channel).
+- **Per-Channel**: DashInfer's quantization techniques at least adopt the Per-Channel (also known as Per-Token) quantization granularity, and some also provide Sub-Channel quantization granularity. Generally speaking, Per-Channel quantization can meet most accuracy requirements due to its simple implementation and optimal performance. Only when the accuracy of Per-Channel quantization is insufficient should the Sub-Channel quantization strategy be considered.
+- **Sub-Channel**: Compared to Per-Channel quantization, Sub-Channel refers to dividing a channel into N groups, and calculating quantization parameters within each group. This quantization granularity typically provides better accuracy, but due to increased implementation complexity, it comes with many limitations. For example, performance may be slightly slower than Per-Channel quantization, and Activation quantization is difficult to implement Sub-Channel quantization due to computational formula constraints (DashInfer's Activation quantization is all Per-Channel).
 
-# Examples
+# Documentation and Example Code
+
+## Documentation
+
+For the detailed user manual, please refer to the documentation: [Documentation Link](https://dashinfer.readthedocs.io/en/latest/).
+
+### Quick Start:
+
+1. Using API [Python Quick Start](https://dashinfer.readthedocs.io/en/latest/get_started/quick_start_api_py_en.html)
+2. LLM OpenAI Server [Quick Start Guide for OpenAI API Server](https://dashinfer.readthedocs.io/en/latest/get_started/quick_start_api_server_en.html)
+3. VLM OpenAI Server [VLM Support](https://dashinfer.readthedocs.io/en/latest/vlm/vlm_offline_inference_en.html)
+
+### Feature Introduction:
+
+1. [Prefix Cache](https://dashinfer.readthedocs.io/en/latest/llm/prefix_caching.html)
+2. [Guided Decoding](https://dashinfer.readthedocs.io/en/latest/llm/guided_decoding.html)
+3. [Engine Config](https://dashinfer.readthedocs.io/en/latest/llm/runtime_config.html)
+
+### Development:
+
+1. [Development Guide](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#)
+2. [Build From Source](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#build-from-source-code)
+3. [OP Profiling](https://dashinfer.readthedocs.io/en/latest/devel/source_code_build_en.html#profiling)
+4. [Environment Variable](https://dashinfer.readthedocs.io/en/latest/get_started/env_var_options_en.html)
+
+## Code Examples
 
 In `<path_to_dashinfer>/examples` there are examples for C++ and Python interfaces, and please refer to the documentation in `<path_to_dashinfer>/documents/EN` to run the examples.
 
@@ -97,6 +129,44 @@ In `<path_to_dashinfer>/examples` there are examples for C++ and Python interfac
 
 The VLM Support in [multimodal](multimodal/) folder, it's a toolkit to support Vision Language Models (VLMs) inference based on the DashInfer engine. It's compatible with the OpenAI Chat Completion API, supporting text and image/video inputs.
 
+## Performance
+
+We have conducted several benchmarks to compare the performance of mainstream LLM inference engines.
+
+### Multi-Modal Model (VLMs)
+
+We compared the performance of Qwen-VL with vllm across various model sizes:
+
+![img_1.png](docs/resources/image/dashinfer-benchmark-vl.png)
+
+Benchmarks were conducted using an A100-80Gx1 for 2B and 7B sizes, and an A100-80Gx4 for the 72B model. For more details, please refer to the [benchmark documentation](https://github.com/modelscope/dash-infer/blob/main/multimodal/tests/README.md).
+
+### Prefix Cache
+
+We evaluated the performance of the prefix cache at different cache hit rates:
+
+![dahsinfer-benchmark-prefix-cache.png](docs/resources/image/dahsinfer-benchmark-prefix-cache.png)
+
+The chart above shows the reduction in TTFT (Time to First Token) with varying PrefixCache hit rates in DashInfer.
+
+![dashinfer-prefix-effect.png](docs/resources/image/dashinfer-prefix-effect.png)
+
+**Test Setup:**  
+- **Model:** Qwen2-72B-Instruct  
+- **GPU:** 4x A100  
+- **Runs:** 20  
+- **Batch Size:** 1  
+- **Input Tokens:** 4000  
+- **Output Tokens:** 1  
+
+### Guided Decoding (JSON Mode)
+
+We compared the guided output (in JSON format) between different engines using the same request with a customized JSON schema (Context Length: 45, Generated Length: 63):
+
+![dashinfer-benchmark-json-mode.png](docs/resources/image/dashinfer-benchmark-json-mode.png)
+
+
+
 # Future Plans
 - [x] GPU Support
 - [x] Multi Modal Model support
@@ -107,8 +177,11 @@ The VLM Support in [multimodal](multimodal/) folder, it's a toolkit to support V
 - [x] Support MoE architecture
 - [x] Guided output: Json Mode
 - [x] Prefix Cache: Support GPU Prefix Cache and CPU Swap 
-- [ ] Quantization: Fp8 support on CUDA.
-- [ ] LORA: Continues Batch LORA Optimization.
+- [x] Quantization: Fp8 A8W8 Activation quantization support on CUDA.
+- [x] LORA: Continues Batch LORA Optimization.
+- [ ] Parallel Context phase and Generation phase within engine.
+- [ ] More effective MoE Operator on GPU.
+- [ ] Porting to AMD(ROCm) Platform.
 
 # License
 
