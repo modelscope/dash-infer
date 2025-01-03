@@ -75,11 +75,11 @@ class HieWokerImpl(threading.Thread):
         if self.model_type == "QWEN2-VL":
             # warm up
             image = torch.randn(
-                10080,
+                2436,
                 1176,
                 dtype=torch.float16 if self.precision == "fp16" else torch.float32,
             )
-            grid_thw = torch.tensor([[1, 120, 84]], dtype=torch.int64)
+            grid_thw = torch.tensor([[1, 58, 42]], dtype=torch.int64)
             first_grid = grid_thw[0, 0].item()
             batch_tensor = torch.zeros(first_grid)
             dict(
@@ -93,6 +93,10 @@ class HieWokerImpl(threading.Thread):
                 self.model = VisualTRT_V2(
                     vit_engine_path=self.model_path, trt_vit_config=self.trt_vit_config
                 )
+            elif self.backend == "transformers":
+                self.model = self.model_path.to(self.device)
+                with torch.no_grad():
+                    self.model(image.to(self.device), grid_thw=grid_thw.to(self.device))
             elif self.backend == "hie":
                 raise NotImplementedError
         else:
@@ -145,10 +149,16 @@ class HieWokerImpl(threading.Thread):
                 dtype=torch.int32, device=self.device
             )
             # output = self.model(image, grid_thw, batch_tensor)
-            output = self.model(image, grid_thw, batch_tensor)
+            if self.backend == "tensorrt":
+                output = self.model(image, grid_thw, batch_tensor)
+            elif self.backend == "transformers":
+                with torch.no_grad():
+                    output = self.model(image, grid_thw=grid_thw)
+            # output = torch.load("/root/workspace/dash-infer/multimodal/image_embeds_hf.pt", weights_only=True).to(device="cuda", dtype=torch.float32)
             # print("vit output shape: ", output.shape)
         else:
             output = self.model(image.contiguous().to(self.device), input_info)
+        
         return output
 
     def process_request(self, task: VitRequest) -> None:

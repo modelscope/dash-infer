@@ -81,7 +81,6 @@ class HuggingFaceVLModel(HuggingFaceModel):
 
             # allspark only needs the torch's model's state dict, no needs to keep torch model
             self.torch_model_state_dict = self.torch_model.state_dict()
-            self.torch_model = None
         else:
             NotImplementedError("direct_load from vl is not implemented!")
 
@@ -122,9 +121,11 @@ class HuggingFaceVLModel(HuggingFaceModel):
             onnx_trt_obj = ONNX_TRT(self.hf_model_path)
             onnx_trt_obj.export_onnx(onnxFile)
             onnx_trt_obj.generate_trt_engine(onnxFile, self.vision_model_path)
+        elif self.vision_engine == "transformers":
+            self.vision_model_path =  self.torch_model.visual.eval().to(torch.float16)
         else:
             raise ValueError(f"unsupported engine {self.vision_engine}")
-
+        self.torch_model = None
         # Convert Allspark LLM
         enable_quant = self.fp8
         weight_only_quant=False

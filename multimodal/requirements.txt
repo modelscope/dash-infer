@@ -1,4 +1,4 @@
-tensorrt==10.5.0
+tensorrt==10.6.0
 av
 numpy==1.24.3
 requests==2.32.3

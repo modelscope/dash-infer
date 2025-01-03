@@ -48,7 +48,7 @@ def add_context_args(parser):
         "--vision_engine",
         type=str,
         default="tensorrt",
-        choices=["tensorrt"],
+        choices=["tensorrt", "transformers"],
         help="engine to run vision model",
     )
     group.add_argument(
@@ -75,6 +75,11 @@ def add_context_args(parser):
         "--fp8",
         action="store_true",
         help="enable FP8",
+    )
+    group.add_argument(
+        "--dtype",
+        default="bfloat16",
+        choices=["bfloat16", "float16"],
     )
     group.add_argument(
         "--min-pixels",

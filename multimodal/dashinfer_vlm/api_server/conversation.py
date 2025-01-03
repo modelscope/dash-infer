@@ -116,7 +116,7 @@ class Conversation:
             image_list = []
         else:
             if image_list[0] == "image":
-                text = "<|vision_start|><|vision_end|>\n" * (len(image_list) - 1)
+                text = "<|vision_start|><|vision_end|>" * (len(image_list) - 1)
             elif image_list[0] == "video":
                 text = "<|vision_start|><|vision_end|>\n"
             else:
