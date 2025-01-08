@@ -464,7 +464,7 @@ def get_vl_request(
             "temperature": temperature,
             "do_sample": True,
             "early_stopping": False if os.getenv("VLM_BENCHMARK") == "1" else True,
-            "top_k": 1,
+            "top_k": top_k,
             "top_p": top_p,
             "max_length": (
                 max_tokens + len(input_ids)
@@ -474,13 +474,12 @@ def get_vl_request(
             "min_length": 5,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
-            "repetition_penalty": 1.05,
+            # "repetition_penalty": 1.05,
             "length_penalty": 1,
             "stop_words_ids": [[151643], [151644], [151645]],
             "eos_token_id": context.get("eos_token_id"),
             "seed": 1234567,
         }
-        print("generation config: ", generate_config)
         vl_request.gen_cfg = generate_config
         vl_request.context_length = len(input_ids)
         vl_request.input_tokens = [input_ids]

@@ -5,6 +5,7 @@
 import os
 import torch
 import glob
+import warnings
 from modelscope import snapshot_download
 from transformers import Qwen2VLForConditionalGeneration, AutoConfig, AutoTokenizer
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
@@ -13,7 +14,10 @@ from safetensors.torch import safe_open
 from dashinfer import allspark
 from dashinfer.allspark.model_loader import HuggingFaceModel, ModelSerializerException
 from dashinfer.allspark.model_config import QWen2ConfigAdapter
-from .trt.onnx_to_plan import ONNX_TRT
+try:
+    from .trt.onnx_to_plan import ONNX_TRT
+except Exception:
+    warnings.warn("TensorRT package is not available", ImportWarning)
 
 
 class HuggingFaceVLModel(HuggingFaceModel):

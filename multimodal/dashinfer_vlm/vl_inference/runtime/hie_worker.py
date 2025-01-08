@@ -11,7 +11,11 @@ from ..utils.config import VitConfig
 import threading
 import queue
 
-from ..utils.trt.vit_process import VisualTRT_V2
+try:
+    from ..utils.trt.vit_process import VisualTRT_V2
+except Exception:
+    pass
+
 import torch
 import numpy as np
 import time
@@ -130,9 +134,6 @@ class HieWokerImpl(threading.Thread):
         if self.model_type == "QWEN1-VL":
             output = self.model(image, use_flashattn=True)
         elif self.model_type == "QWEN2-VL":
-            # grid_thw = torch.tensor(
-            #                 [input_info["vit_grid_t"], input_info["vit_grid_h"], input_info["vit_grid_w"]], dtype=torch.int32
-            #             ).unsqueeze(0)
             grid_thw = np.array(
                 [
                     [
@@ -148,17 +149,14 @@ class HieWokerImpl(threading.Thread):
             batch_tensor = torch.zeros(first_grid).to(
                 dtype=torch.int32, device=self.device
             )
-            # output = self.model(image, grid_thw, batch_tensor)
             if self.backend == "tensorrt":
                 output = self.model(image, grid_thw, batch_tensor)
             elif self.backend == "transformers":
                 with torch.no_grad():
                     output = self.model(image, grid_thw=grid_thw)
-            # output = torch.load("/root/workspace/dash-infer/multimodal/image_embeds_hf.pt", weights_only=True).to(device="cuda", dtype=torch.float32)
-            # print("vit output shape: ", output.shape)
         else:
             output = self.model(image.contiguous().to(self.device), input_info)
-        
+
         return output
 
     def process_request(self, task: VitRequest) -> None:
