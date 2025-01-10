@@ -111,21 +111,26 @@ You can also use OpenAI's Python client library:
 
 Launching with CLI
 -------------------------
-You can also opt to install dashinfer-vlm locally and use command line to launch server.
+You can install dashinfer-vlm locally and use the command line to launch the server by following these steps. We highly recommend using NVIDIA PyTorch Containers `nvcr.io/nvidia/pytorch:xx.xx-py3` for setup.
 
-1. Pull dashinfer docker image (see :ref:`docker-label`)
-2. Install TensorRT Python package, and download TensorRT GA build from NVIDIA Developer Zone.
+1. (Optional when TensorRT is installed) Install TensorRT Python package, and download TensorRT GA build from NVIDIA Developer Zone.
 
 .. code-block:: bash
 
    wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.5.0/tars/TensorRT-10.5.0.18.Linux.x86_64-gnu.cuda-12.6.tar.gz
    tar -xvzf TensorRT-10.5.0.18.Linux.x86_64-gnu.cuda-12.6.tar.gz
+   pip install `pwd`/TensorRT-10.5.0.18/python/tensorrt-10.5.0-cp310-none-linux_x86_64.whl
    export LD_LIBRARY_PATH=`pwd`/TensorRT-10.5.0.18/lib
 
-3. Install dashinfer Python Package from `release <https://github.com/modelscope/dash-infer/releases>`_
-4. Install dashinfer-vlm: ``pip install dashinfer-vlm``.
+2. Install dashinfer-vlm: ``pip install dashinfer-vlm``, or install from source code
 
-Now you can launch server with command line:
+.. code-block:: bash
+
+   git clone https://github.com/modelscope/dash-infer.git
+   cd dash-infer/multimodal/
+   pip install -e ./
+
+3. Launch server with command line:
 
 .. code-block:: bash
 

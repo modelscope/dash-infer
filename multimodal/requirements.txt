@@ -1,5 +1,4 @@
 dashinfer@https://github.com/modelscope/dash-infer/releases/download/v2.0.0-rc3/dashinfer-2.0.0rc3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-tensorrt>=10.5.0
 av
 numpy==1.24.3
 requests==2.32.3
