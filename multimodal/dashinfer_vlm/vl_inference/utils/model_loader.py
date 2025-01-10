@@ -5,6 +5,7 @@
 import os
 import torch
 import glob
+import warnings
 from modelscope import snapshot_download
 from transformers import Qwen2VLForConditionalGeneration, AutoConfig, AutoTokenizer
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
@@ -13,8 +14,20 @@ from safetensors.torch import safe_open
 from dashinfer import allspark
 from dashinfer.allspark.model_loader import HuggingFaceModel, ModelSerializerException
 from dashinfer.allspark.model_config import QWen2ConfigAdapter
-from .trt.onnx_to_plan import ONNX_TRT
+try:
+    from .trt.onnx_to_plan import ONNX_TRT
+except Exception:
+    warnings.warn("TensorRT package is not available", ImportWarning)
 
+def dtype_to_torch_dtype(dtype):
+    if dtype == "float32":
+        return torch.float32
+    elif dtype == "float16":
+        return torch.float16
+    elif dtype == "bfloat16":
+        return torch.bfloat16
+    else:
+        raise ValueError("unsupported data type: {}".format(dtype))
 
 class HuggingFaceVLModel(HuggingFaceModel):
     def __init__(
@@ -49,6 +62,8 @@ class HuggingFaceVLModel(HuggingFaceModel):
                 self.torch_model = Qwen2VLForConditionalGeneration.from_pretrained(
                     self.hf_model_path,
                     trust_remote_code=self.trust_remote_code,
+                    torch_dtype=dtype_to_torch_dtype(self.data_type),
+                    device_map="cpu",
                     **kwargs,
                 ).eval()
                 self.vit_config = Qwen2VLVisionConfig.from_pretrained(
@@ -62,17 +77,6 @@ class HuggingFaceVLModel(HuggingFaceModel):
                     trust_remote_code=self.trust_remote_code,
                     **kwargs,
                 )
-                self.torch_model = self.torch_model.cpu()
-
-                if self.data_type == "float32":
-                    self.torch_model.float()
-                elif self.data_type == "float16":
-                    self.torch_model.half()
-                elif self.data_type == "bfloat16":
-                    self.torch_model.bfloat16()
-                else:
-                    self.torch_model = None
-                    raise ValueError("unsupported data type: {}".format(self.data_type))
             except Exception as e:
                 print(
                     f"exception when load model: {self.hf_model_path} , exception: {e}"
@@ -122,9 +126,17 @@ class HuggingFaceVLModel(HuggingFaceModel):
             onnx_trt_obj = ONNX_TRT(self.hf_model_path)
             onnx_trt_obj.export_onnx(onnxFile)
             onnx_trt_obj.generate_trt_engine(onnxFile, self.vision_model_path)
+        elif self.vision_engine == "transformers":
+            visual_model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    self.hf_model_path,
+                    trust_remote_code=self.trust_remote_code,
+                    torch_dtype=dtype_to_torch_dtype(self.data_type),
+                    device_map="cpu",
+                    attn_implementation="flash_attention_2",
+                ).visual.eval()
+            self.vision_model_path = visual_model
         else:
             raise ValueError(f"unsupported engine {self.vision_engine}")
-
         # Convert Allspark LLM
         enable_quant = self.fp8
         weight_only_quant=False

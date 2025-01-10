@@ -79,7 +79,7 @@ def init():
     home_dir = os.environ.get("HOME") or "/root"
     output_dir = os.path.join(home_dir, ".cache/as_model/", model.split("/")[-1])
     model_name = "model"
-    data_type = "bfloat16"
+    data_type = context.get("dtype")
 
     model_loader = HuggingFaceVLModel(
         model,
@@ -474,7 +474,9 @@ def get_vl_request(
             "min_length": 5,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
+            # "repetition_penalty": 1.05,
             "length_penalty": 1,
+            "stop_words_ids": [[151643], [151644], [151645]],
             "eos_token_id": context.get("eos_token_id"),
             "seed": 1234567,
         }
