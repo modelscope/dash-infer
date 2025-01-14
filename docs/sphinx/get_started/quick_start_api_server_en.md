@@ -1,6 +1,31 @@
-## Quick Start Guide for OpenAI API Server
+## Quick Start Guide for OpenAI API Chat Server
 
-### Start OpenAI Server with Docker
+### Test the OpenAI API Server (fastapi)
+
+prepare:
+`pip install fastapi uvicorn openai`
+
+start server
+`python ./dash-infer/examples/api_server/fastapi/fastapi-server.py`
+
+user may change the parameter by check `fastapi-server.py -h`
+
+After sever start, server will print some log like: 
+```
+INFO:     Started server process [4898]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+```
+
+test with openai client
+`python ./dash-infer/examples/api_server/fastapi/openai-client.py`
+
+This client will call with openai client with streaming and block mode.
+
+
+
+### Start OpenAI Server with Docker (fastchat)
 
 We have provide a Docker image to start OpenAI server.
 This example demonstrates how to use Docker to run DashInfer as an inference engine, providing OpenAI API endpoints.
@@ -40,7 +65,7 @@ docker run  \
 
 You can also build you owner fastchat Docker image by modifying the Docker file `scripts/docker/fschat_ubuntu_cuda.Dockerfile`.
 
-### Testing the OpenAI API Server
+### Testing the OpenAI API Server (fastchat)
 
 #### Testing with OpenAI SDK
 In `examples/api_server/fschat/openai-client.py`, the official OpenAI SDK is used to test the API server.
