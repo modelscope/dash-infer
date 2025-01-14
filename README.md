@@ -121,7 +121,9 @@ For the detailed user manual, please refer to the documentation: [Documentation 
 
 In `<path_to_dashinfer>/examples` there are examples for C++ and Python interfaces, and please refer to the documentation in `<path_to_dashinfer>/documents/EN` to run the examples.
 
-- [Basic Python Example](examples/python/0_basic/basic_example_qwen_v10_io.ipynb) [![Open In PAI-DSW](https://modelscope.oss-cn-beijing.aliyuncs.com/resource/Open-in-DSW20px.svg)](https://gallery.pai-ml.com/#/import/https://github.com/modelscope/dash-infer/blob/main/examples/python/0_basic/basic_example_qwen_v10_io.ipynb)
+
+
+- [Base GPU Python Example](examples/python/0_basic/cuda/demo_dashinfer_2_0_gpu_example.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/modelscope/dash-infer/blob/main/examples/python/0_basic/cuda/demo_dashinfer_2_0_gpu_example.ipynb)
 - [Documentation for All Python Examples](docs/EN/examples_python.md)
 - [Documentation for C++ Examples](docs/EN/examples_cpp.md)
 
