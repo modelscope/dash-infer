@@ -17,93 +17,85 @@ Below is an example of how to quickly serialize a Hugging Face model and perform
 ### Inference Python Example
 This is an example of using asynchronous interface to obtain output, with bfloat16, in memory model serialize, and async output processing. The model is downloaded from Modelscope. Initiating requests and receiving outputs are both asynchronous, and can be handled according to your application needs.
 
-```py
-    import os
-    import modelscope
-    from modelscope.utils.constant import DEFAULT_MODEL_REVISION
+```python
+import os
 
-    from dashinfer import allspark
-    from dashinfer.allspark import *
-    from dashinfer.allspark.engine import *
-    from dashinfer.allspark.prompt_utils import PromptTemplate
+from dashinfer import allspark
+from dashinfer.allspark import *
+from dashinfer.allspark.engine import *
+from dashinfer.allspark.prompt_utils import PromptTemplate
 
-    # if use in memory serialize, change this flag to True
-    in_memory = True
-    device_list=[0]
+# Configuration
+in_memory = False
+device_list = [0] # single card by default, 4 cards replace with [0,1,2,3] 
+model_name = "qwen/Qwen2.5-1.5B-Instruct"
+output_base_folder = "model_output"
+user_data_type = "float16" # most device supports float16
+use_modelscope = True
 
-    modelscope_name ="qwen/Qwen2.5-1.5B-Instruct"
-    ms_version = DEFAULT_MODEL_REVISION
-    output_base_folder="output_qwen"
-    model_local_path=""
-    tmp_dir = "model_output"
+# Download and prepare the model
+if use_modelscope:
+   import modelscope
+   from modelscope.utils.constant import DEFAULT_MODEL_REVISION
+   model_local_path = modelscope.snapshot_download(model_name, DEFAULT_MODEL_REVISION)
+else:
+   model_local_path = model_name
 
-    model_local_path = modelscope.snapshot_download(modelscope_name, ms_version)
-    safe_model_name = str(modelscope_name).replace("/", "_")
-    model_convert_folder = os.path.join(output_base_folder, safe_model_name)
+safe_model_name = model_name.replace("/", "_")
+model_convert_folder = os.path.join(output_base_folder, safe_model_name)
 
-    model_loader = allspark.HuggingFaceModel(model_local_path, safe_model_name, in_memory_serialize=in_memory, trust_remote_code=True)
-    engine = allspark.Engine()
+# Initialize model and engine
+model_loader = allspark.HuggingFaceModel(model_local_path, safe_model_name,
+                                         in_memory_serialize=in_memory,
+                                         user_set_data_type=user_data_type)
+engine = allspark.Engine()
 
-    model_loader.load_model().serialize(engine, model_output_dir=tmp_dir).free_model()
+# Load and serialize the model
+model_loader.load_model().serialize(engine, model_output_dir=output_base_folder).free_model()
 
-    runtime_cfg_builder = model_loader.create_reference_runtime_config_builder(safe_model_name, TargetDevice.CUDA, device_list, max_batch=8)
-    # this builder can change runtime parameter
-    # like change to engine max length to a smaller value
-    runtime_cfg_builder.max_length(2048)
+# Configure runtime settings
+runtime_cfg = model_loader.create_reference_runtime_config_builder(
+   safe_model_name, TargetDevice.CUDA, device_list, max_batch=8).max_length(2048).build()
+engine.install_model(runtime_cfg)
+engine.start_model(safe_model_name)
 
-    runtime_cfg = runtime_cfg_builder.build()
+if in_memory: model_loader.free_memory_serialize_file()
 
-    # install model to engine
-    engine.install_model(runtime_cfg)
+# Prepare input
+input_str = "How to protect our planet and build a green future?"
+messages = [
+   {"role": "system", "content": "You are a helpful assistant."},
+   {"role": "user", "content": PromptTemplate.apply_chatml_template(input_str)}
+]
+templated_input_str = model_loader.init_tokenizer().get_tokenizer().apply_chat_template(
+   messages, tokenize=False, add_generation_prompt=True)
 
-    model_loader.free_memory_serialize_file()
+# Configure generation settings
+gen_cfg = model_loader.create_reference_generation_config_builder(runtime_cfg)
+gen_cfg.update({"top_k": 1})
 
-    # start the model inference
-    engine.start_model(safe_model_name)
+# Generate response
+status, handle, queue = engine.start_request_text(
+   safe_model_name, model_loader, templated_input_str, gen_cfg)
+generated_ids = []
 
-    input_str = "How to protect our planet and build a green future?"
-    input_str = PromptTemplate.apply_chatml_template(input_str)
-    messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": input_str}]
+while True:
+   elements = queue.Get()
+   if elements:
+      generated_ids += elements.ids_from_generate
+   status = queue.GenerateStatus()
+   if status in [GenerateRequestStatus.GenerateFinished,
+                 GenerateRequestStatus.GenerateInterrupted]:
+      break
 
-    templated_input_str = model_loader.init_tokenizer().get_tokenizer().apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    # generate a reference generate config.
-    gen_cfg = model_loader.create_reference_generation_config_builder(runtime_cfg)
-    # change generate config base on this generation config, like change top_k = 1
-    gen_cfg.update({"top_k": 1})
+# Decode and print output
+output_text = model_loader.init_tokenizer().get_tokenizer().decode(generated_ids)
+print(f"Model: {model_name}\nInput: {input_str}\nOutput: {output_text}")
 
-    status, handle, queue = engine.start_request_text(safe_model_name, model_loader, templated_input_str, gen_cfg)
-
-    generated_ids = []
-    status = queue.GenerateStatus()
-
-    # in following 3 status, it means tokens are generating
-    while (status == GenerateRequestStatus.Init or status == GenerateRequestStatus.Generating or status == GenerateRequestStatus.ContextFinished):
-        elements = queue.Get()
-        if elements is not None:
-            generated_ids += elements.ids_from_generate
-        status = queue.GenerateStatus()
-
-        if status == GenerateRequestStatus.GenerateFinished:
-            break
-            # This means generated is finished.
-
-        if status == GenerateRequestStatus.GenerateInterrupted:
-            break
-            # This means the GPU has no available resources; the request has been halted by the engine.
-            # The client should collect the tokens generated so far and initiate a new request later.
-
-    # de-tokenize id to text
-    output_text = model_loader.init_tokenizer().get_tokenizer().decode(generated_ids)
-
-    print(f"model: {modelscope_name} input:\n{input_str}  \n output:\n{output_text}\n")
-    print(f"input token:\n {model_loader.init_tokenizer().get_tokenizer().encode(input_str)}")
-    print(f"output token:\n {generated_ids}")
-
-    engine.release_request(safe_model_name, handle)
-
-    engine.stop_model(safe_model_name)
+# Clean up
+engine.release_request(safe_model_name, handle)
+engine.stop_model(safe_model_name)
+print(f"Model: {model_name} have been released.")
 ```
 
 ### Explanations of the Code:
@@ -112,7 +104,9 @@ In this example, the `HuggingFaceModel` (`dashinfer.allspark.model_loader.Huggin
 
 If you want to convert only once, pass `skip_if_exists=True`. If existing files are found, the model conversion step will be skipped. The model files will reside in the `{output_base_folder}` directory, generating two files: `{safe_model_name}.asparam`, `{safe_model_name}.asmodel`. The `free_model()` function will release the Hugging Face model files to save memory.
 ```python
-model_loader = allspark.HuggingFaceModel(model_local_path, safe_model_name, trust_remote_code=True)
+model_loader = allspark.HuggingFaceModel(model_local_path, safe_model_name,
+                                         in_memory_serialize=in_memory,
+                                         user_set_data_type=user_data_type)
 engine = allspark.Engine()
 ```
 
@@ -123,6 +117,8 @@ use `model_loader.serialize()` for uniform API like in sample code, or use `seri
 `skip_if_exists` means if there is local file exits, local file serialize will be bypassed.
 
 ```python
+model_loader.load_model().serialize(engine, model_output_dir=output_base_folder).free_model()
+# or 
 if in_memory:
     (model_loader.load_model()
      .serialize_to_memory(engine, enable_quant=init_quant, weight_only_quant=weight_only_quant)
@@ -140,21 +136,19 @@ In this code section, inference is conducted using a single CUDA card, with the 
 If using in-memory serialization, you can release the memory file after `install_model`, since it is no longer needed.
 
 ```python
-if in_memory:
-    model_loader.free_memory_serialize_file()
+if in_memory: model_loader.free_memory_serialize_file()
+
 ```
 
 Upon calling `start_model`, the engine will perform a warm-up step that simulates a run with the maximum length set in the runtime parameters and the maximum batch size to ensure that no new resources will be requested during subsequent runs, ensuring stability. If the warm-up fails, reduce the length settings in the runtime configurations to lower resource demand. After completion of the warm-up, the engine enters a state ready to accept requests.
 
 ```python
-runtime_cfg_builder = model_loader.create_reference_runtime_config_builder(safe_model_name, TargetDevice.CUDA, [0, 1], max_batch=8)
-# like change to engine max length to a smaller value
-runtime_cfg_builder.max_length(2048)
+runtime_cfg = model_loader.create_reference_runtime_config_builder(
+   safe_model_name, TargetDevice.CUDA, device_list, max_batch=8).max_length(2048).build()
 # like enable int8 kv-cache or int4 kv cache rather than fp16 kv-cache
 # runtime_cfg_builder.kv_cache_mode(AsCacheMode.AsCacheQuantI8)
 # or u4
 # runtime_cfg_builder.kv_cache_mode(AsCacheMode.AsCacheQuantU4)
-runtime_cfg = runtime_cfg_builder.build()
 # install model to engine
 engine.install_model(runtime_cfg)
 # start the model inference
@@ -166,22 +160,41 @@ The following code is focused on generating configurations and applying text tem
 
 ```python
 gen_cfg = model_loader.create_reference_generation_config_builder(runtime_cfg)
-# change generate config based on this generation config, like change top_k = 1
 gen_cfg.update({"top_k": 1})
-gen_cfg.update({"repetition_penalty": 1.1})
 ```
 This code takes recommended generation parameters from Hugging Face's `generation_config.json` and makes optional modifications. It then asynchronously initiates model inference, where `status` indicates the success of the API. If successful, `handle` and `queue` are used for subsequent requests. The `handle` represents the request handle, while `queue` indicates the output queue; each request has its own output queue, which continuously accumulates generated tokens. This queue will only be released after `release_request` is invoked.
 
 ```python
-status, handle, queue = engine.start_request_text(safe_model_name, model_loader, input_str, gen_cfg)
+status, handle, queue = engine.start_request_text(
+   safe_model_name, model_loader, templated_input_str, gen_cfg)
 ```
 
 #### 5. Handling Output
-##### 5.1 Synchronous Processing
 
 DashInfer prioritizes asynchronous APIs for optimal performance and to align with the inherent nature of LLMs. Sending and receiving requests is primarily designed for asynchronous operation. However, for compatibility with user preferences accustomed to synchronous calls, we provide `engine.sync_request()`. This API allows users to block until the generation request completes.
 
+##### 5.1 Asynchronous Processing
+Asynchronous processing differs in that it requires repeated calls to the queue until the status changes to `GenerateRequestStatus.ContextFinished`. A normal state machine transition goes:
+`Init` (initial state) -> `ContextFinished` (prefill completed and first token generated) ->
+`Generating` (in progress) -> `GenerateFinished` (completed).
+During this normal state transition, an exceptional state can occur: `GenerateInterrupted`, which indicates resource shortages, causing the request to pause while its resources are temporarily released for others. This often happens under heavy loads.
+
+```python
+generated_ids = []
+while True:
+   elements = queue.Get()
+   if elements:
+      generated_ids += elements.ids_from_generate
+   status = queue.GenerateStatus()
+   if status in [GenerateRequestStatus.GenerateFinished, GenerateRequestStatus.GenerateInterrupted]:
+      break
+```
+
+##### 5.2 Synchronous Processing
+
 The subsequent call to `sync_request` will block until generation is finished, simulating a synchronous call. Without this invocation, operations on the queue can proceed but will require polling. The following code synchronously fetches all currently generated IDs from the queue, blocking at this point if there are IDs yet to be generated until completion or an error occurs.
+
+Sync processing is not showing in this example code, you can modify example following code.
 
 Here's an example:
 
@@ -201,45 +214,10 @@ generated_elem = queue.Get()
 generated_ids = generated_elem.ids_from_generate
 ```
 
+#### 6. Decode Token
 For usage of the queue class, you can use `help(dashinfer.allspark.ResultQueue)` for detailed information. The next step converts IDs back into text:
 
 ```python
 output_text = model_loader.init_tokenizer().get_tokenizer().decode(generated_ids)
 ```
 
-##### 5.2 Asynchronous Processing
-Asynchronous processing differs in that it requires repeated calls to the queue until the status changes to `GenerateRequestStatus.ContextFinished`. A normal state machine transition goes:
-`Init` (initial state) -> `ContextFinished` (prefill completed and first token generated) -> 
-`Generating` (in progress) -> `GenerateFinished` (completed).
-During this normal state transition, an exceptional state can occur: `GenerateInterrupted`, which indicates resource shortages, causing the request to pause while its resources are temporarily released for others. This often happens under heavy loads.
-
-```python
-generated_ids2 = []
-# async fetch output result.
-# looping until status is not okay
-print(f"2 request: status: {queue2.GenerateStatus()}")
-status = queue2.GenerateStatus()
-# in the following 3 statuses, it means tokens are generating
-while (status == GenerateRequestStatus.Init
-       or status == GenerateRequestStatus.Generating
-       or status == GenerateRequestStatus.ContextFinished):
-    print(f"2 request: status: {queue2.GenerateStatus()}")
-    elements = queue2.Get()
-    if elements is not None:
-        print(f"new token: {elements.ids_from_generate}")
-        generated_ids2 += elements.ids_from_generate
-    status = queue2.GenerateStatus()
-    if status == GenerateRequestStatus.GenerateFinished:
-        break
-        # This means generation is finished.
-    if status == GenerateRequestStatus.GenerateInterrupted:
-        break
-        # This means the GPU has no available resources; the request has been halted by the engine.
-        # The client should collect the tokens generated so far and initiate a new request later.
-
-if test:
-    test.assertEqual(queue2.GenerateStatus(), GenerateRequestStatus.GenerateFinished)
-
-print(f"generated id: {queue2.GenerateStatus()}  {generated_ids2}")
-output_text2 = model_loader.init_tokenizer().get_tokenizer().decode(generated_ids2)
-```

@@ -16,7 +16,6 @@ from dashinfer.allspark.prompt_utils import PromptTemplate
 from dashinfer.allspark.runtime_config import AsModelRuntimeConfigBuilder
 import uvicorn
 import json
-import modelscope
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="FastAPI server with custom options")
@@ -45,6 +44,7 @@ output_base_folder="output_qwen"
 tmp_dir = "model_output"
 
 if args.use_modelscope:
+    import modelscope
     modelscope_model_name = args.model_name
     model_local_path = modelscope.snapshot_download(modelscope_model_name)
 else:
