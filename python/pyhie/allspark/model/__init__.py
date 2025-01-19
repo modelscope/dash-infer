@@ -4,20 +4,11 @@
 '''
 from .opt import *
 from .llama import *
-from .llama_v2 import *
-from .llama_v3 import *
-from .chatglm_v1 import *
-from .chatglm_v2 import *
-from .chatglm_v3 import *
-from .chatglm_v4 import *
-from .baichuan_v2 import *
-from .baichuan_v1 import *
+from .chatglm import *
+from .baichuan import *
 from .starcoder import *
-from .qwen_v10 import *
-from .qwen_v15 import *
-from .qwen_v20 import *
-from .qwencode_v20 import *
-from .qwen_v20_moe import *
+from .qwen import *
+from .qwen_moe import *
 __all__ = [
     "OPT",
     "LLaMA",
