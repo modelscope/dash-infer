@@ -31,7 +31,7 @@ class SpanAttnOpCUDA : public SpanAttnOp {
   AsStatus setWorkspace(const RuntimeContext* runtime_ctx) override;
 
   /* for Forward (prefill / context) */
-  void contextAttnLauncher(void* k_cache_buf, void* v_cache_buf, int new_step,
+  void contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
                            int beam_size) override;
   void contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
                                const AsTensor& v_cache_ptr_tensor,

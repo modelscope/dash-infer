@@ -189,6 +189,24 @@ inline std::ostream& operator<<(std::ostream& os, DeviceType device_type) {
   }
 }
 
+inline int get_layer_num(std::string str) {
+  std::stringstream ss(str);
+  std::string temp;
+  while (std::getline(ss, temp, '.')) {
+    bool flag = true;
+    for (char c : temp) {
+      if (!std::isdigit(c)) /* 如果不是数字，返回 false */ {
+        flag = false;
+        break;
+      }
+    }
+    if (flag) {
+      return std::stoi(temp);
+    }
+  }
+  return -1;
+}
+
 // deprecated api declear
 #if __cplusplus >= 201402L  // c++14
 

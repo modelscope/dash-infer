@@ -55,9 +55,9 @@ AsStatus GemmLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
   for (auto i = 0; i < batchsize; i++) {
     // DLOG(INFO) <<  "runtime_ctx->is_context=" << std::boolalpha <<
     // runtime_ctx->is_context;
-    GenerateContext* gen_ctx = runtime_ctx->is_context
-                                   ? runtime_ctx->GetContextGenCtx()
-                                   : runtime_ctx->GetGenCtx(i);
+    std::shared_ptr<GenerateContext> gen_ctx =
+        runtime_ctx->is_context ? runtime_ctx->GetContextGenCtx()
+                                : runtime_ctx->GetGenCtx(i);
     auto lora_name = gen_ctx->gen_cfg.lora_name;
     DLOG(INFO) << i << ":r " << lora_name << std::endl;
     if (lora_name.empty())  // 加载了lora权重 但请求中可以不使用
@@ -144,9 +144,9 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
     void* out_ptr =
         (char*)batch_out_tensor->GetDataPtr() + i * batch_out_stride;
     // GemmLora 不使用weights_, 使用lora_weight
-    GenerateContext* gen_ctx = runtime_ctx->is_context
-                                   ? runtime_ctx->GetContextGenCtx()
-                                   : runtime_ctx->GetGenCtx(i);
+    std::shared_ptr<GenerateContext> gen_ctx =
+        runtime_ctx->is_context ? runtime_ctx->GetContextGenCtx()
+                                : runtime_ctx->GetGenCtx(i);
     auto lora_name = gen_ctx->gen_cfg.lora_name;
     DLOG(INFO) << i << ":f " << lora_name << std::endl;
     if (lora_name.empty()) {

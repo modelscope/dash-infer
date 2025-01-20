@@ -14,7 +14,6 @@ class EngineUtils:
     """some common function used in Engine and Engine client."""
     def __init__(self):
         self.model_map = {
-            "OPT": OPT,
             "LLaMA": LLaMA,
             "LLaMA_v2": LLaMA_v2,
             "LLaMA_v3": LLaMA_v3,
@@ -24,7 +23,6 @@ class EngineUtils:
             "ChatGLM_v4": ChatGLM_v4,
             "Baichuan_v1": Baichuan_v1,
             "Baichuan_v2": Baichuan_v2,
-            "StarCoder": StarCoder,
             "Qwen_v10": Qwen_v10,
             "Qwen_v15": Qwen_v15,
             "Qwen_v20": Qwen_v20,

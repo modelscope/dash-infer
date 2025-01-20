@@ -56,7 +56,6 @@ class DecOptMHAI8CacheOp : public AsOperator {
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
-  // AsStatus RunOneBatch(GenerateContext* gen_ctx,int current_batch);
 
  private:
   // io info

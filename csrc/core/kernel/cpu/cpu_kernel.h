@@ -75,6 +75,12 @@ void MHAKernel(T* out, const T* q, const T* k, const T* v, const float* mask,
                int step, int hidden_size, int size_per_head, float alpha);
 template <typename T0, typename T1>
 void CastKernelLauncher(const T0* in, T1* out, int size);
+
+template <typename T>
+void CopyToArrayKernelLauncher(T* array, const T** vars, int count);
+template <typename T>
+void CopyToVarsKernelLauncher(T** vars, const T* array, int count);
+
 template <typename T>
 void LayerNormKernel(T* data_out, const T* data_in, const T* bias,
                      const T* gamma, const T* beta, int m, int n, float eps);

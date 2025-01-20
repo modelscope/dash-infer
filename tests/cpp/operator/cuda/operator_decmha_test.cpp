@@ -90,20 +90,19 @@ class DecMHATest : public ::testing::Test {
   void test_dec_mha(int batch, int phead, int nhead, int xseql, int cache,
                     int loop_max, float feps) {
     proto.set_op_type("DecOptMHAI8Cache");
-    // allspark::GenerateContext genctx;
     std::unique_ptr<allspark::RuntimeContext> runtime_ctx =
         std::make_unique<RuntimeContext>();
-    runtime_ctx->PushBackGenCtx(std::make_unique<GenerateContext>());
-    allspark::GenerateContext genctx = *(runtime_ctx->GetGenCtx(0));
+    runtime_ctx->PushBackGenCtx(std::make_shared<GenerateContext>());
+    std::shared_ptr<GenerateContext> genctx = runtime_ctx->GetGenCtx(0);
     allspark::DataType dt0 = toDataType<T>::dt;
 
     // param
     int loop_cnt = 0;
 
     // context
-    genctx.max_length = cache;
-    genctx.batch_size = batch;
-    genctx.step = 0;
+    genctx->max_length = cache;
+    genctx->batch_size = batch;
+    genctx->step = 0;
 
     // tensor map
     allspark::TensorMap weight_map;
@@ -280,7 +279,7 @@ class DecMHATest : public ::testing::Test {
     std::vector<allspark::dim_t> shape_input0_decoder = shape_input0_context;
     std::vector<allspark::dim_t> shape_input1_decoder = shape_input1_context;
     shape_input0_decoder[1] = 1;
-    genctx.step = xseql;
+    genctx->step = xseql;
 #if ENABLE_PREV
     tensor_map_prev.at(in0_name.c_str())
         ->SetShape(allspark::Shape(shape_input0_decoder));
@@ -291,7 +290,7 @@ class DecMHATest : public ::testing::Test {
 #endif  // ENABLE_I8KV
 
 #if 1  // 2
-    while (genctx.step + 1 < cache && loop_cnt < loop_max) {
+    while (genctx->step + 1 < cache && loop_cnt < loop_max) {
       std::vector<T> vc_input0_decoder1 =
           rand_float<T>(squash_vector_shape(shape_input0_decoder));
       std::vector<float> vc_input1_decoder1 =
@@ -356,7 +355,7 @@ class DecMHATest : public ::testing::Test {
 #endif  // ENABLE_I8KV
 #endif  // ENABLE_PREV
 
-      genctx.step++;
+      genctx->step++;
       loop_cnt++;
     }
 #endif  // 2nd
@@ -383,12 +382,12 @@ void TestDecMhaU4Cache(int batch, int phead, int nhead, int xseql, int cache,
                        int loop_max, float feps) {
   std::unique_ptr<allspark::RuntimeContext> runtime_ctx =
       std::make_unique<RuntimeContext>();
-  runtime_ctx->PushBackGenCtx(std::make_unique<GenerateContext>());
-  allspark::GenerateContext genctx = *(runtime_ctx->GetGenCtx(0));
+  runtime_ctx->PushBackGenCtx(std::make_shared<GenerateContext>());
+  std::shared_ptr<GenerateContext> genctx = runtime_ctx->GetGenCtx(0);
   // context
-  genctx.max_length = cache;
-  genctx.batch_size = batch;
-  genctx.step = 0;
+  genctx->max_length = cache;
+  genctx->batch_size = batch;
+  genctx->step = 0;
 
   // input0 qkv
   std::string in0_name = "qkv";
@@ -507,10 +506,10 @@ void TestDecMhaU4Cache(int batch, int phead, int nhead, int xseql, int cache,
       .at(out_name.c_str())
       ->SetShape(allspark::Shape(shape_output_decoder));
 
-  genctx.step = xseql;
+  genctx->step = xseql;
   int loop_cnt = 0;
-  while (genctx.step + 1 < cache && loop_cnt < loop_max) {
-    // std::cout << "Decoder step : " << genctx.step + 1 - xseql << std::endl;
+  while (genctx->step + 1 < cache && loop_cnt < loop_max) {
+    // std::cout << "Decoder step : " << genctx->step + 1 - xseql << std::endl;
     // update input data
     std::vector<T> input0_decoder =
         rand_float<T>(squash_vector_shape(shape_input0_decoder));
@@ -581,7 +580,7 @@ void TestDecMhaU4Cache(int batch, int phead, int nhead, int xseql, int cache,
     }
     EXPECT_EQ(diff < feps, true);
 
-    genctx.step++;
+    genctx->step++;
     loop_cnt++;
   }
 #endif

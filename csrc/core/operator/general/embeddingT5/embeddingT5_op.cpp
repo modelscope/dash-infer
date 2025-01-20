@@ -76,8 +76,14 @@ AsStatus EmbeddingT5Op::Init(const OperatorProto& op_proto,
   // type inference
   DataType dtype = weights_[0]->GetDataType();
   tensor_map_->at(out_names_[0])->SetDataType(dtype);
+
   // kernel choose
   DeviceType backend = ctx.GetDeviceType();
+
+  in_ids_ = std::make_unique<AsTensor>("in_ids", backend, DataType::INT64,
+                                       DataMode::DENSE,
+                                       Shape{ctx_->GetModelMaxBatch()});
+
   switch (backend) {
 #ifdef ENABLE_CUDA
     case DeviceType::CUDA:
@@ -94,17 +100,79 @@ AsStatus EmbeddingT5Op::Init(const OperatorProto& op_proto,
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus EmbeddingT5Op::Reshape() {
-  Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
-  batch_size_ = in_shape[0];
-  seq_len_ = in_shape[1];
+AsStatus EmbeddingT5Op::Reshape(RuntimeContext* runtime_ctx) {
+  if (runtime_ctx->is_context) {
+    batch_size_ = 1;
+    seq_len_ = runtime_ctx->GetContextGenCtx()
+                   ->request->interim.at("new_input_ids")
+                   ->GetShape()[1];
+  } else {
+    batch_size_ = runtime_ctx->GetGenCtxListSize();
+    seq_len_ = 1;
+  }
+
   Shape out_shape = Shape({batch_size_, seq_len_, hidden_size_});
   AS_CHECK_STATUS(
       tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus EmbeddingT5Op::Forward() {
-  void* in_ids = tensor_map_->at(in_names_[0])->GetDataPtr();
+AsStatus EmbeddingT5Op::Forward(RuntimeContext* runtime_ctx) {
+  void* in_ids = nullptr;
+
+  DeviceType backend = ctx_->GetDeviceType();
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      if (runtime_ctx->is_context) {
+        std::shared_ptr<GenerateContext> gen_ctx =
+            runtime_ctx->GetContextGenCtx();
+        in_ids =
+            gen_ctx->request->interim.at("new_input_ids_gpu")->GetDataPtr();
+      } else {
+        std::vector<int64_t> new_tokens(batch_size_);
+        for (int i = 0; i < batch_size_; i++) {
+          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+          std::shared_ptr<AsTensor> generated_ids_tensor =
+              gen_ctx->request->interim.at("generated_ids");
+          new_tokens[i] =
+              *(static_cast<int64_t*>(generated_ids_tensor->GetDataPtr()) +
+                generated_ids_tensor->GetShape()[1] - 1);
+        }
+        cudaStream_t stream =
+            static_cast<const CUDAContext*>(ctx_)->GetStream();
+        AS_CHECK_CUDA(cudaMemcpyAsync(in_ids_->GetDataPtr(), new_tokens.data(),
+                                      batch_size_ * sizeof(int64_t),
+                                      cudaMemcpyHostToDevice, stream));
+
+        in_ids = in_ids_->GetDataPtr();
+      }
+      break;
+    }
+#endif
+    case DeviceType::CPU: {
+      if (runtime_ctx->is_context) {
+        std::shared_ptr<GenerateContext> gen_ctx =
+            runtime_ctx->GetContextGenCtx();
+        in_ids = gen_ctx->request->interim.at("new_input_ids")->GetDataPtr();
+      } else {
+        int64_t* ptr = static_cast<int64_t*>(in_ids_->GetDataPtr());
+        for (int i = 0; i < batch_size_; i++) {
+          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+          std::shared_ptr<AsTensor> generated_ids_tensor =
+              gen_ctx->request->interim.at("generated_ids");
+          ptr[i] = *(static_cast<int64_t*>(generated_ids_tensor->GetDataPtr()) +
+                     generated_ids_tensor->GetShape()[1] - 1);
+        }
+        in_ids = in_ids_->GetDataPtr();
+      }
+      break;
+    }
+    default:
+      LOG(ERROR) << op_type_ << " Operator does not support "
+                 << DeviceType_Name(backend) << " device type" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+  }
+
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
   kernel_launcher(weights_[0]->GetDataType(), out, in_ids,
                   weights_[0]->GetDataPtr(), batch_size_, seq_len_,

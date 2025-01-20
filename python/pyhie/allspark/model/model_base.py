@@ -69,18 +69,6 @@ class Operator(object):
         return self.op
 
 
-class Embedding(Operator):
-
-    def __init__(self, op_name, inputs, op_attr={}):
-        super().__init__("Embedding", op_name, inputs, op_attr)
-        self.op.weights.append(make_tensor(op_name + ".word_embeddings"))
-        self.op.weights.append(make_tensor(op_name + ".position_embeddings"))
-        if "token_embedding" in op_attr and op_attr["token_embedding"]:
-            self.op.weights.append(
-                make_tensor(op_name + ".token_type_embeddings"))
-        self.op.outputs.append(make_tensor(op_name + ".out"))
-
-
 class EmbeddingT5(Operator):
 
     def __init__(self, op_name, inputs, op_attr={}):

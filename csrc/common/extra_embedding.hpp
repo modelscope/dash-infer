@@ -145,7 +145,8 @@ class ExtraEmbeddingUtils {
   }
 
   static AsStatus CreateTensorForHash(std::shared_ptr<Request> request,
-                                      TensorMap& tensor_map,
+                                      TensorMap& dst_tensor_map,
+                                      const TensorMap& src_tensor_map,
                                       std::string src_tensor_name) {
     std::string dst_tensor_name = src_tensor_name + "_for_hash";
 
@@ -153,8 +154,8 @@ class ExtraEmbeddingUtils {
       if (request->extra_embedding.count("hash_input") > 0) {
         // step 1: parse extra_embedding info
         int64_t* tensor_ptr =
-            (int64_t*)tensor_map[src_tensor_name]->GetDataPtr();
-        int seq_len = tensor_map[src_tensor_name]->GetShape()[1];
+            (int64_t*)src_tensor_map.at(src_tensor_name)->GetDataPtr();
+        int seq_len = src_tensor_map.at(src_tensor_name)->GetShape()[1];
         auto reinfo_vec = std::make_shared<ExtraEmbeddingUtils::REInfoList>();
         AS_CHECK_STATUS(ExtraEmbeddingUtils::ParseExtraEmbedding(
             request->extra_embedding, tensor_ptr, seq_len, reinfo_vec));
@@ -165,20 +166,22 @@ class ExtraEmbeddingUtils {
 
         // step 3: create a new input tensor
         auto dst_tensor = std::make_shared<AsTensor>(
-            dst_tensor_name, *tensor_map[src_tensor_name]);
+            dst_tensor_name, *src_tensor_map.at(src_tensor_name));
 
         // step 4: replace place holder with hashes
         ExtraEmbeddingUtils::ReplacePlaceHolder(dst_tensor, reinfo_vec);
 
-        tensor_map.insert({dst_tensor_name, dst_tensor});
+        dst_tensor_map.insert({dst_tensor_name, dst_tensor});
       } else {
         LOG(ERROR) << "multi-media content `hash_input` "
                    << "of request " << request->request_id << " is missing.";
         return AsStatus::ALLSPARK_PARAM_ERROR;
       }
     } else {
-      // no extra embedding, use original input_ids for hash
-      tensor_map.insert({dst_tensor_name, tensor_map[src_tensor_name]});
+      // no extra embedding, copy original tensor for hash
+      auto dst_tensor = std::make_shared<AsTensor>(
+          dst_tensor_name, *src_tensor_map.at(src_tensor_name));
+      dst_tensor_map.insert({dst_tensor_name, dst_tensor});
     }
 
     return AsStatus::ALLSPARK_SUCCESS;

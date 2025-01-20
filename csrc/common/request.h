@@ -21,7 +21,8 @@ class FormatEnforcer;
 struct Request {
   std::string request_id;
   TensorMap inputs;
-  TensorMap outputs;
+  const TensorMap outputs;  // created in AsEngineImpl, shared by all workers
+  TensorMap interim;        // intermediate tensors
   GenerateConfig gen_cfg;
   std::vector<std::vector<std::pair<int, float>>> log_probs_list;
   std::vector<float> token_logprobs_list;
@@ -42,31 +43,33 @@ struct Request {
   const std::chrono::time_point<std::chrono::steady_clock> start_ts;
   std::chrono::time_point<std::chrono::steady_clock> context_ts;
   std::chrono::time_point<std::chrono::steady_clock> generate_ts;
+
   Request(const std::string& request_id_, const TensorMap& inputs_,
-          const TensorMap& outputs_, const GenerateConfig& gen_cfg)
+          const TensorMap& outputs_, const GenerateConfig& gen_cfg,
+          const TensorMap& interim_ = {})
       : request_id(request_id_),
         inputs(inputs_),
         outputs(outputs_),
+        interim(interim_),
         gen_cfg(gen_cfg),
         finish(false),
         status(AsEngine::GenerateRequestStatus::Init),
         start_ts(std::chrono::steady_clock::now()) {}
-  Request(std::shared_ptr<Request> source_request) {
-    if (source_request) {
-      this->request_id = source_request->request_id;
-      this->inputs = source_request->inputs;
-      this->outputs = source_request->outputs;
-      this->gen_cfg = source_request->gen_cfg;
-      this->log_probs_list = source_request->log_probs_list;
-      this->token_logprobs_list = source_request->token_logprobs_list;
-      this->finish = source_request->finish;
-      this->input_len = source_request->input_len;
-      this->prefill_chunk_len = source_request->prefill_chunk_len;
-      this->prefix_len = source_request->prefix_len;
-      this->status = source_request->status;
-      this->extra_embedding = source_request->extra_embedding;
-    }
-  }
+
+  Request(std::shared_ptr<Request> source_request)
+      : request_id(source_request->request_id),
+        inputs(source_request->inputs),
+        outputs(source_request->outputs),
+        interim(source_request->interim),
+        gen_cfg(source_request->gen_cfg),
+        log_probs_list(source_request->log_probs_list),
+        token_logprobs_list(source_request->token_logprobs_list),
+        finish(source_request->finish),
+        input_len(source_request->input_len),
+        prefill_chunk_len(source_request->prefill_chunk_len),
+        prefix_len(source_request->prefix_len),
+        status(source_request->status),
+        extra_embedding(source_request->extra_embedding) {}
 };
 
 }  // namespace allspark

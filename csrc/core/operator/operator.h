@@ -52,9 +52,7 @@ class AsOperator {
   AsStatus CallReshape(RuntimeContext* runtime_ctx);
   AsStatus CallAlloc(RuntimeContext* runtime_ctx);
 
-  AsStatus SetGenerateContext(GenerateContext& gen_ctx);
-  AsStatus SetGenerateContextList(
-      std::vector<std::unique_ptr<GenerateContext>>& gen_ctx_list);
+  AsStatus SetGenerateContext(std::shared_ptr<GenerateContext>& gen_ctx);
   void Synchronize();
   void PrintInformation();
   void SaveInformation();
@@ -117,7 +115,7 @@ class AsOperator {
                            // output tensor.
   std::vector<TensorListMap>* embedding_map_;
   const DeviceContext* ctx_;
-  GenerateContext* gen_ctx_;
+  std::shared_ptr<GenerateContext> gen_ctx_;
   std::unique_ptr<DNNLOpContext> dnnl_op_ctx_;
   ModelProfiler* profiler_ = nullptr;
   std::shared_ptr<ModelWeightHandler> weight_handler_;

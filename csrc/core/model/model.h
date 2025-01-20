@@ -38,6 +38,7 @@ class LoraManager;
 
 using GraphOpMap =
     std::unordered_map<std::string, std::vector<std::unique_ptr<AsOperator>>>;
+
 class AsModel {
  public:
   explicit AsModel(const std::string& model_type = "");
@@ -89,7 +90,7 @@ class AsModel {
 
   TensorMap& GetWeightsBuffer() { return weights_buffer_; }
   AsStatus ErrorProcess(AsStatus status) {
-    gen_ctx_ = std::make_unique<GenerateContext>();
+    gen_ctx_model_ = std::make_unique<GenerateContext>();
 #ifdef ENABLE_CUDA
     cudaGetLastError();
 #endif
@@ -140,7 +141,7 @@ class AsModel {
 
  protected:
   AsStatus runDecoderContext();
-  AsStatus buildGenContext(GenerateContext* gen_ctx,
+  AsStatus buildGenContext(std::shared_ptr<GenerateContext>& gen_ctx,
                            const std::shared_ptr<Request>& request) const;
 
   std::string model_type_;
@@ -153,12 +154,14 @@ class AsModel {
   std::vector<std::string> output_names_;
   std::vector<AsOperator*> topo_ops_;
   const DeviceContext* ctx_;
-  std::unique_ptr<GenerateContext> gen_ctx_;
+  std::unique_ptr<GenerateContext>
+      gen_ctx_model_;  // 仅用于给给精度校对工具记录step
   std::unique_ptr<RuntimeContext> runtime_ctx_;
 
   std::atomic<int> current_unfinished_request_;
   std::mutex gen_ctx_lock_;
   std::queue<std::shared_ptr<Request>> pending_request_queue_;
+
   std::mutex request_map_lock_;
   std::unordered_map<std::string, std::shared_ptr<Request>> all_request_map_;
   int rank_ = 0;
@@ -181,13 +184,12 @@ class AsModel {
   std::shared_ptr<ModelWeightHandler> weight_handler_;
   std::shared_ptr<WeightManager> weight_manager_;
   std::shared_ptr<LoraManager> lora_manager_;
-  std::unique_ptr<ModelProfiler> model_profiler_;
+  std::shared_ptr<ModelProfiler> model_profiler_;
 #if ENABLE_SPAN_ATTENTION
 #ifdef CONFIG_CONCURRENT_SPAN
   std::unique_ptr<ThreadPool> layer_threadpool_;
 #endif  // CONFIG_CONCURRENT_SPAN
 #endif  // ENABLE_SPAN_ATTENTION
-  bool is_rebuild_ = false;
 };
 
 using ModelConstructor = std::function<std::unique_ptr<AsModel>()>;

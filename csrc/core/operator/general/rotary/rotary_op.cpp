@@ -304,7 +304,7 @@ AsStatus RotaryOp::RunContext(RuntimeContext* runtime_ctx) {
                << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
 
   seq_len_ += gen_ctx->prefix_len;
   TensorListMap extra_embedding = gen_ctx->request->extra_embedding;
@@ -318,7 +318,7 @@ AsStatus RotaryOp::RunContext(RuntimeContext* runtime_ctx) {
     layer_cache_manager->SetCache("rotary_inv_freq");
     int freq_size = size_per_head_ / 2;
     int batch_size = 1;
-    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
     std::vector<float> inv_freq_tmp =
         calculate_invfreq(base_, gen_ctx->input_len, invfreq_type_);
     rotary_inv_freq->SetShape(Shape{batch_size * freq_size});
@@ -376,7 +376,7 @@ AsStatus RotaryOp::RunDecoder(RuntimeContext* runtime_ctx) {
     std::vector<float> inv_freq_tmp(batch_size * freq_size);
     std::vector<int> run_step_tmp(batch_size);
     for (int batch = 0; batch < batch_size; batch++) {
-      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+      std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
       std::vector<float> inv_freq_one =
           calculate_invfreq(base_, gen_ctx->step, invfreq_type_);
       for (int j = 0; j < freq_size; j++) {

@@ -166,7 +166,7 @@ class AsModelConfig {
   static constexpr int default_num_thread = 0;
   static constexpr const char* default_matmul_precision = "highest";
   static constexpr const char* default_compute_unit = "CUDA:0";
-  static constexpr int default_span_size = 32;
+  static constexpr int default_span_size = 128;
   static constexpr AsMHAPrefill default_prefill_mode =
       AsMHAPrefill::AsPrefillDefault;
   static constexpr AsCacheMode default_kv_cache_mode =

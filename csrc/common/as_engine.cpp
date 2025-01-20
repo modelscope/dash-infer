@@ -246,7 +246,6 @@ class AsEngineImpl final {
 
 ModelControlState::ModelControlState(const std::string& name)
     : model_name(name), msg_queue(1000) {
-  cond_var = std::make_unique<std::condition_variable>();
   request_handle_map.reserve(1000);
   result_queue_map.reserve(1000);
   msg_queue_size.store(0);
@@ -328,14 +327,25 @@ AsEngineImpl::~AsEngineImpl() {
   // we should wait for the running thread stop otherwise it will cause
   // exception.
   LOG(INFO) << "~AsEngine called";
-  for (auto& model_state : model_state_map_) {
-    if (!model_state.second && model_state.second->model_stopped) {
-      LOG(INFO) << "Stopping model " << model_state.first;
-      StopModel(model_state.first.c_str());
-      ReleaseModel(model_state.first.c_str());
-      // model_state.second->StopLoop();
+
+  std::vector<std::string> pending_stop_model;
+
+  {
+    std::lock_guard<std::mutex> guard(engine_lock_);
+    LOG(INFO) << "model_state_map_ size:" << model_state_map_.size();
+    for (auto& model_state : model_state_map_) {
+      if (!model_state.second->model_stopped) {
+        LOG(INFO) << "Stopping model " << model_state.first;
+        pending_stop_model.push_back(model_state.first);
+      }
     }
   }
+
+  for (auto& name : pending_stop_model) {
+    StopModel(name.c_str());
+    ReleaseModel(name.c_str());
+  }
+
   // LOG(INFO) << "~Engine clear BFC Allocator ";
   //  free weight manager before destroy bfc.
   bool do_destroy_bfc = weight_manager_->GetNumModels() > 0;
@@ -1557,9 +1567,10 @@ AsStatus AsEngineImpl::StopModel(const char* model_name) {
       LOG(ERROR) << "push message queue failed.";
     }
   }
-  model_state->cond_var->notify_all();
 
+  LOG(INFO) << "AsEngineImpl:: wait stop model return";
   auto ret = reply_promise->get_future().get();
+  LOG(INFO) << "AsEngineImpl:: stop model got return.";
 
   if (ret != AsStatus::ALLSPARK_SUCCESS) {
     LOG(ERROR) << "[" << model_name << "] "
@@ -1781,8 +1792,7 @@ AsStatus AsEngineImpl::StartRequest(
   handle->mm_embedding_internal = extra_embedding;
 
 #ifdef ENABLE_JSON_MODE
-  if (request_info->config.response_format.find("type") !=
-          request_info->config.response_format.end() &&
+  if (request_info->config.response_format.count("type") &&
       request_info->config.response_format["type"] == "json_object") {
     if (util::FormatEnforcer::vocab_.empty() &&
         request_info->config.vocab.empty()) {
@@ -1824,7 +1834,6 @@ AsStatus AsEngineImpl::StartRequest(
     // create result queue & handle
   }
 
-  model_state->cond_var->notify_one();
 #ifndef ENABLE_CUDA
   workers_[0]->GetDeviceContext()->SemWaitSendInterProcess();
 #endif
@@ -1869,7 +1878,6 @@ AsStatus AsEngineImpl::StopRequest(const char* model_name,
                                     reply_promise, uuid);
     model_state->msg_queue.enqueue(std::move(msg));
   }
-  model_state->cond_var->notify_one();
 #ifndef ENABLE_CUDA
   workers_[0]->GetDeviceContext()->SemWaitSendInterProcess();
 #endif
@@ -1916,7 +1924,6 @@ AsStatus AsEngineImpl::ReleaseRequest(const char* model_name,
     model_state->msg_queue.enqueue(std::move(msg));
   }
 
-  model_state->cond_var->notify_one();
   auto ret = reply_promise->get_future().get();
   if (ret == AsStatus::ALLSPARK_SUCCESS) {
     LOG(INFO) << "[" << model_name << "] "
@@ -1965,7 +1972,6 @@ AsStatus AsEngineImpl::SyncRequest(const char* model_name,
                                     reply_promise, uuid);
     model_state->msg_queue.enqueue(std::move(msg));
   }
-  model_state->cond_var->notify_one();
 #ifndef ENABLE_CUDA
   workers_[0]->GetDeviceContext()->SemWaitSendInterProcess();
 #endif
@@ -2430,6 +2436,7 @@ AsStatus AsEngineImpl::InputParamsVerify(
                << "gen_cfg.top_p must in [0,1]" << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
+
   if (gen_cfg.temperature < SAMPLING_EPS) {
     DLOG(INFO) << "[" << model_name << "] "
                << "gen_cfg.temperature = " << gen_cfg.temperature
@@ -2437,6 +2444,14 @@ AsStatus AsEngineImpl::InputParamsVerify(
     gen_cfg.top_k = 1;
     gen_cfg.top_p = 0;
     gen_cfg.temperature = 1.0;
+  }
+
+  if (std::abs(gen_cfg.top_p - 1.0) < 1e-6) {
+    LOG(WARNING) << "[" << model_name << "] "
+                 << "gen_cfg.top_p == 1.0, This might lead to performance "
+                    "issues, so it is manually set to 0.99. "
+                 << std::endl;
+    gen_cfg.top_p = 0.99;
   }
   // user customized max batch size
   if (engine_max_batch_ != 0 && input_batch > engine_max_batch_) {
@@ -2481,8 +2496,8 @@ AsStatus AsEngineImpl::StartRequestImpl(
              << std::endl;
 
   TensorMap out_tensors;
-  // TODO: alloc generated_ids on CPU
-  std::string out_name = "generated_ids";
+  // TODO: alloc generated_ids_global on CPU
+  std::string out_name = "generated_ids_global";
   out_tensors.insert(
       {out_name, std::make_shared<AsTensor>(out_name, DeviceType::CPU,
                                             DataType::INT64, DataMode::DENSE,
@@ -2531,11 +2546,11 @@ FetchGenerationResultAndIncreaseCounter(
   ele->prefix_len_gpu = request->prefix_len_gpu;
   ele->prefix_len_cpu = request->prefix_len - request->prefix_len_gpu;
 
-  TensorMap& tmap = request->outputs;
+  const TensorMap& tmap = request->outputs;
 
   std::vector<std::vector<std::pair<int, float>>> log_probs_list =
       request->log_probs_list;
-  auto device_tensor_ptr = tmap.at("generated_ids");
+  auto device_tensor_ptr = tmap.at("generated_ids_global");
   if (device_tensor_ptr->GetShape().Count() == 0) {
     return nullptr;
   }

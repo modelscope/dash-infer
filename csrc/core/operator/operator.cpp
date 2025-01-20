@@ -107,6 +107,7 @@ void AsOperator::PrintInformation() {
   }
   std::cout << "op_outputs:" << std::endl;
   for (auto& v : out_names_) {
+    if (v == "generated_ids") continue;
     std::cout << tensor_map_->at(v)->ToString() << std::endl;
 #ifdef ENABLE_CUDA
     if (backend == DeviceType::CUDA) {
@@ -155,6 +156,7 @@ void AsOperator::SaveInformation() {
   }
   OutFile << "op_outputs:" << std::endl;
   for (auto& v : out_names_) {
+    if (v == "generated_ids") continue;
     OutFile << tensor_map_->at(v)->ToStringAll() << std::endl;
   }
   OutFile << std::endl;
@@ -210,6 +212,8 @@ void AsOperator::SaveTensorToBinary() {
   }
 
   for (auto& v : out_names_) {
+    if (v == "generated_ids") continue;
+
     std::string filename = path + tensor_map_->at(v)->GetName();
 
     void* data_ptr = tensor_map_->at(v)->GetDataPtr();
@@ -305,6 +309,7 @@ AsStatus AsOperator::Init(const OperatorProto& op_proto,
     if (is_lora_op_ && out_names_.size() > 0) continue;
     out_names_.emplace_back(t_name);
   }
+
   for (auto& t : op_proto.weights()) {
     const std::string& t_name = t.name();
     if (is_lora_op_) {
@@ -356,8 +361,9 @@ AsStatus AsOperator::InitV2(const OperatorProto& op_proto,
   return Init(op_proto, ctx, weights_map, tensor_map);
 }
 
-AsStatus AsOperator::SetGenerateContext(GenerateContext& gen_ctx) {
-  gen_ctx_ = &gen_ctx;
+AsStatus AsOperator::SetGenerateContext(
+    std::shared_ptr<GenerateContext>& gen_ctx) {
+  gen_ctx_ = gen_ctx;
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

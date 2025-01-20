@@ -336,6 +336,10 @@ std::unordered_map<std::string, std::shared_ptr<JsonSchemaParser>>
     FormatEnforcer::parser_map_;
 std::map<std::string, int> FormatEnforcer::vocab_;
 VocabType FormatEnforcer::vocab_type_;
+std::vector<float> FormatEnforcer::scores_mask_;
+#ifdef ENABLE_CUDA
+std::vector<float> FormatEnforcer::scores_vec_;
+#endif
 
 FormatEnforcer::FormatEnforcer(std::map<std::string, int>& vocab,
                                std::string& schema_str, VocabType vocab_type,

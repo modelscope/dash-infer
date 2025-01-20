@@ -62,7 +62,7 @@ span::DataType to_span_data_type<hie::bfloat16>() {
 }  // anonymous namespace
 
 void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
-                                         int new_step, int beam_size) {
+                                         int beam_size) {
   constexpr int current_batch = 0;
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
@@ -355,7 +355,7 @@ void SpanAttnOpCUDA::decoderAttnLauncher(const RuntimeContext* runtime_ctx) {
 
   std::vector<int> new_seq_lens(batch_size_);
   for (int batch = 0; batch < batch_size_; ++batch) {
-    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
     new_seq_lens[batch] = gen_ctx->step + seq_len_;
   }
 
@@ -409,7 +409,7 @@ AsStatus SpanAttnOpCUDA::setDecoderWorkspaceSize() {
     span::DataType dtype = to_span_data_type<T>();
     span::SpanAttnHandle_t handle{nullptr};
     CHECK_SPAN_ATTN(span::CreateHandle(
-        &handle, dtype, CacheUtils::toQuantMode(mode), batch_size_,
+        &handle, dtype, CacheUtils::toQuantMode(mode), max_batch,
         attn_head_->NumHeads(), attn_head_->NumGroups(),
         attn_head_->SizePerHead(), span_len, max_num_spans, max_seq_lens.data(),
         dprop_));
@@ -446,7 +446,7 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
   constexpr int single_batch = 1;
 
   if (!runtime_ctx->is_context) {
-    AS_CHECK_STATUS(setDecoderWorkspaceSize());
+    // AS_CHECK_STATUS(setDecoderWorkspaceSize());
   } else {
     std::pair<bool, AsMHAPrefill> prefill_mode_pair = GetPrefillMode();
     if (!prefill_mode_pair.first) {
@@ -556,6 +556,7 @@ AsStatus SpanAttnOpCUDA::deviceInit() {
   host_workspace_ =
       std::make_unique<AsTensor>("host_workspace", DeviceType::CPU,
                                  DataType::INT8, DataMode::DENSE, Shape{1});
+  AS_CHECK_STATUS(setDecoderWorkspaceSize());
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

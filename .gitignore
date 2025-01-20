@@ -25,5 +25,4 @@ third_party/from_source/openssl/*
 *.nsys-rep
 log*
 *.csv
-#*.sh
 *.as*

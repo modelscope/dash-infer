@@ -53,7 +53,7 @@ AsStatus RichEmbeddingOp::Forward(RuntimeContext* runtime_ctx) {
   if (!runtime_ctx->is_context) {
     return AsStatus::ALLSPARK_SUCCESS;
   }
-  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
   TensorListMap extra_embedding = gen_ctx->request->extra_embedding;
   if (extra_embedding.empty()) {
     return AsStatus::ALLSPARK_SUCCESS;
@@ -68,11 +68,11 @@ AsStatus RichEmbeddingOp::Forward(RuntimeContext* runtime_ctx) {
   DataType dtype = tensor_map_->at(in_names_[1])->GetDataType();
   int word_size = SizeofType(dtype);
   int64_t* input_ids_host_ptr =
-      (int64_t*)gen_ctx->request->inputs["input_ids"]->GetDataPtr();
+      (int64_t*)gen_ctx->request->inputs.at("input_ids")->GetDataPtr();
   DeviceType backend = ctx_->GetDeviceType();
   ctx_->Synchronize();
 
-  int seq_len = gen_ctx->request->inputs["input_ids"]->GetShape()[1];
+  int seq_len = gen_ctx->request->inputs.at("input_ids")->GetShape()[1];
   auto reinfo_vec = std::make_shared<ExtraEmbeddingUtils::REInfoList>();
   AS_CHECK_STATUS(ExtraEmbeddingUtils::ParseExtraEmbedding(
       extra_embedding, input_ids_host_ptr, seq_len, reinfo_vec));

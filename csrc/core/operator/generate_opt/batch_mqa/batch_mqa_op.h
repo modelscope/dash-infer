@@ -53,9 +53,10 @@ class BatchMQAOp : public AsOperator {
     return ctx_->GetPrefillMode() == AsMHAPrefill::AsPrefillFlashV2 &&
            seq_len_ > AttentionEnvConfig::GetFlashThresh();
   }
-  AsStatus RunFlash(GenerateContext* gen_ctx);
+  AsStatus RunFlash(std::shared_ptr<GenerateContext> gen_ctx);
 #endif
-  AsStatus RunOneBatch(GenerateContext* gen_ctx, int current_batch);
+  AsStatus RunOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
+                       int current_batch);
   AsStatus ResetCache() override;
   AsStatus setWorkspace(const RuntimeContext* runtime_ctx);
 

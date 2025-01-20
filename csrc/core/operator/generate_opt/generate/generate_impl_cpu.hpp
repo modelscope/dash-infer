@@ -81,7 +81,7 @@ AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
   // for batch
   std::vector<int> bad_words_ids_size(0);
   if (runtime_ctx->is_context) {
-    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
     int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens);
     void* in_logits = (ori_in_logits);
     auto functor = [&]<typename T>() {
@@ -97,7 +97,7 @@ AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
     DispatchCPU(dtype, functor);
   } else {
     for (int i = 0; i < batch_size; i++) {
-      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+      std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
       int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens) +
                            gen_ctx->current_batch * ctx->GetModelMaxLength();
       void* in_logits = ((char*)ori_in_logits + i * length * SizeofType(dtype));
@@ -120,16 +120,14 @@ AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
 AsStatus gen_sample_cpu(DataType dtype, int64_t* total_out_tokens,
                         void* total_topk_value, void* total_topp_value,
                         int* total_topk_indice, void* total_in_logits,
-                        void* sample_states_vec_unused, int total_batch_size,
+                        void** sample_states_vec_unused, int total_batch_size,
                         int max_k, int length, int* k_arr_list,
                         float* p_arr_list, float* temperature_arr_unused,
                         const DeviceContext* ctx, RuntimeContext* runtime_ctx,
                         void* ws_ptr, size_t ws_bytes, void* device_prop) {
-  DLOG(INFO) << "cpu_sample" << std::endl;
-
   constexpr int batch_size = 1;
   for (int i = 0; i < total_batch_size; i++) {
-    GenerateContext* gen_ctx;
+    std::shared_ptr<GenerateContext> gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -174,6 +172,72 @@ AsStatus gen_sample_cpu(DataType dtype, int64_t* total_out_tokens,
 void gen_sample_init_cpu(void* sample_state, unsigned long long seed,
                          int batch_size, const DeviceContext* ctx) {
   cpu::SampleKernelInitLauncher(sample_state, seed, batch_size);
+}
+
+AsStatus fill_generated_ids_cpu(RuntimeContext* runtime_ctx,
+                                std::shared_ptr<AsTensor>& dec_ids,
+                                int rank_id) {
+  if (rank_id != 0) {
+    return AsStatus::ALLSPARK_SUCCESS;
+  }
+
+  int batch_size = 1;
+  if (!runtime_ctx->is_context) {
+    batch_size = runtime_ctx->GetGenCtxListSize();
+  }
+
+  std::vector<int64_t*> ptrs_host(batch_size);
+  for (int i = 0; i < batch_size; i++) {
+    std::shared_ptr<GenerateContext> gen_ctx;
+    if (runtime_ctx->is_context) {
+      gen_ctx = runtime_ctx->GetContextGenCtx();
+    } else {
+      gen_ctx = runtime_ctx->GetGenCtx(i);
+    }
+
+    int generated_len = gen_ctx->step + gen_ctx->in_length_bias + 1;
+    std::shared_ptr<AsTensor> generated_ids_tensor =
+        gen_ctx->request->interim.at("generated_ids");
+    generated_ids_tensor->SetShape(Shape{1, generated_len});
+    ptrs_host[i] = static_cast<int64_t*>(generated_ids_tensor->GetDataPtr()) +
+                   generated_len - 1;
+  }
+
+  // dec_ids -> generated_ids
+  cpu::CopyToVarsKernelLauncher(
+      ptrs_host.data(), static_cast<const int64_t*>(dec_ids->GetDataPtr()),
+      batch_size);
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+AsStatus fill_max_dec_ids_cpu(RuntimeContext* runtime_ctx,
+                              std::shared_ptr<AsTensor>& max_dec_ids,
+                              const DeviceContext* ctx) {
+  int batch_size = 1;
+  if (!runtime_ctx->is_context) {
+    batch_size = runtime_ctx->GetGenCtxListSize();
+  }
+
+  // memset(max_dec_ids->GetDataPtr(), 0, max_dec_ids->GetSizeInByte());
+
+  for (int i = 0; i < batch_size; i++) {
+    std::shared_ptr<GenerateContext> gen_ctx;
+    if (runtime_ctx->is_context) {
+      gen_ctx = runtime_ctx->GetContextGenCtx();
+    } else {
+      gen_ctx = runtime_ctx->GetGenCtx(i);
+    }
+
+    std::shared_ptr<AsTensor> generated_ids_tensor =
+        gen_ctx->request->interim.at("generated_ids");
+
+    void* dst_data = (void*)((int64_t*)max_dec_ids->GetDataPtr() +
+                             gen_ctx->current_batch * ctx->GetModelMaxLength());
+    void* src_data = generated_ids_tensor->GetDataPtr();
+    size_t nbytes = generated_ids_tensor->GetSizeInByte();
+    memcpy(dst_data, src_data, nbytes);
+  }
+  return AsStatus::ALLSPARK_SUCCESS;
 }
 
 #ifdef ENABLE_MULTINUMA

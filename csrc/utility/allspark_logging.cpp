@@ -16,6 +16,14 @@ static std::once_flag g_log_init_once;
 
 void as_init_log() {
   std::call_once(g_log_init_once, []() {
+    // TBD
+    // It may raise "0x7f097eef94e google:: (anonymous namespace)::
+    // FailureSignalHandler ()" error when using java to call AS. Here we use a
+    // workaround to avoid this error.
+    const char* log_dir = std::getenv("HIE_LOG_DIR");
+    if (log_dir == nullptr || std::string(log_dir) == "") {
+      return;
+    }
     google::InitGoogleLogging("hie_allspark");
     google::InstallFailureSignalHandler();
     google::EnableLogCleaner(3);
@@ -27,7 +35,6 @@ void as_init_log() {
     fLI::FLAGS_logbufsecs = 5;
     fLI::FLAGS_max_log_size = 1024;
 
-    const char* log_dir = std::getenv("HIE_LOG_DIR");
     if (not log_dir or std::string(log_dir) == "") {
       fLB::FLAGS_logtostderr = true;
     } else {

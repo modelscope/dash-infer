@@ -19,59 +19,69 @@ AsStatus PreProcessIdOp::Init(const OperatorProto& op_proto,
                               const TensorMap& weights_map,
                               TensorMap* tensor_map) {
   AS_CHECK_STATUS(AsOperator::Init(op_proto, ctx, weights_map, tensor_map));
-  auto& attr_map = op_proto.attr();
-  if (attr_map.find("start_id") != attr_map.end()) {
-    start_id_ = *(int64_t*)(attr_map.at("start_id").c_str());
-  }
-  if (attr_map.find("num_beam") != attr_map.end()) {
-    num_beam_ = *(int*)(attr_map.at("num_beam").c_str());
-  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus PreProcessIdOp::Reshape() {
-  num_beam_ = 1;
-  Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
-  batch_size_ = in_shape[0];
-  seq_len_ = start_id_ == -1 ? in_shape[1] : 1;
-  max_len_ = ctx_->GetModelMaxLength();
-  tensor_map_->at(out_names_[0])
-      ->SetShape(Shape{batch_size_ * num_beam_, seq_len_});
-  tensor_map_->at(out_names_[1])
-      ->SetShape(Shape{batch_size_ * num_beam_, max_len_});
+AsStatus PreProcessIdOp::Reshape(RuntimeContext* runtime_ctx) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus PreProcessIdOp::Forward() {
-  int64_t* dec_ids =
-      static_cast<int64_t*>(tensor_map_->at(out_names_[0])->GetDataPtr());
-  int64_t* max_dec_ids =
-      static_cast<int64_t*>(tensor_map_->at(out_names_[1])->GetDataPtr());
-  const int64_t* in_ids =
-      static_cast<const int64_t*>(tensor_map_->at(in_names_[0])->GetDataPtr());
-  DeviceType backend = ctx_->GetDeviceType();
-  switch (backend) {
-#ifdef ENABLE_CUDA
-    case DeviceType::CUDA: {
-      cudaStream_t cu_stream =
-          static_cast<const CUDAContext*>(ctx_)->GetStream();
-      // TensorUtils::Memset(*tensor_map_->at(out_names_[1]), 0);
-      cuda::PreProcessForGeneration(dec_ids, max_dec_ids, in_ids, start_id_,
-                                    batch_size_, num_beam_, max_len_, seq_len_,
-                                    cu_stream);
-      break;
-    }
+AsStatus PreProcessIdOp::Forward(RuntimeContext* runtime_ctx) {
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<Request> request = gen_ctx->request;
+
+  {
+    // create local generated_ids (own by each workder)
+    std::string tensor_name, new_tensor_name;
+    tensor_name = "generated_ids_global";
+    new_tensor_name = "generated_ids";
+    auto generated_ids_tensor = std::make_shared<AsTensor>(
+        new_tensor_name, DeviceType::CPU,
+        request->outputs.at(tensor_name)->GetDataType(), DataMode::DENSE,
+        Shape{1, ctx_->GetModelMaxLength()});
+
+    // copy input_ids to generated_ids, cpu to cpu
+    generated_ids_tensor->SetShape(
+        Shape(request->inputs.at("input_ids")->GetShape()));
+    AS_CHECK_EXCEPTION(TensorUtils::DeepCopyWholeAsync(
+        *generated_ids_tensor, *request->inputs.at("input_ids"), ctx_));
+    request->interim.insert({new_tensor_name, generated_ids_tensor});
+  }
+
+#if ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    std::string tensor_name, new_tensor_name;
+
+    // copy generated_ids to gpu
+    tensor_name = "generated_ids";
+    new_tensor_name = tensor_name + "_gpu";
+    auto generated_ids_gpu_tensor = std::make_shared<AsTensor>(
+        new_tensor_name, DeviceType::CUDA,
+        request->interim.at(tensor_name)->GetDataType(), DataMode::DENSE,
+        Shape{1, ctx_->GetModelMaxLength()});
+    generated_ids_gpu_tensor->SetShape(
+        Shape(request->interim.at(tensor_name)->GetShape()));
+    request->interim.insert({new_tensor_name, generated_ids_gpu_tensor});
+
+    AS_CHECK_EXCEPTION(TensorUtils::DeepCopyWholeAsync(
+        *request->interim.at(new_tensor_name),
+        *request->interim.at(tensor_name), ctx_));
+
+    // copy new_input_ids to gpu
+    tensor_name = "new_input_ids";
+    new_tensor_name = tensor_name + "_gpu";
+    auto new_input_ids_gpu_tensor = std::make_shared<AsTensor>(
+        new_tensor_name, DeviceType::CUDA,
+        request->interim.at(tensor_name)->GetDataType(), DataMode::DENSE,
+        request->interim.at(tensor_name)->GetShape());
+    request->interim.insert({new_tensor_name, new_input_ids_gpu_tensor});
+
+    AS_CHECK_EXCEPTION(TensorUtils::DeepCopyWholeAsync(
+        *request->interim.at(new_tensor_name),
+        *request->interim.at(tensor_name), ctx_));
+  }
 #endif
-    case DeviceType::CPU:
-      // TensorUtils::Memset(*tensor_map_->at(out_names_[1]), 0);
-      cpu::PreProcessForGeneration(dec_ids, max_dec_ids, in_ids, start_id_,
-                                   batch_size_, num_beam_, max_len_, seq_len_);
-      break;
-    default:
-      LOG(ERROR) << op_type_ << " Operator does not support "
-                 << DeviceType_Name(backend) << " device type" << std::endl;
-      return AsStatus::ALLSPARK_RUNTIME_ERROR;
-  }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

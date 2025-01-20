@@ -812,7 +812,7 @@ class HuggingFaceModel(LLM):
             raise ValueError(f"model_output_dir should not be empty string: {model_output_dir}")
 
         safe_model_name = self.pretain_model_name.replace("/", "_")
-        model_suffix = "..asgraph"
+        model_suffix = ".asgraph"
         weights_suffix = ".asparam"
 
         model_path = os.path.join(model_output_dir, safe_model_name + model_suffix)

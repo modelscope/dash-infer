@@ -362,7 +362,7 @@ AsStatus RotaryMulQueryOp::RunContext(RuntimeContext* runtime_ctx) {
   }
   int freq_size = size_per_head_ / 2;
   int batch_size = 1;
-  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
 
   std::vector<int> run_step_tmp(batch_size);
   run_step_tmp[0] = gen_ctx->step;
@@ -379,7 +379,7 @@ AsStatus RotaryMulQueryOp::RunDecoder(RuntimeContext* runtime_ctx) {
   int batch_size = runtime_ctx->GetGenCtxListSize();
   std::vector<int> run_step_tmp(batch_size);
   for (int batch = 0; batch < batch_size; batch++) {
-    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
     run_step_tmp[batch] = gen_ctx->step;
   }
 

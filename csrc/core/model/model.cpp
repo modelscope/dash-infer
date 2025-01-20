@@ -78,7 +78,7 @@ using std::vector;
 
 AsModel::AsModel(const std::string& model_type)
     : model_type_(model_type), ctx_(nullptr), current_unfinished_request_(0) {
-  gen_ctx_ = std::make_unique<GenerateContext>();
+  gen_ctx_model_ = std::make_unique<GenerateContext>();
   runtime_ctx_ = std::make_unique<RuntimeContext>();
 
   // pre-alloc enough request space.
@@ -134,7 +134,7 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   // model_profiler_
   auto do_profile = EnvVarConfig::GetString("AS_PROFILE", "OFF");
   if (do_profile == "ON") {
-    model_profiler_ = std::make_unique<ModelProfiler>(this);
+    model_profiler_ = std::make_shared<ModelProfiler>(this);
   } else {
     model_profiler_ = nullptr;
   }
@@ -142,13 +142,14 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   auto rankInfo = this->GetRankInfo();
   AS_CHECK_STATUS(
       weight_manager_->LoadWeightForModel(ctx, weight_handler_, rankInfo));
+
   // load LoRA
   auto& model_cfg = weight_handler_->GetModelConfig();
   lora_manager_ = LoraManager::Create(
       model_cfg.lora_max_num, rankInfo);  // 每个卡上的AsModel都拥有一批LoRA
   if (model_cfg.lora_names.size() > 0) {
-    LOG(WARNING)
-        << "Config item 'lora_names' is not any longer supported and ignored!";
+    LOG(WARNING) << "Config item 'lora_names' is not any longer supported "
+                    "and ignored!";
   }
 
 #if ENABLE_SPAN_ATTENTION
@@ -228,7 +229,11 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
     output_names_.emplace_back(t.name());
   }
 
-  gen_ctx_ = std::make_unique<GenerateContext>();
+  // shared tmp workspace for operator
+  tensors_.insert(std::make_pair(
+      "workspace", std::make_unique<AsTensor>("workspace", ctx.GetDeviceType(),
+                                              DataType::INT8)));
+  gen_ctx_model_ = std::make_unique<GenerateContext>();
   runtime_ctx_ = std::make_unique<RuntimeContext>();
 
   std::unique_ptr<AsTensor> rotary_step = std::make_unique<AsTensor>(
@@ -239,11 +244,11 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   rotary_inv_freq->SetShape(
       Shape{ctx_->GetModelMaxBatch() * ctx_->GetSizePerHead() / 2});
 
-  std::shared_ptr<LayerCacheManager> layer_cache_manager =
-      runtime_ctx_->CreateLayerCacheManager();
-  layer_cache_manager->CreateCache("rotary_step", std::move(rotary_step));
-  layer_cache_manager->CreateCache("rotary_inv_freq",
-                                   std::move(rotary_inv_freq));
+  runtime_ctx_->CreateLayerCacheManager();
+  runtime_ctx_->GetLayerCacheManager()->CreateCache("rotary_step",
+                                                    std::move(rotary_step));
+  runtime_ctx_->GetLayerCacheManager()->CreateCache("rotary_inv_freq",
+                                                    std::move(rotary_inv_freq));
 
   auto& graph = model_proto.graphs();
   int nodes = 0;
@@ -290,14 +295,7 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
   MemoryReuser memory_reuser_;
   memory_reuser_.binding_with_algo_0(topo_tensors,
                                      const_cast<DeviceContext*>(ctx_));
-  tensors_["input_ids"]->SetShape(Shape{1, ctx_->GetModelMaxLength()});
   tensors_["attention_mask"]->SetShape(Shape{1, ctx_->GetModelMaxLength()});
-  tensors_["dec_ids"]->SetShape(
-      Shape{ctx_->GetModelMaxBatch(), ctx_->GetModelMaxLength()});
-  // shared tmp workspace for operator
-  tensors_.insert(std::make_pair(
-      "workspace", std::make_unique<AsTensor>("workspace", ctx.GetDeviceType(),
-                                              DataType::INT8)));
   tensors_.insert(std::make_pair(
       "context_k_workspace",
       std::make_unique<AsTensor>("context_k_workspace", ctx.GetDeviceType(),
@@ -313,23 +311,9 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
         "cublas_workspace",
         std::make_unique<AsTensor>("cublas_workspace", ctx.GetDeviceType(),
                                    DataType::INT8)));
-    tensors_.insert(std::make_pair(
-        "sample_states",
-        std::make_unique<AsTensor>("sample_states", ctx.GetDeviceType(),
-                                   DataType::INT8)));
-
-    tensors_["sample_states"]->SetShape(
-        Shape{ctx_->GetModelMaxBatch() * (int)sizeof(curandState_t)});
   }
 #endif
-  tensors_.insert(std::make_pair(
-      "tmp_dec_ids", std::make_unique<AsTensor>(
-                         "tmp_dec_ids", ctx.GetDeviceType(), DataType::INT64)));
-  ctx_->Synchronize();
-  tensors_["max_dec_ids"]->SetShape(Shape{
-      ctx_->GetModelMaxBatch(), static_cast<long>(ctx_->GetModelMaxLength())});
-  tensors_["tmp_dec_ids"]->SetShape(Shape{
-      ctx_->GetModelMaxBatch(), static_cast<long>(ctx_->GetModelMaxLength())});
+
   const size_t kv_ws_bytes = ctx.GetModelMaxLength() * ctx.GetNumberHeads() *
                              ctx.GetSizePerHead() * SizeofType(ctx.GetDtype()) /
                              rankInfo.rank_size;
@@ -419,20 +403,22 @@ std::endl; \
 */
 
 AsStatus AsModel::buildGenContext(
-    GenerateContext* gen_ctx, const std::shared_ptr<Request>& request) const {
+    std::shared_ptr<GenerateContext>& gen_ctx,
+    const std::shared_ptr<Request>& request) const {
   gen_ctx->gen_cfg = request->gen_cfg;
   gen_ctx->request = request;
   gen_ctx->k_cache_list = std::vector<std::unique_ptr<CacheMemory>>();
   gen_ctx->v_cache_list = std::vector<std::unique_ptr<CacheMemory>>();
 
   gen_ctx->engine_max_length = ctx_->GetModelMaxLength();
-  gen_ctx->input_len = request->inputs["input_ids"]->GetShape()[1];
+  gen_ctx->input_len = request->inputs.at("input_ids")->GetShape()[1];
   gen_ctx->real_input_len = gen_ctx->input_len;
   gen_ctx->gen_cfg.input_len = gen_ctx->input_len;
   gen_ctx->max_length = ctx_->GetModelMaxLength();
 
 #ifdef ENABLE_JSON_MODE
-  if (request->gen_cfg.response_format["type"] == "json_object") {
+  if (request->gen_cfg.response_format.count("type") &&
+      request->gen_cfg.response_format["type"] == "json_object") {
     gen_ctx->format_enforcer = request->format_enforcer;
     DLOG(INFO)
         << "Request:" << request->request_id
@@ -466,15 +452,29 @@ AsStatus AsModel::buildGenContext(
   int state_size = sizeof(std::mt19937);
 #ifdef ENABLE_CUDA
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-    state_size = (int)sizeof(cuda::PhiloxCudaState);
+    if (ctx_->GetUseTorchSample()) {
+      state_size = (int)sizeof(cuda::PhiloxCudaState);
+    } else {
+      state_size = (int)sizeof(curandState_t);
+      gen_ctx->sample_state = std::make_unique<AsTensor>(
+          "sample_state:" + request->request_id, DeviceType::CUDA,
+          DataType::INT8, DataMode::DENSE, Shape({state_size}));
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      cudaStream_t cu_stream = gpu_ctx->GetStream();
+      AS_CHECK_CUDA(cudaMemsetAsync(gen_ctx->sample_state->GetDataPtr(), 0,
+                                    gen_ctx->sample_state->GetSizeInByte(),
+                                    cu_stream));
+    }
   }
 #endif
 
-  gen_ctx->sample_state = std::make_unique<AsTensor>(
-      "sample_state:" + request->request_id, DeviceType::CPU, DataType::INT8,
-      DataMode::DENSE, Shape({state_size}));
-  memset(gen_ctx->sample_state->GetDataPtr(), 0,
-         gen_ctx->sample_state->GetSizeInByte());
+  if (gen_ctx->sample_state == nullptr) {
+    gen_ctx->sample_state = std::make_unique<AsTensor>(
+        "sample_state:" + request->request_id, DeviceType::CPU, DataType::INT8,
+        DataMode::DENSE, Shape({state_size}));
+    memset(gen_ctx->sample_state->GetDataPtr(), 0,
+           gen_ctx->sample_state->GetSizeInByte());
+  }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -498,15 +498,15 @@ AsStatus AsModel::runDecoderContext() {
   runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_step");
   runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_inv_freq");
 
-  GenerateContext* gen_ctx =
+  std::shared_ptr<GenerateContext> gen_ctx =
       (runtime_ctx_->GetGenCtx(runtime_ctx_->current_batch));
   GenerateConfig gen_cfg = gen_ctx->gen_cfg;
 
   DLOG(INFO) << "start run context ,uuid = " << gen_ctx->request->request_id
              << " lora_name=" << gen_cfg.lora_name << std::endl;
-  const Shape& in_shape = tensors_["input_ids"]->GetShape();
-  int batch_size = in_shape[0];
-  size_t in_length = in_shape[1];
+  int batch_size = 1;
+  size_t in_length =
+      gen_ctx->request->interim.at("new_input_ids")->GetShape()[1];
   gen_ctx->batch_size = batch_size;
   if (gen_cfg.do_sample && gen_cfg.num_beams == 1) {
     gen_ctx->generate_method = 0;  // sample
@@ -522,7 +522,7 @@ AsStatus AsModel::runDecoderContext() {
   }
   for (auto& graph : graph_ops_) {
     for (auto& op : graph_ops_[graph.first]) {
-      op->SetGenerateContext(*gen_ctx);
+      op->SetGenerateContext(gen_ctx);
     }
   }
   gen_ctx->only_decoder = true;
@@ -540,6 +540,7 @@ AsStatus AsModel::runDecoderContext() {
 
   for (auto& op : graph_ops_["pre_graph"]) {
     AsStatus status = op->CallForward(runtime_ctx_.get());
+
 #if DEBUG_GEN_LAYER_SYNC
     op->Synchronize();
 #endif
@@ -651,11 +652,6 @@ AsStatus AsModel::runDecoderContext() {
       gen_ctx->prefix_len == 0 ? gen_ctx->input_len : in_length;
 
   gen_ctx->num_beams = gen_cfg.num_beams;
-  tensors_["dec_ids"]->SetShape(Shape{batch_size * gen_ctx->num_beams, 1});
-  tensors_["max_dec_ids"]->SetShape(
-      Shape{batch_size * gen_ctx->num_beams,
-            static_cast<long>(ctx_->GetModelMaxLength())});
-  // LOG(INFO)<<"before gen_graph"<<std::endl;
   for (auto& op : graph_ops_["gen_graph"]) {
     AsStatus status = op->CallReshape(runtime_ctx_.get());
     if (status != AsStatus::ALLSPARK_SUCCESS) {
@@ -763,10 +759,11 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
   }
 
   int batch = runtime_ctx_->GetGenCtxListSize();
-  runtime_ctx_->PushBackGenCtx(std::make_unique<GenerateContext>());
 
-  GenerateContext* gen_ctx = runtime_ctx_->GetGenCtx(batch);
+  std::shared_ptr<GenerateContext> gen_ctx =
+      std::make_shared<GenerateContext>();
   AS_CHECK_STATUS(buildGenContext(gen_ctx, request));
+  runtime_ctx_->PushBackGenCtx(gen_ctx);
 
 #if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
@@ -787,48 +784,34 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
       ctx_->GetDeviceType() == DeviceType::CUDA) {
     std::shared_ptr<AsTensor> new_input_ids_tensor;
     prefix_cache_manager_->RefFill(
-        gen_ctx->request->inputs["input_ids"],
-        gen_ctx->request->inputs["input_ids_for_hash"], new_input_ids_tensor,
-        gen_ctx->request->start_ts, gen_ctx->prefix_len,
+        gen_ctx->request->inputs.at("input_ids"),
+        gen_ctx->request->interim.at("input_ids_for_hash"),
+        new_input_ids_tensor, gen_ctx->request->start_ts, gen_ctx->prefix_len,
         gen_ctx->virtual_k_cache, gen_ctx->virtual_v_cache,
-        gen_ctx->prefix_cache_hash_list);
-    gen_ctx->request->inputs.insert({"new_input_ids", new_input_ids_tensor});
-
-    int batch_now = request->inputs["new_input_ids"]->GetShape()[0];
-    int seq_now = request->inputs["new_input_ids"]->GetShape()[1];
-    tensors_["input_ids"]->SetShape(Shape({batch_now, seq_now}));
-    TensorUtils::DeepCopyWholeAsync(*tensors_["input_ids"],
-                                    *request->inputs["new_input_ids"], ctx_);
-    tensors_["attention_mask"]->SetShape(Shape({batch_now, seq_now}));
+        gen_ctx->prefix_cache_node_list);
+    gen_ctx->request->interim.insert({"new_input_ids", new_input_ids_tensor});
 
     if (ctx_->GetRank() == 0) {
       LOG(INFO) << "[" << __FUNCTION__ << "] "
                 << "request id: " << gen_ctx->request->request_id << ", "
                 << "cached prefix_len: " << gen_ctx->prefix_len << ", "
                 << "total tokens: "
-                << gen_ctx->request->inputs["input_ids"]->GetShape()[1];
+                << gen_ctx->request->inputs.at("input_ids")->GetShape()[1];
     }
   } else {
 #endif
 
     {
-      int batch_now = request->inputs["input_ids"]->GetShape()[0];
-      int seq_now = request->inputs["input_ids"]->GetShape()[1];
-      tensors_["input_ids"]->SetShape(Shape({batch_now, seq_now}));
-      TensorUtils::DeepCopyWholeAsync(*tensors_["input_ids"],
-                                      *request->inputs["input_ids"], ctx_);
+      int batch_now = request->inputs.at("input_ids")->GetShape()[0];
+      int seq_now = request->inputs.at("input_ids")->GetShape()[1];
+      gen_ctx->request->interim.insert(
+          {"new_input_ids", request->inputs.at("input_ids")});
       tensors_["attention_mask"]->SetShape(Shape({batch_now, seq_now}));
     }
 
 #if ENABLE_SPAN_ATTENTION
   }
 #endif
-
-  DeviceType backend = ctx_->GetDeviceType();
-  AsTensor tmp_dec_ids = *tensors_["tmp_dec_ids"];
-  tmp_dec_ids.SetShape(Shape({batch + 1, 1}));
-  CopyData(tmp_dec_ids.GetDataPtr(), backend, tensors_["dec_ids"]->GetDataPtr(),
-           backend, (batch) * sizeof(int64_t), ctx_);
 
   runtime_ctx_->is_context = true;
   runtime_ctx_->current_batch = batch;
@@ -851,10 +834,11 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
     if (prefix_cache_manager_ != nullptr) {
       prefix_cache_manager_->Insert(
-          gen_ctx->request->inputs["input_ids_for_hash"], gen_ctx->prefix_len,
-          gen_ctx->request->start_ts, gen_ctx->virtual_k_cache->GetLayerCache(),
+          gen_ctx->request->interim.at("input_ids_for_hash"),
+          gen_ctx->prefix_len, gen_ctx->request->start_ts,
+          gen_ctx->virtual_k_cache->GetLayerCache(),
           gen_ctx->virtual_v_cache->GetLayerCache(),
-          gen_ctx->prefix_cache_hash_list);
+          gen_ctx->prefix_cache_node_list);
     }
   }
 #endif
@@ -862,14 +846,6 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
   // context阶段成功结束
   runtime_ctx_->is_context = false;
   runtime_ctx_->current_batch = 0;
-  CopyData((int64_t*)tmp_dec_ids.GetDataPtr() + (batch), backend,
-           tensors_["dec_ids"]->GetDataPtr(), backend, (1) * sizeof(int64_t),
-           ctx_);
-  tensors_["dec_ids"]->SetShape(Shape{batch + 1, 1});
-  CopyData(tensors_["dec_ids"]->GetDataPtr(), backend, tmp_dec_ids.GetDataPtr(),
-           backend, (batch + 1) * sizeof(int64_t), ctx_);
-  tensors_["max_dec_ids"]->SetShape(
-      Shape{batch + 1, static_cast<long>(ctx_->GetModelMaxLength())});
   DLOG(INFO)
       << "AsModel::StartRequest: context finish, restore ops with Reshape";
   for (AsOperator* op : topo_ops_) {
@@ -937,12 +913,9 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
                 << ",maybe already stop." << std::endl;
     return AsStatus::ALLSPARK_SUCCESS;
   }
-  GenerateContext* gen_ctx = runtime_ctx_->GetGenCtx(request_idx);
-  Request* request = gen_ctx->request.get();
-  // std::cout << "request: " << request->request_id
-  //           << "stop --------------------------" << std::endl;
-  // std::cout << request->outputs["generated_ids"]->ToStringAll() <<
-  // std::endl;
+  std::shared_ptr<GenerateContext> gen_ctx =
+      runtime_ctx_->GetGenCtx(request_idx);
+  std::shared_ptr<Request> request = gen_ctx->request;
 
   // free cache
   for (int i = 0; i < gen_ctx->k_cache_list.size(); i++) {
@@ -952,23 +925,24 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
     gen_ctx->v_cache_list[i]->Free();
   }
   DLOG(INFO) << "AsModel::StopRequest: [" << request_id << "] cache released";
+
 #if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
     if (prefix_cache_manager_ != nullptr) {
       AS_CHECK_STATUS(ExtraEmbeddingUtils::CreateTensorForHash(
-          gen_ctx->request, gen_ctx->request->outputs, "generated_ids"));
+          request, request->interim, request->interim, "generated_ids"));
       prefix_cache_manager_->Insert(
-          gen_ctx->request->outputs["generated_ids_for_hash"],
+          request->interim.at("generated_ids_for_hash"),
           gen_ctx->input_len / ctx_->GetCacheSpanSize() *
               ctx_->GetCacheSpanSize(),
-          gen_ctx->request->start_ts, gen_ctx->virtual_k_cache->GetLayerCache(),
+          request->start_ts, gen_ctx->virtual_k_cache->GetLayerCache(),
           gen_ctx->virtual_v_cache->GetLayerCache(),
-          gen_ctx->prefix_cache_hash_list);
+          gen_ctx->prefix_cache_node_list);
 
-      prefix_cache_manager_->UnRef(gen_ctx->prefix_cache_hash_list);
+      prefix_cache_manager_->UnRef(gen_ctx->prefix_cache_node_list);
 
       std::stringstream ss;
-      ss << "UnRef request_id: " << gen_ctx->request->request_id << ", "
+      ss << "UnRef request_id: " << request->request_id << ", "
          << "rank: " << ctx_->GetRank();
       prefix_cache_manager_->PrintPrefixCacheInfo(ss.str());
       // prefix_cache_manager_->PrintAllPrefixCache();
@@ -978,7 +952,7 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
     gen_ctx->virtual_v_cache.reset();
 
     if (prefix_cache_manager_ != nullptr) {
-      if (isWarmupRequest(gen_ctx->request->request_id)) {
+      if (isWarmupRequest(request->request_id)) {
         prefix_cache_manager_->EvictAllUnrefered();
       }
     }
@@ -986,37 +960,6 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
 #endif
   request->extra_embedding.clear();
   int last_batch = runtime_ctx_->GetGenCtxListSize() - 1;
-
-  // don't remove this sync, make sure cpu and gpu same state
-  ctx_->Synchronize();
-  DeviceType backend = ctx_->GetDeviceType();
-  if (request_idx != last_batch) {
-    CopyData((int64_t*)tensors_["dec_ids"]->GetDataPtr() + request_idx, backend,
-             (int64_t*)tensors_["dec_ids"]->GetDataPtr() + last_batch, backend,
-             (1) * sizeof(int64_t), ctx_);
-    CopyData((int64_t*)tensors_["max_dec_ids"]->GetDataPtr() +
-                 request_idx * ctx_->GetModelMaxLength(),
-             backend,
-             (int64_t*)tensors_["max_dec_ids"]->GetDataPtr() +
-                 last_batch * ctx_->GetModelMaxLength(),
-             backend, (ctx_->GetModelMaxLength()) * sizeof(int64_t), ctx_);
-
-#ifdef ENABLE_CUDA
-    if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-      CopyData((char*)tensors_["sample_states"]->GetDataPtr() +
-                   request_idx * (int)sizeof(curandState_t),
-               backend,
-               (char*)tensors_["sample_states"]->GetDataPtr() +
-                   last_batch * (int)sizeof(curandState_t),
-               backend, (int)sizeof(curandState_t), ctx_);
-    }
-#endif
-  }
-  tensors_["dec_ids"]->SetShape(
-      Shape{(int64_t)runtime_ctx_->GetGenCtxListSize() - 1, 1});
-  tensors_["max_dec_ids"]->SetShape(
-      Shape{(int64_t)runtime_ctx_->GetGenCtxListSize() - 1,
-            static_cast<long>(ctx_->GetModelMaxLength())});
 
   // don't remove this sync, make sure finish with correct state.
   ctx_->Synchronize();
@@ -1026,7 +969,6 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
   if (ctx_->GetRank() == 0) {
     LOG(INFO) << "Stop request with request id: " << request_id;
   }
-
   if (runtime_ctx_->GetGenCtxListSize() > 0) {
     for (AsOperator* op : topo_ops_) {
       AsStatus status = op->CallReshape(runtime_ctx_.get());
@@ -1090,23 +1032,18 @@ void AsModel::PrefillChunkRequest(std::shared_ptr<Request> request) {
   int new_len = request->prefill_chunk_len + ctx_->GetModelMaxPrefillLength();
   new_len += 1;  // prefix cache only cache input_len - 1, so new_len += 1
 
-  // LOG(INFO) << "request->prefill_chunk_len: "
-  //           << request->prefill_chunk_len << ", "
-  //           << "ctx_->GetModelMaxPrefillLength(): "
-  //           << ctx_->GetModelMaxPrefillLength();
-
   if (new_len >= request->input_len) {
-    request->inputs["input_ids"]->SetShape(Shape{1, request->origin_len});
+    request->inputs.at("input_ids")->SetShape(Shape{1, request->origin_len});
     pending_request_queue_.pop();
     StartRequest(request);
     request->prefill_chunk_len = request->input_len;
   } else {
-    std::shared_ptr<Request> request_ptr =
-        std::make_shared<Request>(request->request_id, request->inputs,
-                                  request->outputs, request->gen_cfg);
+    std::shared_ptr<Request> request_ptr = std::make_shared<Request>(
+        request->request_id, request->inputs, request->outputs,
+        request->gen_cfg, request->interim);
     request_ptr->request_id.append("_chunk_prefill");
     request_ptr->input_len = new_len;
-    request_ptr->inputs["input_ids"]->SetShape(Shape{1, new_len});
+    request_ptr->inputs.at("input_ids")->SetShape(Shape{1, new_len});
     request_ptr->gen_cfg.max_length = new_len + 1;
     StartRequest(request_ptr);
     request->prefill_chunk_len = new_len - 1;
@@ -1155,14 +1092,14 @@ AsStatus AsModel::GenerateContinueContext(
         size_t context_frame = 0;
         if (prefix_cache_manager_ != nullptr) {
           AS_CHECK_STATUS(ExtraEmbeddingUtils::CreateTensorForHash(
-              request, request->inputs, "input_ids"));
+              request, request->interim, request->inputs, "input_ids"));
 
-          std::vector<std::string> prefix_cache_hash_list;
+          std::vector<PrefixCacheManager::PrefixNodePtr> prefix_cache_node_list;
           int prefix_len = 0;
           int gpu_cached_len = 0;
           prefix_cache_manager_->RefOnly(
-              request->inputs["input_ids_for_hash"], request->start_ts,
-              prefix_len, gpu_cached_len, prefix_cache_hash_list);
+              request->interim.at("input_ids_for_hash"), request->start_ts,
+              prefix_len, gpu_cached_len, prefix_cache_node_list);
 
           int real_input = request->input_len - prefix_len;
           if (request->prefill_chunk_len == 0) {
@@ -1190,7 +1127,7 @@ AsStatus AsModel::GenerateContinueContext(
                       << ", swap unrefered prefix cache to cpu memory";
             prefix_cache_manager_->EvictUnrefered(context_frame);
           }
-          prefix_cache_manager_->UnRef(prefix_cache_hash_list);
+          prefix_cache_manager_->UnRef(prefix_cache_node_list);
         } else {
           context_frame = (std::min(request->input_len + min_gen_length,
                                     ctx_->GetModelMaxLength()) /
@@ -1282,7 +1219,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
     }
 
     util::Timer t2;
-    gen_ctx_->step++;  // 利用这个废弃的字段，给校对工具使用
+    gen_ctx_model_->step++;  // 利用这个废弃的字段，给校对工具使用
     runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_step");
     runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_inv_freq");
     {
@@ -1352,7 +1289,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
                 runtime_ctx_->GetGenCtx(0)->request->request_id)) {
           op->PrintInformation();
 #if DEBUG_GEN_LAYER_SAVE_NPY
-          DO_ARBITRATE(rank_, nranks_, gen_ctx_->step, op);
+          DO_ARBITRATE(rank_, nranks_, gen_ctx_model_->step, op);
 #endif
         }
 #endif
@@ -1390,7 +1327,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
               runtime_ctx_->GetGenCtx(0)->request->request_id)) {
         op->PrintInformation();
 #if DEBUG_GEN_LAYER_SAVE_NPY
-        DO_ARBITRATE(rank_, nranks_, gen_ctx_->step, op);
+        DO_ARBITRATE(rank_, nranks_, gen_ctx_model_->step, op);
 #endif
       }
 #endif
@@ -1402,8 +1339,6 @@ AsStatus AsModel::GenerateContinueDecoder() {
     }
 
     util::Timer t6;
-    tensors_["max_dec_ids"]->SetShape(
-        Shape{batch_size, static_cast<long>(ctx_->GetModelMaxLength())});
     for (auto& op : graph_ops_["post_graph"]) {
       AsStatus status = op->CallReshape(runtime_ctx_.get());
       if (status != AsStatus::ALLSPARK_SUCCESS) {
@@ -1419,7 +1354,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
               runtime_ctx_->GetGenCtx(0)->request->request_id)) {
         op->PrintInformation();
 #if DEBUG_GEN_LAYER_SAVE_NPY
-        DO_ARBITRATE(rank_, nranks_, gen_ctx_->step, op);
+        DO_ARBITRATE(rank_, nranks_, gen_ctx_model_->step, op);
 #endif
       }
 #endif
@@ -1484,7 +1419,7 @@ AsStatus AsModel::StartRequestImpl(
   DLOG(INFO) << "AsModel::StartRequestImpl()" << std::endl;
   std::shared_ptr<Request> request_ptr = std::make_shared<Request>(
       request_id, *request_handle->inputs_internal, *outputs, gen_cfg);
-  request_ptr->input_len = request_ptr->inputs["input_ids"]->GetShape()[1];
+  request_ptr->input_len = request_ptr->inputs.at("input_ids")->GetShape()[1];
   request_ptr->origin_len = request_ptr->input_len;
   request_ptr->extra_embedding = request_handle->mm_embedding_internal;
   request_ptr->enqueue_ts = request_handle->create_ts;
@@ -1526,7 +1461,7 @@ AsStatus AsModel::AllocDecoderMemory() {
       int span_size = ctx_->GetCacheSpanSize();
       int new_span_batch = 0;
       for (int i = 0; i < runtime_ctx_->GetGenCtxListSize(); i++) {
-        GenerateContext* gen_ctx = runtime_ctx_->GetGenCtx(i);
+        std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx_->GetGenCtx(i);
         size_t length_now = gen_ctx->virtual_k_cache->GetSeqLength(0);
         if (length_now % span_size == 0) {
           new_span_batch += 1;

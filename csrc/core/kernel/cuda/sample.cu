@@ -40,14 +40,14 @@ __device__ T exponential_func(T val) {
 // for-batch 实现
 template <typename T>
 __global__ void sample_kernel_batch(int64_t* out, const T* in,
-                                    const int* indice, curandState_t* state,
+                                    const int* indice, curandState_t** state,
                                     int batch_size, int* num_arr, int stride) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid < batch_size) {
     int64_t max_idx = 0;
     float max_val = -1e20;
     for (int i = 0; i < num_arr[tid]; i++) {
-      float r = (float)curand_uniform(&state[tid]);
+      float r = (float)curand_uniform(state[tid]);
       float q = (float)exponential_func(r);
       float val = (float)in[tid * stride + i] / q;
       if (val > max_val) {
@@ -60,26 +60,27 @@ __global__ void sample_kernel_batch(int64_t* out, const T* in,
 }
 
 template <typename T>
-void SampleKernelLauncher(int64_t* out, void* states, T* in, const int* indice,
+void SampleKernelLauncher(int64_t* out, void** states, T* in, const int* indice,
                           int batch_size, int* num_arr, int stride,
                           cudaStream_t stream, void*) {
-  curandState_t* curand_state = (curandState_t*)(states);
+  curandState_t** curand_state = (curandState_t**)(states);
   const int block_num = (batch_size + THREAD_PER_BLOCK - 1) / THREAD_PER_BLOCK;
   sample_kernel_batch<<<block_num, THREAD_PER_BLOCK, 0, stream>>>(
       out, in, indice, curand_state, batch_size, num_arr, stride);
 }
-template void SampleKernelLauncher<float>(int64_t* out, void* states, float* in,
-                                          const int* indice, int batch_size,
-                                          int* num_arr, int stride,
-                                          cudaStream_t stream, void*);
+template void SampleKernelLauncher<float>(int64_t* out, void** states,
+                                          float* in, const int* indice,
+                                          int batch_size, int* num_arr,
+                                          int stride, cudaStream_t stream,
+                                          void*);
 #ifdef ENABLE_FP16
-template void SampleKernelLauncher<half>(int64_t* out, void* states, half* in,
+template void SampleKernelLauncher<half>(int64_t* out, void** states, half* in,
                                          const int* indice, int batch_size,
                                          int* num_arr, int stride,
                                          cudaStream_t stream, void*);
 #endif
 template void SampleKernelLauncher<hie::bfloat16>(
-    int64_t* out, void* states, hie::bfloat16* in, const int* indice,
+    int64_t* out, void** states, hie::bfloat16* in, const int* indice,
     int batch_size, int* num_arr, int stride, cudaStream_t stream, void*);
 
 // utility function that calculates proper philox_offset
@@ -158,7 +159,7 @@ __global__ void transform_index_kernel(int64_t* out, int* tmp_indice,
 }
 
 template <typename T>
-void SampleTorchKernelLauncher(int64_t* out, std::vector<void*>& states, T* in,
+void SampleTorchKernelLauncher(int64_t* out, void** states, T* in,
                                const int* indice, int batch_size, int* num_arr,
                                int stride, cudaStream_t stream,
                                void* device_prop) {
@@ -171,7 +172,7 @@ void SampleTorchKernelLauncher(int64_t* out, std::vector<void*>& states, T* in,
 
   for (auto i = 0; i < batch_size;
        i++) {  // batch_size for later refactor...  == 1 for now
-    PhiloxCudaState& philox_state = *((PhiloxCudaState*)states[i]);
+    PhiloxCudaState& philox_state = *(((PhiloxCudaState**)states)[i]);
     int numel = num_arr_cpu[i];  // number of elements
     auto execution_policy =
         calc_execution_policy(numel, (cudaDeviceProp*)device_prop);
@@ -199,20 +200,23 @@ void SampleTorchKernelLauncher(int64_t* out, std::vector<void*>& states, T* in,
                                                        indice + i * stride);
   }
 }
-template void SampleTorchKernelLauncher<float>(
-    int64_t* out, std::vector<void*>& states, float* in, const int* indice,
-    int batch_size, int* num_arr, int stride, cudaStream_t stream, void*);
+template void SampleTorchKernelLauncher<float>(int64_t* out, void** states,
+                                               float* in, const int* indice,
+                                               int batch_size, int* num_arr,
+                                               int stride, cudaStream_t stream,
+                                               void*);
 #ifdef ENABLE_FP16
-template void SampleTorchKernelLauncher<half>(
-    int64_t* out, std::vector<void*>& states, half* in, const int* indice,
-    int batch_size, int* num_arr, int stride, cudaStream_t stream, void*);
+template void SampleTorchKernelLauncher<half>(int64_t* out, void** states,
+                                              half* in, const int* indice,
+                                              int batch_size, int* num_arr,
+                                              int stride, cudaStream_t stream,
+                                              void*);
 #endif
 
 #ifdef ENABLE_BF16
 template void SampleTorchKernelLauncher<hie::bfloat16>(
-    int64_t* out, std::vector<void*>& states, hie::bfloat16* in,
-    const int* indice, int batch_size, int* num_arr, int stride,
-    cudaStream_t stream, void*);
+    int64_t* out, void** states, hie::bfloat16* in, const int* indice,
+    int batch_size, int* num_arr, int stride, cudaStream_t stream, void*);
 #endif
 
 template <typename T>

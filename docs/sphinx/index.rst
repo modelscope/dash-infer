@@ -73,6 +73,8 @@ Table of Contents
 
    llm/prefix_caching
 
+   llm/lora_support
+
 .. _vlm_deployment:
 .. toctree::
    :maxdepth: 1
