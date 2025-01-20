@@ -10,13 +10,15 @@ class GenerateOp : public AsOperator {
  public:
   explicit GenerateOp(const std::string& op_type = "")
       : AsOperator(op_type), batch_size_(1) {}
+  ~GenerateOp();
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
   AsStatus Reshape(RuntimeContext* runtime_ctx) override;
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
-  AsStatus RunOneBatch(GenerateContext* gen_ctx, int current_batch);
+  AsStatus RunOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
+                       int current_batch);
   AsStatus RunSample(RuntimeContext* runtime_ctx);
 
  private:
@@ -58,6 +60,11 @@ class GenerateOp : public AsOperator {
   std::unique_ptr<AsTensor> topp_list_;
   std::unique_ptr<AsTensor> temperature_list_;
   std::unique_ptr<AsTensor> device_prop_;  // for cudaDeviceProp
+  std::unique_ptr<AsTensor> sample_states_;
+  std::shared_ptr<AsTensor> dec_ids_;
+  std::shared_ptr<AsTensor> max_dec_ids_;
+  int64_t* dec_ids_host_{nullptr};
+  std::shared_ptr<AsTensor> gen_ids_ptr_;
 
   std::unique_ptr<AsTensor> repetition_penalty_list;
   std::unique_ptr<AsTensor> presence_penalty_list;
@@ -68,10 +75,6 @@ class GenerateOp : public AsOperator {
   std::unique_ptr<AsTensor> cur_len_list;
   std::unique_ptr<AsTensor> input_len_list;
   std::unique_ptr<AsTensor> suppress_repetition_in_generation_list;
-#if defined(ENABLE_JSON_MODE) && defined(ENABLE_CUDA)
-  std::unique_ptr<AsTensor> float_in_ptr;
-  std::unique_ptr<std::vector<float>> token_probs_;
-#endif
   void* topk_value_ptr_;
   void* topk_indice_ptr_;
   void* topp_value_ptr_;
@@ -112,15 +115,15 @@ class GenerateOp : public AsOperator {
    * @return AsStatus
    */
 #ifdef ENABLE_JSON_MODE
-  AsStatus FormatModelOutput(GenerateContext* gen_ctx, int64_t* out_ptr,
-                             char* in_ptr, int current_batch);
+  AsStatus FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
+                             char* in_ptr, int current_batch, bool is_context);
 #endif
   void build_batch_gencfg(RuntimeContext* runtime_ctx,
                           BatchGencfg& batch_gencfg, const DeviceContext* ctx);
   AsStatus (*kernel_launcher)(DataType dtype, int64_t* out_tokens,
                               void* topk_value, void* topp_value,
                               int* topk_indice, void* in_logits,
-                              void* sample_states, int batch_size, int max_k,
+                              void** sample_states, int batch_size, int max_k,
                               int length, int* k_arr, float* p_arr,
                               float* temperature_arr, const DeviceContext* ctx,
                               RuntimeContext* runtime_ctx, void* ws_ptr,
@@ -141,6 +144,11 @@ class GenerateOp : public AsOperator {
                                 RuntimeContext* runtime_ctx, void* ws_ptr,
                                 size_t ws_bytes,
                                 const DeviceContext* ctx) = nullptr;
+
+  AsStatus (*fill_max_dec_ids_launcher)(RuntimeContext* runtime_ctx,
+                                        std::shared_ptr<AsTensor>& max_dec_ids,
+                                        const DeviceContext* ctx) = nullptr;
+
   AsStatus (*process_logits_launcher)(DataType dtype, int64_t* in_tokens,
                                       void* in_logits, int batch_size,
                                       int vocab_size, const DeviceContext* ctx,

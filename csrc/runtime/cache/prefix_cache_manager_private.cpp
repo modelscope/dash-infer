@@ -72,6 +72,7 @@ void PrefixCacheManager::init_cpu_union(const int nranks,
     max_frame_num = cache_mem_per_worker / frame_size;
     capacity = max_frame_num / frame_per_node;
 
+#if 0
     if (capacity < min_capacity_) {
       LOG(ERROR) << __FUNCTION__ << ": cpu memory capacity"
                  << " (" << capacity << ") "
@@ -81,6 +82,7 @@ void PrefixCacheManager::init_cpu_union(const int nranks,
                     "max_batch * max_length tokens.";
       AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
     }
+#endif
 
     const float to_GB = 1024 * 1024 * 1024;
     // clang-format off
@@ -153,13 +155,13 @@ void PrefixCacheManager::ref_node(const std::string& hash,
 
   if (union_ptr->hash_table.count(hash) <= 0) return;
 
-  if (union_ptr->hash_table[hash]->ref_cnt == 0) {
+  if (union_ptr->hash_table.at(hash)->ref_cnt == 0) {
     ref_cache_span(hash, union_ptr->device_type);
-    union_ptr->evictor.Del(hash);
+    union_ptr->evictor.Del(union_ptr->hash_table.at(hash));
   }
-  union_ptr->hash_table[hash]->ref_cnt += 1;
-  if (union_ptr->hash_table[hash]->last_access_time < ts) {
-    union_ptr->hash_table[hash]->last_access_time = ts;
+  union_ptr->hash_table.at(hash)->ref_cnt += 1;
+  if (union_ptr->hash_table.at(hash)->last_access_time < ts) {
+    union_ptr->hash_table.at(hash)->last_access_time = ts;
   }
 }
 
@@ -170,15 +172,15 @@ void PrefixCacheManager::unref_node(const std::string& hash,
     union_ptr = cpu_union_;
   }
 
-  union_ptr->hash_table[hash]->ref_cnt -= 1;
-  if (union_ptr->hash_table[hash]->ref_cnt == 0) {
+  union_ptr->hash_table.at(hash)->ref_cnt -= 1;
+  if (union_ptr->hash_table.at(hash)->ref_cnt == 0) {
     /*
      * should NOT unref span here,
      * otherwise unreferenced span will be released
      * after StopRequest
      */
     // unref_cache_span(hash, union_ptr->device_type);
-    union_ptr->evictor.Add(hash, union_ptr->hash_table[hash]);
+    union_ptr->evictor.Add(union_ptr->hash_table.at(hash));
   }
 }
 
@@ -196,10 +198,10 @@ bool PrefixCacheManager::insert_node(const std::string& hash,
   }
 
   if (union_ptr->hash_table.size() < union_ptr->capacity) {
-    union_ptr->hash_table[hash] = node;
+    union_ptr->hash_table.emplace(hash, node);
     ref_cache_span(hash, device_type);
     if (node->ref_cnt == 0) {
-      union_ptr->evictor.Add(hash, union_ptr->hash_table[hash]);
+      union_ptr->evictor.Add(union_ptr->hash_table.at(hash));
     }
     return true;
   }
@@ -216,8 +218,8 @@ void PrefixCacheManager::delete_node(const std::string& hash,
 
   unref_cache_span(hash, union_ptr->device_type);
   free_cache_span(hash, union_ptr->device_type);
+  union_ptr->evictor.Del(union_ptr->hash_table.at(hash));
   union_ptr->hash_table.erase(hash);
-  union_ptr->evictor.Del(hash);
 }
 
 void PrefixCacheManager::delete_multinodes(
@@ -230,8 +232,8 @@ void PrefixCacheManager::delete_multinodes(
   for (std::string hash : hash_vec) {
     unref_cache_span(hash, union_ptr->device_type);
     free_cache_span(hash, union_ptr->device_type);
+    union_ptr->evictor.Del(union_ptr->hash_table.at(hash));
     union_ptr->hash_table.erase(hash);
-    union_ptr->evictor.Del(hash);
   }
 }
 
@@ -270,6 +272,19 @@ void PrefixCacheManager::create_node(PrefixNodePtr& new_node,
 }
 
 #if ENABLE_PREFIX_CACHE_DEBUG_API
+void PrefixCacheManager::print_node(PrefixNodePtr& node) {
+  if (node == nullptr) {
+    return;
+  }
+
+  auto cpu_node = node;
+  if (node->device_type != DeviceType::CPU) {
+    cpu_node = swap_node_to_cpu(node);
+  }
+
+  PrefixNode::PrintData(cpu_node);
+}
+
 bool PrefixCacheManager::compare_node(PrefixNodePtr& node1,
                                       PrefixNodePtr& node2, int idx) {
   if (node1 == nullptr || node2 == nullptr) {
@@ -308,7 +323,7 @@ void PrefixCacheManager::filter_timeout_hash(
       std::remove_if(
           hash_list.begin(), hash_list.end(),
           [this, current_ts](std::string hash_str) {
-            PrefixNodePtr& node = gpu_union_->hash_table[hash_str];
+            PrefixNodePtr& node = gpu_union_->hash_table.at(hash_str);
             auto duration = current_ts - node->last_access_time;
             auto duration_in_s =
                 std::chrono::duration_cast<std::chrono::milliseconds>(duration)
@@ -335,8 +350,10 @@ void PrefixCacheManager::update_node_ts(const std::string& hash,
     union_ptr = cpu_union_;
   }
 
-  if (union_ptr->hash_table[hash]->last_access_time < ts) {
-    union_ptr->hash_table[hash]->last_access_time = ts;
+  if (union_ptr->hash_table.count(hash) <= 0) return;
+
+  if (union_ptr->hash_table.at(hash)->last_access_time < ts) {
+    union_ptr->hash_table.at(hash)->last_access_time = ts;
   }
 }
 
@@ -449,7 +466,7 @@ void PrefixCacheManager::swap_to_cpu_by_hashlist(
 
   // step 1: collect all uncached nodes, and allocate new cpu nodes
   for (std::string hash : hash_list) {
-    PrefixNodePtr& src_node = gpu_union_->hash_table[hash];
+    PrefixNodePtr& src_node = gpu_union_->hash_table.at(hash);
 
     bool is_cached = transverse_hash_table(hash, DeviceType::CPU);
     if (is_cached) {
@@ -532,7 +549,10 @@ void PrefixCacheManager::swap_nodelist_to_cpu_impl(
     int copy_num = std::min(copy_step, total_copy_num - copy_cnt);
 
     // step 2.1: device to device, discrete to continuous
-    TensorUtils::Memset(*spanptr_tensor_device_, 0);
+    AS_CHECK_CUDA(cudaMemsetAsync((void*)(spanptr_tensor_device_->GetDataPtr()),
+                                  0, spanptr_tensor_device_->GetSizeInByte(),
+                                  stream_));
+    AS_CHECK_CUDA(cudaStreamSynchronize(stream_));
 
     AS_CHECK_CUDA(cudaMemcpyAsync(
         spanptr_tensor_device_->GetDataPtr(), &gpu_span_list[copy_cnt],
@@ -626,22 +646,20 @@ bool PrefixCacheManager::swap_node_to_cpu(PrefixNodePtr& src_node,
 }
 #endif
 
-void PrefixCacheManager::swap_to_gpu_by_hashlist(
-    std::vector<std::string>& hash_list,
+void PrefixCacheManager::swap_to_gpu_by_nodelist(
+    std::vector<PrefixNodePtr>& cpu_node_list,
+    std::vector<PrefixNodePtr>& new_gpu_node_list,
     std::unique_ptr<VirtualCache>& virtual_k_cache,
     std::unique_ptr<VirtualCache>& virtual_v_cache) {
-  std::vector<PrefixNodePtr> cpu_node_list;
-  std::vector<PrefixNodePtr> new_gpu_node_list;
-
   // step 1: collect all unhashed nodes, and allocate new gpu nodes
-  for (std::string hash : hash_list) {
-    PrefixNodePtr& src_node = cpu_union_->hash_table[hash];
+  for (PrefixNodePtr& src_node : cpu_node_list) {
+    std::string hash = src_node->hash;
 
     bool is_cached = transverse_hash_table(hash, DeviceType::CUDA);
     if (is_cached) {
       update_node_ts(hash, src_node->last_access_time, DeviceType::CUDA);
-      virtual_k_cache->FillCache(gpu_union_->hash_table[hash]->k_cache);
-      virtual_v_cache->FillCache(gpu_union_->hash_table[hash]->v_cache);
+      virtual_k_cache->FillCache(gpu_union_->hash_table.at(hash)->k_cache);
+      virtual_v_cache->FillCache(gpu_union_->hash_table.at(hash)->v_cache);
     } else {
       PrefixNodePtr new_node_ptr = nullptr;
       bool success =
@@ -649,7 +667,6 @@ void PrefixCacheManager::swap_to_gpu_by_hashlist(
                          src_node->prefix_len, src_node->last_access_time,
                          virtual_k_cache, virtual_v_cache, hash);
       if (success == true) {
-        cpu_node_list.emplace_back(src_node);
         new_gpu_node_list.emplace_back(new_node_ptr);
       } else {
         break;
@@ -736,7 +753,10 @@ void PrefixCacheManager::swap_nodelist_to_gpu_impl(
     AS_CHECK_CUDA(cudaStreamSynchronize(stream_));
 
     // step 2.3: device to device, continuous to discrete
-    TensorUtils::Memset(*spanptr_tensor_device_, 0);
+    AS_CHECK_CUDA(cudaMemsetAsync((void*)(spanptr_tensor_device_->GetDataPtr()),
+                                  0, spanptr_tensor_device_->GetSizeInByte(),
+                                  stream_));
+    AS_CHECK_CUDA(cudaStreamSynchronize(stream_));
 
     AS_CHECK_CUDA(cudaMemcpyAsync(
         spanptr_tensor_device_->GetDataPtr(), &gpu_span_list[copy_cnt],
@@ -798,10 +818,10 @@ void PrefixCacheManager::ref_cache_span(const std::string& hash,
 
   bool is_cached = transverse_hash_table(hash, device_type);
   if (is_cached) {
-    int cache_num = union_ptr->hash_table[hash]->cache_num;
+    int cache_num = union_ptr->hash_table.at(hash)->cache_num;
     for (int cache_idx = 0; cache_idx < cache_num; cache_idx++) {
-      union_ptr->hash_table[hash]->k_cache[cache_idx]->RefCacheSpan();
-      union_ptr->hash_table[hash]->v_cache[cache_idx]->RefCacheSpan();
+      union_ptr->hash_table.at(hash)->k_cache[cache_idx]->RefCacheSpan();
+      union_ptr->hash_table.at(hash)->v_cache[cache_idx]->RefCacheSpan();
     }
   } else {
     ;
@@ -817,10 +837,10 @@ void PrefixCacheManager::unref_cache_span(const std::string& hash,
 
   bool is_cached = transverse_hash_table(hash, device_type);
   if (is_cached) {
-    int cache_num = union_ptr->hash_table[hash]->cache_num;
+    int cache_num = union_ptr->hash_table.at(hash)->cache_num;
     for (int cache_idx = 0; cache_idx < cache_num; cache_idx++) {
-      union_ptr->hash_table[hash]->k_cache[cache_idx]->UnrefCacheSpan();
-      union_ptr->hash_table[hash]->v_cache[cache_idx]->UnrefCacheSpan();
+      union_ptr->hash_table.at(hash)->k_cache[cache_idx]->UnrefCacheSpan();
+      union_ptr->hash_table.at(hash)->v_cache[cache_idx]->UnrefCacheSpan();
     }
   } else {
     ;
@@ -836,12 +856,12 @@ void PrefixCacheManager::free_cache_span(const std::string& hash,
 
   bool is_cached = transverse_hash_table(hash, device_type);
   if (is_cached) {
-    int cache_num = union_ptr->hash_table[hash]->cache_num;
+    int cache_num = union_ptr->hash_table.at(hash)->cache_num;
     for (int cache_idx = 0; cache_idx < cache_num; cache_idx++) {
       union_ptr->span_manager->ReleaseSpan(
-          union_ptr->hash_table[hash]->k_cache[cache_idx]);
+          union_ptr->hash_table.at(hash)->k_cache[cache_idx]);
       union_ptr->span_manager->ReleaseSpan(
-          union_ptr->hash_table[hash]->v_cache[cache_idx]);
+          union_ptr->hash_table.at(hash)->v_cache[cache_idx]);
     }
   } else {
     ;

@@ -18,9 +18,7 @@ namespace allspark {
 
 class UpdateIdOp : public AsOperator {
  public:
-  explicit UpdateIdOp(const std::string& op_type = "")
-      : AsOperator(op_type), batch_size_(1), beam_size_(1), seq_len_(1) {}
-  ~UpdateIdOp();
+  explicit UpdateIdOp(const std::string& op_type = "") : AsOperator(op_type) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
   AsStatus Reshape(RuntimeContext* runtime_ctx) override;
@@ -29,18 +27,14 @@ class UpdateIdOp : public AsOperator {
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
 
  private:
-  AsStatus (*kernel_launcher)(int64_t* max_dec_ids, const int64_t* dec_ids,
-                              const int* beam_idx, int64_t* tmp_id,
-                              int batch_size, int beam_size, int max_dec_len,
-                              int* step_list, int seq_len,
-                              const DeviceContext* ctx) = nullptr;
+  bool check_stop_words(
+      const int batch_size, const int generated_len, const int max_len,
+      int64_t* out_host, bool* gen_over,
+      const std::vector<std::vector<int64_t>>& stop_words_ids);
 
-  int batch_size_;
-  int seq_len_;
-  int beam_size_;
-  std::unique_ptr<AsTensor> tmp_id_;
-  std::unique_ptr<AsTensor> tmp_step_device_;
-  int* tmp_step_host_{nullptr};
+  bool check_finish(std::shared_ptr<GenerateContext>& gen_ctx);
+  AsStatus copy_generated_ids(std::shared_ptr<GenerateContext>& gen_ctx,
+                              bool is_context);
 };
 
 }  // namespace allspark

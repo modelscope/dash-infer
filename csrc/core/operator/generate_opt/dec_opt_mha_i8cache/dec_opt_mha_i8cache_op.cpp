@@ -182,30 +182,13 @@ void gpu_dec_opt_mha_cache_decoder(
   DispatchCUDA(dtype, functor);
 }
 #endif  // ENABLE_CUDA
-int get_layer_num_(std::string str) {
-  std::stringstream ss(str);
-  std::string temp;
-  while (std::getline(ss, temp, '.')) {
-    bool flag = true;
-    for (char c : temp) {
-      if (!std::isdigit(c))  // 如果不是数字，返回 false
-      {
-        flag = false;
-        break;
-      }
-    }
-    if (flag) {
-      return std::stoi(temp);
-    }
-  }
-  return -1;
-}
+
 AsStatus DecOptMHAI8CacheOp::Init(const OperatorProto& op_proto,
                                   const DeviceContext& ctx,
                                   const TensorMap& weights_map,
                                   TensorMap* tensor_map) {
   AS_CHECK_STATUS(AsOperator::Init(op_proto, ctx, weights_map, tensor_map));
-  layer_num_ = get_layer_num_(this->op_name_);
+  layer_num_ = get_layer_num(this->op_name_);
   if (layer_num_ < 0) {
     LOG(ERROR) << "DecOptMHAI8CacheOp : can't find layer_num_" << std::endl;
     return AsStatus::ALLSPARK_PARAM_ERROR;
@@ -367,7 +350,7 @@ AsStatus DecOptMHAI8CacheOp::RunContext(RuntimeContext* runtime_ctx) {
   }
 
 #ifdef ENABLE_CUDA
-  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
   void* qkv = tensor_map_->at(in_names_[0])->GetDataPtr();
   void* mask =
       mask_exist_ ? tensor_map_->at(in_names_[1])->GetDataPtr() : nullptr;
@@ -419,7 +402,7 @@ AsStatus DecOptMHAI8CacheOp::RunDecoder(RuntimeContext* runtime_ctx) {
 #ifdef ENABLE_CUDA
   for (int batch = 0; batch < batch_; batch++) {
     int current_batch = batch;
-    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
     void* qkv = tensor_map_->at(in_names_[0])->GetDataPtr();
     void* mask = nullptr;
     // TODO(ZHANG YUFEI): add this back for all situation. currently we

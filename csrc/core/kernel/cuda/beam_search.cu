@@ -341,7 +341,7 @@ __global__ static void rep_logits_processor(
         return;
       }
     }
-    if (src_idx >= cur_len_list[batch]) {
+    if (idx2 >= cur_len_list[batch]) {
       return;
     }
     const int vocab_offset = in_ids[src_idx];

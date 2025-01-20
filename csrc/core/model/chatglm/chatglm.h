@@ -17,7 +17,6 @@ class ChatGLMModel : public AsModel {
       : AsModel(model_type) {}
   AsStatus Init(const TransformerProto& model_proto,
                 const DeviceContext& ctx) override;
-  AsStatus Forward(const TensorMap& inputs, TensorMap* outputs);
 };
 
 class ChatGLM_v2Model : public ChatGLMModel {

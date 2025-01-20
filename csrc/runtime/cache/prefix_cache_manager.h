@@ -89,6 +89,20 @@ class PrefixCacheManager {
   using ConstPtr = std::shared_ptr<const PrefixCacheManager>;
   using CacheArray = cache::CacheArray;
 
+  /***************************************
+   * privte definitions
+   ***************************************/
+ private:
+  class PrefixNode;
+  class LRUEvictor;
+  class CacheUnion;
+  class MemcpyWorkspace;
+  class Profiler;
+  using CacheUnionPtr = std::shared_ptr<CacheUnion>;
+
+ public:
+  using PrefixNodePtr = std::shared_ptr<PrefixNode>;
+
  public:
   PrefixCacheManager() = delete;
   PrefixCacheManager(const CacheSpanManager::Ptr& span_manager,
@@ -105,20 +119,20 @@ class PrefixCacheManager {
               const NodeTimestamp ts,
               const std::vector<std::unique_ptr<CacheArray>>& layer_cache_k,
               const std::vector<std::unique_ptr<CacheArray>>& layer_cache_v,
-              std::vector<std::string>& hash_vec);
+              std::vector<PrefixNodePtr>& node_vec);
 
   void RefOnly(const std::shared_ptr<AsTensor>& tokens, const NodeTimestamp ts,
                int& prefix_len, int& gpu_cached_len,
-               std::vector<std::string>& hash_vec);
+               std::vector<PrefixNodePtr>& node_vec);
 
   void RefFill(const std::shared_ptr<AsTensor>& tokens,
                const std::shared_ptr<AsTensor>& tokens_for_hash,
                std::shared_ptr<AsTensor>& new_tokens, const NodeTimestamp ts,
                int& prefix_len, std::unique_ptr<VirtualCache>& virtual_k_cache,
                std::unique_ptr<VirtualCache>& virtual_v_cache,
-               std::vector<std::string>& hash_vec);
+               std::vector<PrefixNodePtr>& node_vec);
 
-  void UnRef(const std::vector<std::string>& hash_vec);
+  void UnRef(const std::vector<PrefixNodePtr>& node_vec);
 
   void UpdateCnt(int hit_cnt, int miss_cnt);
   void Reset();
@@ -137,21 +151,10 @@ class PrefixCacheManager {
   void PrintAllPrefixCache(DeviceType device_type);
   void CheckHash(const std::shared_ptr<AsTensor>& tokens,
                  std::vector<std::string>& hash_vec, std::string request_id);
+  void SwapByNodeList(std::vector<PrefixNodePtr>& node_list);
   void SwapByHashList(std::vector<std::string>& hash_vec);
   void RemoveByHashList(std::vector<std::string>& hash_vec);
 #endif
-
-  /***************************************
-   * privte definitions
-   ***************************************/
- private:
-  class PrefixNode;
-  class LRUEvictor;
-  class CacheUnion;
-  class MemcpyWorkspace;
-  class Profiler;
-  using PrefixNodePtr = std::shared_ptr<PrefixNode>;
-  using CacheUnionPtr = std::shared_ptr<CacheUnion>;
 
   /***************************************
    * privte functions
@@ -199,7 +202,8 @@ class PrefixCacheManager {
   void swap_to_cpu_by_hashlist(std::vector<std::string>& hash_list);
   void swap_nodelist_to_cpu_impl(std::vector<PrefixNodePtr>& gpu_node_list,
                                  std::vector<PrefixNodePtr>& new_cpu_node_list);
-  void swap_to_gpu_by_hashlist(std::vector<std::string>& hash_list,
+  void swap_to_gpu_by_nodelist(std::vector<PrefixNodePtr>& cpu_node_list,
+                               std::vector<PrefixNodePtr>& new_gpu_node_list,
                                std::unique_ptr<VirtualCache>& virtual_k_cache,
                                std::unique_ptr<VirtualCache>& virtual_v_cache);
   void swap_nodelist_to_gpu_impl(std::vector<PrefixNodePtr>& cpu_node_list,
@@ -217,6 +221,7 @@ class PrefixCacheManager {
 
 #if ENABLE_PREFIX_CACHE_DEBUG_API
   bool copy_node(PrefixNodePtr& src_node, PrefixNodePtr& dst_node);
+  void print_node(PrefixNodePtr& node);
   bool compare_node(PrefixNodePtr& node1, PrefixNodePtr& node2, int idx = -1);
   PrefixNodePtr swap_node_to_cpu(PrefixNodePtr& src_node);
   bool swap_node_to_cpu(PrefixNodePtr& src_node, const std::string& hash);
@@ -242,7 +247,7 @@ class PrefixCacheManager {
 
   int token_per_span_;
   int layer_num_;
-  int min_capacity_;
+  // int min_capacity_;
   int64_t hit_cnt_ = 0;
   int64_t miss_cnt_ = 0;
 

@@ -199,7 +199,7 @@ void PrefixCacheCopyModeDispatch(const void* const* spanPtrs, T* dst,
  * @param nGroups Number of K/V heads.
  * @param headSize Size of each head, must be power of 2; support 2**5 ~ 2**9.
  * @param spanLen Length (number of tokens) of each cache span; support 16,
- * 32, 64.
+ * 32, 64, 128.
  * @param preLen Prefilled sequence length (number of tokens) of the source
  * spans.
  * @param cacheMode KV cache quant mode.

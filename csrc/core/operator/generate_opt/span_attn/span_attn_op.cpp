@@ -14,24 +14,6 @@
 namespace allspark {
 
 namespace {
-int get_layer_num(const std::string& str) {
-  std::stringstream ss(str);
-  std::string temp;
-  while (std::getline(ss, temp, '.')) {
-    bool flag = true;
-    for (char c : temp) {
-      if (!std::isdigit(c)) /* 如果不是数字，返回 false */ {
-        flag = false;
-        break;
-      }
-    }
-    if (flag) {
-      return std::stoi(temp);
-    }
-  }
-  return -1;
-}
-
 /// @brief Fallback CPU prefill kernel
 /// @deprecated This CPU kernel needs refactor
 void cpu_dec_single_mha(DataType dtype, void* out, void* score,
@@ -114,7 +96,7 @@ AsStatus SpanAttnOp::decoderAppendCache(const RuntimeContext* runtime_ctx) {
 
   std::vector<int> old_seq_lens(batch_size_);
   for (int batch = 0; batch < batch_size_; batch++) {
-    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
     old_seq_lens[batch] = gen_ctx->step;
 #ifdef ENABLE_SPAN_DEBUG
     DLOG(INFO) << "SpanAttnOp::decoderAppendCache: [" << batch
@@ -147,7 +129,7 @@ AsStatus SpanAttnOp::runContext(RuntimeContext* runtime_ctx) {
                   "not context pharse.";
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
 #ifdef ENABLE_SPAN_DEBUG
   DLOG(INFO) << "SpanAttnOp::runContext [" << gen_ctx->request->request_id
              << "][layer " << layer_num_ << "]";
@@ -166,8 +148,7 @@ AsStatus SpanAttnOp::runContext(RuntimeContext* runtime_ctx) {
   copyPrefixSpanToCtxMemLauncher(k_cache_ptrs, v_cache_ptrs, k_cache_buf,
                                  v_cache_buf);
 
-  contextAttnLauncher(k_cache_buf, v_cache_buf, gen_ctx->step,
-                      gen_ctx->num_beams);
+  contextAttnLauncher(k_cache_buf, v_cache_buf, gen_ctx->num_beams);
 #ifdef ENABLE_SPAN_DEBUG
   // slice & copy cache to spans
   DLOG(INFO) << "runContext [layer " << layer_num_ << "]: copy cache";
@@ -337,7 +318,7 @@ AsStatus SpanAttnOp::Alloc(RuntimeContext* runtime_ctx) {
 
   // noncontiguous cache
   if (runtime_ctx->is_context) {
-    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
 
     const int cache_increment = seq_len_;
     const int old_seq_len = gen_ctx->step;
@@ -361,7 +342,7 @@ AsStatus SpanAttnOp::Alloc(RuntimeContext* runtime_ctx) {
     //* NOTE: do NOT run this concurrently, it decreases performance
     // for each request in batch, claim its cache
     for (int batch = 0; batch < batch_size_; batch++) {
-      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
+      std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
       const int cache_increment = seq_len_;
       const int old_seq_len = gen_ctx->step;
 

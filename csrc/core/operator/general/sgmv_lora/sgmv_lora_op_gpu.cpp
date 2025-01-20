@@ -145,9 +145,9 @@ AsStatus SgmvLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
   // batch中至少有一个请求带lora，不然本算子不会被调用
   // weight_names_[0] = "...lora_A.weight" weight_names_[1] = "...lora_B.weight"
   for (auto i = 0; i < batchsize; i++) {
-    GenerateContext* gen_ctx = runtime_ctx->is_context
-                                   ? runtime_ctx->GetContextGenCtx()
-                                   : runtime_ctx->GetGenCtx(i);
+    std::shared_ptr<GenerateContext> gen_ctx =
+        runtime_ctx->is_context ? runtime_ctx->GetContextGenCtx()
+                                : runtime_ctx->GetGenCtx(i);
     auto lora_name = gen_ctx->gen_cfg.lora_name;
     if (lora_name.empty()) {  // 加载了lora权重 但请求中可以不使用
       need_set_zero_ = true;

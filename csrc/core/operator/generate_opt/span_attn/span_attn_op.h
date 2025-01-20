@@ -57,7 +57,7 @@ class SpanAttnOp : public AsOperator {
 
   /* for Forward (prefill / context) */
   virtual void contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
-                                   int new_step, int beam_size) = 0;
+                                   int beam_size) = 0;
   virtual void contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
                                        const AsTensor& v_cache_ptr_tensor,
                                        const void* k_contiguous_cache,

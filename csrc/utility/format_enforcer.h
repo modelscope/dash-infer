@@ -6,7 +6,10 @@
 #pragma once
 
 #include <common/common.h>
+#include <common/device_context.h>
+#include <core/tensor/tensor.h>
 
+#include <limits>
 #include <lmfe/jsonschemaparser.hpp>
 #include <lmfe/tokenenforcer.hpp>
 
@@ -52,6 +55,44 @@ class FormatEnforcer {
 
   static std::map<std::string, int> vocab_;
   static VocabType vocab_type_;
+  static std::vector<float> scores_mask_;
+
+#ifdef ENABLE_CUDA
+  // 存储从GPU拷贝来的logits，类型未必是float，但用float占位可以避免整个类写成模板类
+  static std::vector<float> scores_vec_;
+#endif
+
+  // logits processor
+  template <typename T>
+  static AsStatus process_logits(FrozenTokenVector& allowed_tokens, T* in_ptr,
+                                 const DeviceContext* ctx, size_t dtype_size,
+                                 int model_vocab_size) {
+    scores_mask_.assign(model_vocab_size, std::numeric_limits<float>::lowest());
+    T* scores = in_ptr;
+#ifdef ENABLE_CUDA
+    if (ctx->GetDeviceType() == DeviceType::CUDA) {
+      scores_vec_.resize(model_vocab_size);
+      CopyData(scores_vec_.data(), DeviceType::CPU, (void*)(in_ptr),
+               DeviceType::CUDA, dtype_size * model_vocab_size, ctx);
+      ctx->Synchronize();
+      scores = (T*)scores_vec_.data();
+    }
+#endif
+    for (auto& token : allowed_tokens) {
+      AS_ENFORCE(token < scores_mask_.size());
+      scores_mask_[token] = 0;
+    }
+    for (int i = 0; i < scores_mask_.size(); i++) {
+      scores[i] += scores_mask_[i];
+    }
+#ifdef ENABLE_CUDA
+    if (ctx->GetDeviceType() == DeviceType::CUDA) {
+      CopyData((void*)(in_ptr), DeviceType::CUDA, (void*)scores,
+               DeviceType::CPU, dtype_size * model_vocab_size, ctx);
+    }
+#endif
+    return AsStatus::ALLSPARK_SUCCESS;
+  }
 
  private:
   static std::unordered_map<std::string, std::shared_ptr<JsonSchemaParser>>

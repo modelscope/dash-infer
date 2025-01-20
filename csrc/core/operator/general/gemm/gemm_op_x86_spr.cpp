@@ -157,8 +157,8 @@ AsStatus GemmOpSpr::Reshape() {
 }
 
 AsStatus GemmOpSpr::Forward() {
-  DLOG(INFO) << "GemmOpSpr::Forward, m: " << m_
-             << ", GetMatmulPrecision: " << ctx_->GetMatmulPrecision();
+  // DLOG(INFO) << "GemmOpSpr::Forward, m: " << m_
+  //            << ", GetMatmulPrecision: " << ctx_->GetMatmulPrecision();
 
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   void* in = in_tensor->GetDataPtr();

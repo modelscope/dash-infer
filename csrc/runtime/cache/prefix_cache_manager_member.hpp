@@ -59,14 +59,13 @@ class PrefixCacheManager::PrefixNode {
 
   // smaller nodes are more likely to be evicted
   bool operator<(const PrefixNode& other) const {
-    if (other.last_access_time < last_access_time) {
-      return false;
-    } else if (other.last_access_time == last_access_time) {
-      if (other.prefix_len > prefix_len) {
-        return false;
-      }
+    if (last_access_time != other.last_access_time) {
+      return last_access_time < other.last_access_time;
     }
-    return true;
+    if (prefix_len != other.prefix_len) {
+      return prefix_len > other.prefix_len;
+    }
+    return hash < other.hash;
   }
 
 #if ENABLE_PREFIX_CACHE_DEBUG_API
@@ -137,6 +136,41 @@ class PrefixCacheManager::PrefixNode {
     }
   }
 
+  static void PrintData(std::shared_ptr<PrefixNode>& node) {
+    if (node == nullptr) {
+      return;
+    }
+
+    if (node->device_type != DeviceType::CPU) {
+      LOG(ERROR) << __FUNCTION__ << ": only support comparing cpu nodes";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+    }
+
+    int span_size = node->k_cache[0]->Size();
+    // for (int i = 0; i < node->cache_num; i++) {
+    // for (int i = node->cache_num - 1; i < node->cache_num; i++) {
+    for (int i = 0; i < 1; i++) {
+      void* node_k_cache_ptr = node->k_cache[i]->Data();
+      void* node_v_cache_ptr = node->v_cache[i]->Data();
+      std::stringstream ss;
+      int print_num = 10;
+      uint16_t* data1 = static_cast<uint16_t*>(node_k_cache_ptr);
+      ss << "hash_str: " << node->hash;
+      ss << "\n";
+      ss << "first " << print_num << " data in k_cache: ";
+      for (int idx = 0; idx < print_num; idx++) {
+        ss << data1[idx] << " ";
+      }
+      uint16_t* data2 = static_cast<uint16_t*>(node_v_cache_ptr);
+      ss << "\n";
+      ss << "first " << print_num << " data in v_cache: ";
+      for (int idx = 0; idx < print_num; idx++) {
+        ss << data2[idx] << " ";
+      }
+      LOG(INFO) << ss.str();
+    }
+  }
+
   static bool isSame(std::shared_ptr<PrefixNode>& node1,
                      std::shared_ptr<PrefixNode>& node2, int idx = -1) {
     if (node1 == nullptr || node2 == nullptr) {
@@ -153,6 +187,7 @@ class PrefixCacheManager::PrefixNode {
 
     if (node1->cache_num != node2->cache_num) return false;
 
+    bool rt = true;
     int span_size = node1->k_cache[0]->Size();
     for (int i = 0; i < node1->cache_num; i++) {
       void* node1_k_cache_ptr = node1->k_cache[i]->Data();
@@ -160,10 +195,10 @@ class PrefixCacheManager::PrefixNode {
       void* node2_k_cache_ptr = node2->k_cache[i]->Data();
       void* node2_v_cache_ptr = node2->v_cache[i]->Data();
 
-      bool rt = true;
-      rt &= (memcmp(node1_k_cache_ptr, node2_k_cache_ptr, span_size) == 0);
-      rt &= (memcmp(node1_v_cache_ptr, node2_v_cache_ptr, span_size) == 0);
-      if (rt != true) {
+      bool is_same = true;
+      is_same &= (memcmp(node1_k_cache_ptr, node2_k_cache_ptr, span_size) == 0);
+      is_same &= (memcmp(node1_v_cache_ptr, node2_v_cache_ptr, span_size) == 0);
+      if (is_same != true) {
         std::stringstream ss;
         ss << __FUNCTION__ << ": two nodes have different data";
         if (idx >= 0) {
@@ -171,110 +206,70 @@ class PrefixCacheManager::PrefixNode {
         }
         ss << ", layer no. " << i;
         LOG(INFO) << ss.str();
-        return false;
+        rt = false;
+        break;
       }
     }
 
-    // LOG(INFO) << __FUNCTION__ << ": two nodes have the same data";
-    return true;
+    if (rt == true) {
+      LOG(INFO) << __FUNCTION__ << ": two nodes have the same data";
+    }
+    return rt;
   }
 #endif
 };
 
 class PrefixCacheManager::LRUEvictor {
  private:
-  std::unordered_map<std::string, PrefixNodePtr> candidates_;
+  struct NodeComparator {
+    bool operator()(const PrefixNodePtr& lhs, const PrefixNodePtr& rhs) const {
+      return (*lhs) < (*rhs);
+    }
+  };
+
+  std::set<PrefixNodePtr, NodeComparator> candidates_set_;
 
  public:
   std::string FindVictim() {
     std::string victim_hash = DEFAULT_HASH_STR;
-    PrefixNodePtr victim_node = nullptr;
 
-    for (auto it = candidates_.begin(); it != candidates_.end();) {
-      if (it->second->ref_cnt != 0) {
-        // Theoretically, this conditional branch won't hit, add this line just
-        // in case
-        it = candidates_.erase(it);
-        continue;
-      }
-
-      if (victim_node == nullptr) {
-        victim_hash = it->first;
-        victim_node = it->second;
-      } else {
-        if (*it->second < *victim_node) {
-          victim_hash = it->first;
-          victim_node = it->second;
-        }
-      }
-      ++it;
+    if (!candidates_set_.empty()) {
+      const PrefixNodePtr& victim_node = *candidates_set_.begin();
+      victim_hash = victim_node->hash;
     }
 
     return victim_hash;
   }
 
   std::vector<std::string> FindMultiVictims(int k) {
-    auto compare = [](const PrefixNodePtr& lhs, const PrefixNodePtr& rhs) {
-      return (*lhs) < (*rhs);
-    };
-    std::priority_queue<PrefixNodePtr, std::vector<PrefixNodePtr>,
-                        decltype(compare)>
-        minHeap(compare);
-
-    for (auto it = candidates_.begin(); it != candidates_.end();) {
-      if (it->second->ref_cnt != 0) {
-        // Theoretically, this conditional branch won't hit, add this line just
-        // in case
-        it = candidates_.erase(it);
-        continue;
-      }
-
-      minHeap.push(it->second);
-      if (minHeap.size() > k) {
-        minHeap.pop();
-      }
-      ++it;
-    }
+    k = std::min(static_cast<int>(candidates_set_.size()), k);
 
     std::vector<std::string> victim_hash_list;
-    while (!minHeap.empty()) {
-      victim_hash_list.push_back(minHeap.top()->hash);
-      minHeap.pop();
-    }
-
-    // std::reverse(victim_hash_list.begin(), victim_hash_list.end());
-
+    victim_hash_list.reserve(k);
+    auto itEnd = std::next(candidates_set_.begin(), k);
+    std::transform(
+        candidates_set_.begin(), itEnd, std::back_inserter(victim_hash_list),
+        [](const PrefixNodePtr& node) -> std::string { return node->hash; });
     return std::move(victim_hash_list);
   }
 
   std::vector<std::string> GetAllCandidatesHash() {
-    std::vector<std::string> list;
-    for (auto it = candidates_.begin(); it != candidates_.end(); ++it) {
-      list.emplace_back(it->first);
-    }
-    return list;
+    int size = candidates_set_.size();
+    return std::move(FindMultiVictims(size));
   }
 
-  bool isCandidate(const std::string& hash) {
-    if (candidates_.count(hash) > 0)
-      return true;
-    else
-      return false;
-  }
+  void Add(PrefixNodePtr& kv_cache) { candidates_set_.insert(kv_cache); }
+  void Del(PrefixNodePtr& kv_cache) { candidates_set_.erase(kv_cache); }
+  void Reset() { candidates_set_.clear(); }
 
-  void Add(const std::string& hash, PrefixNodePtr kv_cache) {
-    candidates_[hash] = kv_cache;
-  }
-  void Del(const std::string& hash) { candidates_.erase(hash); }
-  void Reset() { candidates_.clear(); }
-  int Size() { return candidates_.size(); }
+  int Size() { return candidates_set_.size(); }
   std::string ToString() {
     std::stringstream ss;
-    ss << "total candidate number: " << candidates_.size() << "\n";
-    for (auto it = candidates_.begin(); it != candidates_.end(); ++it) {
-      ss << "hash: " << it->first << ", "
-         << "ref_cnt: " << it->second->ref_cnt << ", "
-         << "prefix_len: " << it->second->prefix_len << "\n";
+    ss << "total candidate number: " << candidates_set_.size() << "\n";
+    for (auto it = candidates_set_.begin(); it != candidates_set_.end(); ++it) {
+      ss << "hash: " << (*it)->hash << ", "
+         << "ref_cnt: " << (*it)->ref_cnt << ", "
+         << "prefix_len: " << (*it)->prefix_len << "\n";
     }
     return ss.str();
   }

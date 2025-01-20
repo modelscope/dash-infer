@@ -34,10 +34,18 @@
  */
 namespace allspark {
 #ifdef ENABLE_JSON_MODE
-AsStatus GenerateOp::FormatModelOutput(GenerateContext* gen_ctx,
-                                       int64_t* out_ptr, char* in_ptr,
-                                       int current_batch) {
+AsStatus GenerateOp::FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
+                                       char* in_ptr, int current_batch,
+                                       bool is_context) {
   std::shared_ptr<util::FormatEnforcer> formatter = gen_ctx->format_enforcer;
+  if (is_context == false) {
+    int64_t* generated_ids = static_cast<int64_t*>(
+        gen_ctx->request->interim.at("generated_ids")->GetDataPtr());
+    // get last generated token
+    // gen_ctx->step is already increased after 'decoder' graph, so use step-1
+    // here
+    formatter->gen_sequence.emplace_back(generated_ids[gen_ctx->step - 1]);
+  }
   FrozenTokenVector& allowed_tokens =
       formatter->token_enforcer_->get_allowed_tokens(formatter->gen_sequence);
   if (allowed_tokens.empty()) {
@@ -47,118 +55,40 @@ AsStatus GenerateOp::FormatModelOutput(GenerateContext* gen_ctx,
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 
-  int64_t out_token = 0;
-  bool token_modified = false;
-#ifdef ENABLE_CUDA
-  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-    // get generated token from GPU memory to CPU memory
-    CopyData(&out_token, DeviceType::CPU, out_ptr + current_batch,
-             DeviceType::CUDA, sizeof(int64_t), ctx_);
-    ctx_->Synchronize();
-  } else
-#endif
-  {
-    out_token = *(int64_t*)(out_ptr + current_batch);
-  }
-
-  if (std::find(allowed_tokens.begin(), allowed_tokens.end(), out_token) ==
-      allowed_tokens.end()) {
-    DLOG(INFO) << "LMFE: Parser got not allowed token: \'"
-               << formatter->tokenizer_data_->decode(
-                      {static_cast<int>(out_token)})
-               << "\', id: " << out_token << "\n"
-               << "generated sequence:\n"
-               << formatter->tokenizer_data_->decode(formatter->gen_sequence);
-    float* token_probs_ptr;  // length: vocab_size_
-
-#ifdef ENABLE_CUDA
-    float* gpu_in_ptr = nullptr;
-    if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-      if (dtype_ != DataType::FLOAT32) {
-        // convert in_ptr from other types to float
-        cudaStream_t cu_stream =
-            static_cast<const CUDAContext*>(ctx_)->GetStream();
-        void* src_ptr =
-            (void*)(in_ptr + current_batch * vocab_size_ * SizeofType(dtype_));
-        auto functor = [&]<typename T>() {
-          T* typed_src_ptr = static_cast<T*>(src_ptr);
-          cuda::ToFloatKernelLauncher<T>((float*)float_in_ptr->GetDataPtr(),
-                                         typed_src_ptr, vocab_size_, cu_stream);
-        };
-        DispatchCUDA(dtype_, functor);
-        gpu_in_ptr = (float*)float_in_ptr->GetDataPtr();
-      } else {
-        gpu_in_ptr =
-            (float*)(in_ptr + current_batch * vocab_size_ * SizeofType(dtype_));
-      }
-      CopyData(token_probs_->data(), DeviceType::CPU, gpu_in_ptr,
-               DeviceType::CUDA, sizeof(float) * vocab_size_, ctx_);
-      ctx_->Synchronize();
-      token_probs_ptr = token_probs_->data();
-    } else
-#endif
-    {
-      if (dtype_ != DataType::FLOAT32) {
-        LOG(ERROR)
-            << "LMFE: FormatEnforcer only support float32 data type on CPU!\n";
-        return AsStatus::ALLSPARK_RUNTIME_ERROR;
-      }
-      token_probs_ptr =
-          (float*)(in_ptr + current_batch * vocab_size_ * SizeofType(dtype_));
-    }
-    if (allowed_tokens.size() > 1) {
-      // in_ptr is not processed by SoftMax, so use float::lowest as minimum
-      // value
-      float max_prob = std::numeric_limits<float>::lowest();
-      int max_prob_token = 0;
-      for (auto token : allowed_tokens) {
-        if (token_probs_ptr[token] > max_prob) {
-          max_prob = token_probs_ptr[token];
-          max_prob_token = token;
-        }
-      }
-      DLOG(INFO) << "LMFE: Parser chose token: \'"
-                 << formatter->tokenizer_data_->decode({max_prob_token})
-                 << "\', id: " << max_prob_token
-                 << ", probability: " << max_prob
-                 << ", originial probability: " << token_probs_ptr[out_token]
-                 << "\n";
-      out_token = max_prob_token;
-    } else {
-      // only 1 token available to choose
-      DLOG(INFO) << "LMFE: Parser chose token: \'"
-                 << formatter->tokenizer_data_->decode({allowed_tokens[0]})
-                 << "\', id: " << allowed_tokens[0]
-                 << ", probability: " << token_probs_ptr[allowed_tokens[0]]
-                 << ", originial probability: " << token_probs_ptr[out_token]
-                 << "\n";
-      out_token = allowed_tokens[0];
-    }
-    token_modified = true;
-  } else {
-    DLOG(INFO) << "LMFE: Parser got allowed token: \'"
-               << formatter->tokenizer_data_->decode(
-                      {static_cast<int>(out_token)})
-               << "\'\n";
-  }
-  formatter->gen_sequence.push_back(out_token);
-
-  if (token_modified == true) {
-#ifdef ENABLE_CUDA
-    if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-      // put modified token back to GPU memory
-      CopyData(out_ptr + current_batch, DeviceType::CUDA, &out_token,
-               DeviceType::CPU, sizeof(int64_t), ctx_);
-      ctx_->Synchronize();
-    } else
-#endif
-    {
-      *(int64_t*)(out_ptr + current_batch) = out_token;
-    }
+  void* batch_in_ptr =
+      (void*)(in_ptr + current_batch * vocab_size_ * SizeofType(dtype_));
+  switch (dtype_) {
+    case DataType::FLOAT32:
+      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<float>(
+          allowed_tokens, static_cast<float*>(batch_in_ptr), ctx_,
+          SizeofType(dtype_), vocab_size_));
+      break;
+    case DataType::FLOAT16:
+      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<half>(
+          allowed_tokens, static_cast<half*>(batch_in_ptr), ctx_,
+          SizeofType(dtype_), vocab_size_));
+      break;
+    case DataType::BFLOAT16:
+      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<hie::bfloat16>(
+          allowed_tokens, static_cast<hie::bfloat16*>(batch_in_ptr), ctx_,
+          SizeofType(dtype_), vocab_size_));
+      break;
+    default:
+      LOG(ERROR)
+          << "GenerateOp::FormatModelOutput got unsupported data type!\n";
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 #endif
+
+GenerateOp::~GenerateOp() {
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    AS_CHECK_CUDA(cudaFreeHost(dec_ids_host_));
+  }
+#endif
+}
 
 AsStatus GenerateOp::Init(const OperatorProto& op_proto,
                           const DeviceContext& ctx,
@@ -170,12 +100,9 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
 #ifdef ENABLE_CUDA
     case DeviceType::CUDA: {
       copy_matrix = copy_matrix_gpu;
-      if (ctx.GetUseTorchSample()) {
-        sample_init_launcher = gen_torch_sample_init_gpu;
-      } else {
-        sample_init_launcher = gen_sample_init_gpu;
-      }
+      sample_init_launcher = gen_sample_init_gpu;
       kernel_launcher = gen_sample_gpu;
+      fill_max_dec_ids_launcher = fill_max_dec_ids_gpu;
       process_logits_launcher = gen_process_logits_gpu;
       beam_init_launcher = gen_beam_init_gpu;
       logprobs_launcher = logprobs_gpu;
@@ -195,9 +122,14 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
       copy_matrix = copy_matrix_cpu;
       sample_init_launcher = gen_sample_init_cpu;
       kernel_launcher = gen_sample_cpu;
+      fill_max_dec_ids_launcher = fill_max_dec_ids_cpu;
       process_logits_launcher = gen_process_logits_cpu;
       beam_init_launcher = gen_beam_init_cpu;
       logprobs_launcher = logprobs_cpu;
+
+      const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
+      rank_id_ = cpu_ctx->GetRank();
+      nrank_ = cpu_ctx->GetNranks();
       break;
     }
     default:
@@ -220,6 +152,33 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
   temperature_list_ =
       std::make_unique<AsTensor>("temperature_list", backend, DataType::FLOAT32,
                                  DataMode::DENSE, Shape{max_batch});
+
+  dec_ids_ = std::make_shared<AsTensor>("dec_ids", backend, DataType::INT64,
+                                        DataMode::DENSE, Shape{max_batch});
+  max_dec_ids_ = std::make_shared<AsTensor>(
+      "max_dec_ids", backend, DataType::INT64, DataMode::DENSE,
+      Shape{max_batch, static_cast<long>(ctx_->GetModelMaxLength())});
+  gen_ids_ptr_ =
+      std::make_shared<AsTensor>("gen_ids_ptr", backend, DataType::POINTER,
+                                 DataMode::DENSE, Shape{max_batch});
+
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    if (ctx_->GetUseTorchSample()) {
+      sample_states_ = std::make_unique<AsTensor>(
+          "sample_states", DeviceType::CPU, DataType::POINTER, DataMode::DENSE,
+          Shape{max_batch});
+    } else {
+      sample_states_ = std::make_unique<AsTensor>(
+          "sample_states", DeviceType::CUDA, DataType::POINTER, DataMode::DENSE,
+          Shape{max_batch});
+    }
+
+    AS_CHECK_CUDA(cudaMallocHost(&dec_ids_host_, sizeof(int64_t) * max_batch,
+                                 cudaHostAllocDefault));
+  }
+#endif
+
   if (out_names_.size() > 3) {
     tensor_map_->at(out_names_[3])->SetDataType(dtype_);
   }
@@ -250,15 +209,6 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
   suppress_repetition_in_generation_list = std::make_unique<AsTensor>(
       "suppress_repetition_in_generation_list", backend, DataType::INT32,
       DataMode::DENSE, Shape{max_batch});
-
-#if defined(ENABLE_JSON_MODE) && defined(ENABLE_CUDA)
-  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-    float_in_ptr =
-        std::make_unique<AsTensor>("float_in_ptr", backend, DataType::FLOAT32,
-                                   DataMode::DENSE, Shape{max_batch});
-    token_probs_ = std::make_unique<std::vector<float>>();
-  }
-#endif
   return AsStatus::ALLSPARK_SUCCESS;
 }
 void GenerateOp::build_batch_gencfg(RuntimeContext* runtime_ctx,
@@ -280,7 +230,7 @@ void GenerateOp::build_batch_gencfg(RuntimeContext* runtime_ctx,
   std::vector<int> host_input_len_list(batch_size);
   std::vector<int> host_suppress_repetition_in_generation_list(batch_size);
   for (int i = 0; i < batch_size; i++) {
-    GenerateContext* gen_ctx;
+    std::shared_ptr<GenerateContext> gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -347,16 +297,11 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
       vocab_size_ = in_shape[2];
       beam_size_ = 1;
       max_k_ = 0;
-#if defined(ENABLE_JSON_MODE) && defined(ENABLE_CUDA)
-      if (backend == DeviceType::CUDA) {
-        token_probs_->resize(vocab_size_);
-      }
-#endif
       std::vector<int> topk_vec(batch_size_);
       std::vector<float> topp_vec(batch_size_);
       std::vector<float> temperatures(batch_size_);
       for (int i = 0; i < batch_size_; i++) {
-        GenerateContext* gen_ctx;
+        std::shared_ptr<GenerateContext> gen_ctx;
         if (runtime_ctx->is_context) {
           gen_ctx = runtime_ctx->GetContextGenCtx();
         } else {
@@ -386,10 +331,10 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
                                       DeviceType::CPU, ctx_);
 
       build_batch_gencfg(runtime_ctx, batch_gencfg_, ctx_);
-      AS_CHECK_STATUS(
-          tensor_map_->at(out_names_[0])->SetShape(Shape{max_batch, 1}));
-      AS_CHECK_STATUS(
-          tensor_map_->at(out_names_[0])->SetShape(Shape{batch_size_, 1}));
+
+      AS_CHECK_STATUS(dec_ids_->SetShape(Shape{batch_size_, 1}));
+      AS_CHECK_STATUS(gen_ids_ptr_->SetShape(Shape{batch_size_, 1}));
+
 #ifdef CONFIG_SAMPLE_CONSTRAIN_MAX_K
       if (max_k_ == 0) {
         max_k_ = 1024;
@@ -445,9 +390,6 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
           return AsStatus::ALLSPARK_EXCEED_LIMIT_ERROR;
         }
         total_ws_bytes = std::max(total_ws_bytes, topp_ws_bytes);
-#ifdef ENABLE_JSON_MODE
-        AS_CHECK_STATUS(float_in_ptr->SetShape(Shape{vocab_size_}));
-#endif
       }
 #endif  // ENABLE_CUDA
 
@@ -469,13 +411,14 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
       // alloc for logprobs_
       need_logprobs_ = false;
       if (runtime_ctx->is_context) {
-        GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+        std::shared_ptr<GenerateContext> gen_ctx =
+            runtime_ctx->GetContextGenCtx();
         if (gen_ctx->gen_cfg.logprobs == true) {
           need_logprobs_ = true;
         }
       } else {
         for (int i = 0; i < batch_size_; i++) {
-          GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
           if (gen_ctx->gen_cfg.logprobs == true) {
             need_logprobs_ = true;
           }
@@ -499,66 +442,85 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
 AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
   const DeviceType device = ctx_->GetDeviceType();
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
-  AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   char* in_ptr = (char*)in_tensor->GetDataPtr() +
                  (seq_len_ - 1) * vocab_size_ * SizeofType(dtype_);
-  void* out_ptr = out_tensor->GetDataPtr();
+  void* out_ptr = dec_ids_->GetDataPtr();
   void* ws_ptr = tensor_map_->at("workspace")->GetDataPtr();
   size_t ws_bytes = tensor_map_->at("workspace")->GetSizeInByte();
-  void* sample_states =
-      runtime_ctx->is_context
-          ? runtime_ctx->GetContextGenCtx()->sample_state->GetDataPtr()
-          : nullptr;
+  void** sample_states = nullptr;
 
   void* device_prop_ptr = nullptr;
 #ifdef ENABLE_CUDA
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
     device_prop_ptr = device_prop_ ? device_prop_->GetDataPtr() : nullptr;
-    if (device == DeviceType::CUDA && ctx_->GetUseTorchSample() == false) {
-      sample_states = (char*)tensor_map_->at("sample_states")->GetDataPtr() +
-                      runtime_ctx->current_batch * sizeof(curandState_t);
-    }
   }
 #endif
   if (runtime_ctx->is_context) {
-    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
-    sample_init_launcher(sample_states, gen_ctx->gen_cfg.seed, 1, ctx_);
+    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+    sample_init_launcher(gen_ctx->sample_state->GetDataPtr(),
+                         gen_ctx->gen_cfg.seed, 1, ctx_);
   }
-  if (runtime_ctx->is_context) {
-    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
-    int64_t* max_dec_ids =
-        static_cast<int64_t*>(tensor_map_->at(in_names_[1])->GetDataPtr()) +
-        gen_ctx->current_batch * ctx_->GetModelMaxLength();
+
+#ifdef ENABLE_CUDA
+  if (device == DeviceType::CUDA) {
+    int batch_size = batch_size_;
+    if (runtime_ctx->is_context) {
+      batch_size = 1;
+    }
+
+    if (ctx_->GetUseTorchSample() == false) {
+      std::vector<void*> sample_states_vec(batch_size);
+      for (int i = 0; i < batch_size; i++) {
+        std::shared_ptr<GenerateContext> gen_ctx = nullptr;
+        if (runtime_ctx->is_context) {
+          gen_ctx = runtime_ctx->GetContextGenCtx();
+        } else {
+          gen_ctx = runtime_ctx->GetGenCtx(i);
+        }
+        sample_states_vec[i] = gen_ctx->sample_state->GetDataPtr();
+      }
+      cudaStream_t stream = static_cast<const CUDAContext*>(ctx_)->GetStream();
+      AS_CHECK_CUDA(cudaMemcpyAsync(sample_states_->GetDataPtr(),
+                                    sample_states_vec.data(),
+                                    sample_states_vec.size() * sizeof(void*),
+                                    cudaMemcpyHostToDevice, stream));
+    } else {
+      for (int i = 0; i < batch_size; i++) {
+        std::shared_ptr<GenerateContext> gen_ctx = nullptr;
+        if (runtime_ctx->is_context) {
+          gen_ctx = runtime_ctx->GetContextGenCtx();
+        } else {
+          gen_ctx = runtime_ctx->GetGenCtx(i);
+        }
+        ((void**)(sample_states_->GetDataPtr()))[i] =
+            gen_ctx->sample_state->GetDataPtr();
+      }
+    }
+    sample_states = (void**)sample_states_->GetDataPtr();
+  }
+#endif
+
+  {
+    fill_max_dec_ids_launcher(runtime_ctx, max_dec_ids_, ctx_);
+
+    int batch_size;
+    int64_t* max_dec_ids;
     char* batch_in_ptr = in_ptr;
-    process_logits_launcher(dtype_, max_dec_ids, batch_in_ptr, 1, vocab_size_,
-                            ctx_, runtime_ctx, batch_gencfg_, ws_ptr, ws_bytes);
-  } else {
-    int64_t* max_dec_ids =
-        static_cast<int64_t*>(tensor_map_->at(in_names_[1])->GetDataPtr());
-    char* batch_in_ptr = in_ptr;
-    process_logits_launcher(dtype_, max_dec_ids, batch_in_ptr, batch_size_,
+    if (runtime_ctx->is_context) {
+      batch_size = 1;
+      max_dec_ids = static_cast<int64_t*>(max_dec_ids_->GetDataPtr()) +
+                    runtime_ctx->current_batch * ctx_->GetModelMaxLength();
+    } else {
+      batch_size = batch_size_;
+      max_dec_ids = static_cast<int64_t*>(max_dec_ids_->GetDataPtr());
+    }
+
+    process_logits_launcher(dtype_, max_dec_ids, batch_in_ptr, batch_size,
                             vocab_size_, ctx_, runtime_ctx, batch_gencfg_,
                             ws_ptr, ws_bytes);
   }
 
-  // don't remove this sync, otherwise wrong token will generate.
-  ctx_->Synchronize();
-  kernel_launcher(dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
-                  topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
-                  sample_states, batch_size_, max_k_, vocab_size_,
-                  static_cast<int*>(topk_list_->GetDataPtr()),
-                  static_cast<float*>(topp_list_->GetDataPtr()),
-                  static_cast<float*>(temperature_list_->GetDataPtr()), ctx_,
-                  runtime_ctx, ws_ptr, ws_bytes, device_prop_ptr);
-
 #ifdef ENABLE_JSON_MODE
-  // TODO: LMFE, 如果batch开启了JSON
-  // Mode，检查out_ptr[batch]是否为allowed_token，注意特殊token
-  // token非法则将in_ptr中的allowed_token按照概率大小排序选取最大的作为out token
-  // in_ptr length:
-  //    context:  1 * vocab_size_
-  //    decode:   batch_size_ * vocab_size_
-  // out_ptr length: batch_size_ * 1
   bool do_format = false;
 #ifdef ENABLE_CUDA
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
@@ -574,23 +536,35 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
 #endif
   if (do_format == true) {
     if (runtime_ctx->is_context) {
-      GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
-      if (gen_ctx->gen_cfg.response_format["type"] == "json_object") {
-        AS_CHECK_STATUS(FormatModelOutput(
-            gen_ctx, static_cast<int64_t*>(out_ptr), in_ptr, 0));
+      std::shared_ptr<GenerateContext> gen_ctx =
+          runtime_ctx->GetContextGenCtx();
+      if (gen_ctx->gen_cfg.response_format.count("type") &&
+          gen_ctx->gen_cfg.response_format["type"] == "json_object") {
+        AS_CHECK_STATUS(
+            FormatModelOutput(gen_ctx, in_ptr, 0, runtime_ctx->is_context));
       }
     } else {
       for (int i = 0; i < batch_size_; i++) {
-        GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
-        if (gen_ctx->gen_cfg.response_format["type"] == "json_object") {
-          AS_CHECK_STATUS(FormatModelOutput(
-              gen_ctx, static_cast<int64_t*>(out_ptr), in_ptr, i));
+        std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+        if (gen_ctx->gen_cfg.response_format.count("type") &&
+            gen_ctx->gen_cfg.response_format["type"] == "json_object") {
+          AS_CHECK_STATUS(
+              FormatModelOutput(gen_ctx, in_ptr, i, runtime_ctx->is_context));
         }
       }
     }
   }
-
 #endif
+
+  // don't remove this sync, otherwise wrong token will generate.
+  ctx_->Synchronize();
+  kernel_launcher(dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
+                  topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
+                  sample_states, batch_size_, max_k_, vocab_size_,
+                  static_cast<int*>(topk_list_->GetDataPtr()),
+                  static_cast<float*>(topp_list_->GetDataPtr()),
+                  static_cast<float*>(temperature_list_->GetDataPtr()), ctx_,
+                  runtime_ctx, ws_ptr, ws_bytes, device_prop_ptr);
 
   if (need_logprobs_) {
     logprobs_launcher(dtype_, in_ptr, static_cast<int64_t*>(out_ptr),
@@ -604,19 +578,23 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
   if (device == DeviceType::CUDA) {
     const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
     if (cuda_ctx->GetNranks() > 1) {
-      AsStatus status = NcclBcast(tensor_map_->at(out_names_[0]), cuda_ctx);
+      AsStatus status = NcclBcast(dec_ids_, cuda_ctx);
       if (status != AsStatus::ALLSPARK_SUCCESS) {
         LOG(ERROR) << "forward failed in sampling " << std::endl;
         return status;
       }
       ctx_->Synchronize();
     }
+
+    fill_generated_ids_gpu(runtime_ctx, dec_ids_, gen_ids_ptr_, dec_ids_host_,
+                           cuda_ctx, rank_id_);
   }
 #endif
+
   if (device == DeviceType::CPU) {
     if (nrank_ > 1) {
 #ifdef ENABLE_MULTINUMA
-      AsStatus status = MpiBcast(tensor_map_->at(out_names_[0]));
+      AsStatus status = MpiBcast(dec_ids_);
 
       if (status != AsStatus::ALLSPARK_SUCCESS) {
         LOG(ERROR) << "forward failed in sampling " << std::endl;
@@ -627,7 +605,10 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
 #endif
     }
+
+    fill_generated_ids_cpu(runtime_ctx, dec_ids_, rank_id_);
   }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 AsStatus GenerateOp::Forward(RuntimeContext* runtime_ctx) {

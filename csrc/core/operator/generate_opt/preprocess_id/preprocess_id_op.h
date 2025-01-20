@@ -24,29 +24,12 @@ namespace allspark {
 class PreProcessIdOp : public AsOperator {
  public:
   explicit PreProcessIdOp(const std::string& op_type = "")
-      : AsOperator(op_type),
-        batch_size_(1),
-        num_beam_(1),
-        seq_len_(1),
-        max_len_(1),
-        start_id_(-1) {}
+      : AsOperator(op_type) {}
+
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
-  AsStatus Reshape() override;
-  AsStatus Forward() override;
-  AsStatus Reshape(RuntimeContext* runtime_ctx) override {
-    return this->Reshape();
-  }
-  AsStatus Forward(RuntimeContext* runtime_ctx) override {
-    return this->Forward();
-  }
-
- private:
-  int batch_size_;
-  int num_beam_ = 1;
-  int seq_len_;
-  int max_len_;
-  int64_t start_id_;
+  AsStatus Reshape(RuntimeContext* runtime_ctx) override;
+  AsStatus Forward(RuntimeContext* runtime_ctx) override;
 };
 
 }  // namespace allspark

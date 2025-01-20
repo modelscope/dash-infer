@@ -54,9 +54,10 @@ class BatchMHAOp : public AsOperator {
     return ctx_->GetPrefillMode() == AsMHAPrefill::AsPrefillFlashV2 &&
            seq_len_ > AttentionEnvConfig::GetFlashThresh();
   }
-  AsStatus runFlash(GenerateContext* gen_ctx);
+  AsStatus runFlash(std::shared_ptr<GenerateContext> gen_ctx);
 #endif
-  AsStatus runOneBatch(GenerateContext* gen_ctx, int current_batch);
+  AsStatus runOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
+                       int current_batch);
 
   AsStatus lognFromAttributes(const OperatorProto& op) {
     auto& attr = op.attr();

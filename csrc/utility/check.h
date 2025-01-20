@@ -94,4 +94,14 @@ std::string ConcatString(Args&&... args) {
     }                                   \
   } while (0)
 
+#define AS_CHECK_EXCEPTION(expr)                                \
+  do {                                                          \
+    try {                                                       \
+      expr;                                                     \
+    } catch (std::exception & e) {                              \
+      LOG(ERROR) << "Failed:  " << __FILE__ << ":" << __LINE__; \
+      throw e;                                                  \
+    }                                                           \
+  } while (0)
+
 }  // namespace allspark

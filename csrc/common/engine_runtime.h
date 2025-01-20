@@ -48,14 +48,10 @@ class ModelControlState final {
   moodycamel::BlockingConcurrentQueue<EngineControlMessage> msg_queue;
   std::atomic<int> msg_queue_size;
 
-  std::unique_ptr<std::condition_variable> cond_var;
-
   std::unordered_map<std::string, std::shared_ptr<RequestHandle>>
       request_handle_map;
   std::unordered_map<std::string, std::shared_ptr<AsEngine::ResultQueue>>
       result_queue_map;
-  std::queue<std::shared_ptr<RequestHandle>> release_request_handle;
-  std::queue<std::shared_ptr<AsEngine::ResultQueue>> release_request_queue;
   std::atomic<bool> model_stopping =
       false;                                // after GracefulStopModel called...
   std::atomic<bool> model_stopped = false;  // after GracefulStopModel is done.

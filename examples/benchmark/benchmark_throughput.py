@@ -380,6 +380,10 @@ class BenchmarkConfig():
         self.guided_decode = args.guided_decode
         self.dtype = args.dtype
 
+        self.run_lora = args.run_lora
+        self.lora_path = args.lora_path
+        self.lora_name = args.lora_name
+
         if self.engine_max_length - self.test_max_output <= 0:
             raise ValueError("engine max length too small, should at least largeer than test max output")
 
@@ -394,6 +398,10 @@ class BenchmarkConfig():
             if self.engine_enable_prefix_cache == False:
                 print("got prefix cache list, enable prefix cache enbale config.")
                 self.engine_enable_prefix_cache = True
+        
+        if self.run_lora == True:
+            if self.lora_path == None or self.lora_name == None:
+                raise ValueError("\'lora_path\' and \'lora_name\' must be both provided when \'run_lora\' is \'True\'")
 
         for rate in self.prefix_cache_list:
             if rate < 0 or rate > 1.0:
@@ -702,16 +710,25 @@ def test_model_stress(config: BenchmarkConfig):
     model_loader = allspark.HuggingFaceModel(model_real_path, safe_model_name, in_memory_serialize=in_memory,
                                              user_set_data_type=config.dtype,
                                              trust_remote_code=True)
-
-
+    
     engine = allspark.Engine()
-    (model_loader.load_model()
-     .read_model_config()
-     .serialize(engine, model_output_dir=".",
-                enable_quant=config.enable_quant,
-                weight_only_quant=config.weight_only_quant,
-                customized_quant_config=config.quant_config)
-     .free_model())
+    if config.run_lora == True:
+        (model_loader.load_model()
+        .read_model_config()
+        .serialize(engine, model_output_dir=".",
+                    enable_quant=config.enable_quant,
+                    weight_only_quant=config.weight_only_quant,
+                    customized_quant_config=config.quant_config,
+                    lora_cfg={'input_base_dir': config.lora_path, 'lora_names': [config.lora_name], 'lora_only': False})
+        .free_model())
+    else:
+        (model_loader.load_model()
+        .read_model_config()
+        .serialize(engine, model_output_dir=".",
+                    enable_quant=config.enable_quant,
+                    weight_only_quant=config.weight_only_quant,
+                    customized_quant_config=config.quant_config)
+        .free_model())
 
     runtime_cfg_builder = model_loader.create_reference_runtime_config_builder("model", config.device_type,
                                                                            config.device_ids, max_batch=config.engine_max_batch)
@@ -727,12 +744,19 @@ def test_model_stress(config: BenchmarkConfig):
 
     engine.start_model('model')
 
+    if config.run_lora == True:
+        ret = engine.load_lora('model', config.lora_name)
+        if ret != allspark.AsStatus.ALLSPARK_SUCCESS:
+            raise ValueError('AllSpark engine load_lora failed!')
 
     # like change to engine max length
     tokenizer = model_loader.read_model_config().init_tokenizer().get_tokenizer()
 
 
     gen_cfg_builder = model_loader.create_reference_generation_config_builder(runtime_cfg)
+
+    if config.run_lora == True:
+        gen_cfg_builder.update({"lora_name": config.lora_name})
 
     if config.test_random_input:
         gen_cfg_builder.early_stopping(False)
@@ -894,6 +918,10 @@ if __name__ == '__main__':
     parser.add_argument("--guided_decode", action="store_true", default=False, help="enable guided decode for json object.")
     parser.add_argument("--skip_unfinished", action="store_true", default=False, help="skip unfinished task, processing the test.")
     parser.add_argument("--prefix_cache_rate_list", type=parse_float_list, required=False, default=[], help="add one cache running list, for benchmark different cache hit rate result, must be in decending order, like  0.99, 0.9, 0.6, 0.3, benchmark result will in multiple line, first line was total cache miss")
+
+    parser.add_argument("--run_lora", action="store_true", default=False, help="run lora request")
+    parser.add_argument("--lora_path", type=str, required=False, help="path of LoRA weights", default=None)
+    parser.add_argument("--lora_name", type=str, required=False, help="name of LoRA weights", default=None)
 
     parser.add_argument(
         '--duration',

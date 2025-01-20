@@ -156,13 +156,13 @@ void TopPSoftmaxGetWorkspaceSize(size_t* sizeInBytes, int batch_size,
                                  int length, bool input_is_sorted);
 
 template <typename T>
-void SampleKernelLauncher(int64_t* out, void* states, T* in, const int* indice,
+void SampleKernelLauncher(int64_t* out, void** states, T* in, const int* indice,
                           int batch_size, int* num_arr, int stride,
                           cudaStream_t stream, void* device_prop);
 void SampleKernelInitLauncher(void* state, unsigned long long seed,
                               int batch_size, cudaStream_t stream);
 template <typename T>
-void SampleTorchKernelLauncher(int64_t* out, std::vector<void*>& states, T* in,
+void SampleTorchKernelLauncher(int64_t* out, void** states, T* in,
                                const int* indice, int batch_size, int* num_arr,
                                int stride, cudaStream_t stream,
                                void* device_prop);
@@ -370,6 +370,13 @@ void ReplaceEmbedding(T* output, float* input, int64_t nbytes,
 template <typename T>
 void ToFloatKernelLauncher(float* out, const T* in, int64_t count,
                            cudaStream_t stream);
+
+template <typename T>
+void CopyToArrayKernelLauncher(T* array, const T** vars, int count,
+                               cudaStream_t stream);
+template <typename T>
+void CopyToVarsKernelLauncher(T** vars, const T* array, int count,
+                              cudaStream_t stream);
 
 template <typename CT, typename DT>
 size_t GetBatchedGEMVWorkspaceSize(int k, int n, int batchSize);

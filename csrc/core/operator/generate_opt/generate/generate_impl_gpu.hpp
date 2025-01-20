@@ -113,7 +113,7 @@ AsStatus gen_process_logits_gpu(DataType dtype, int64_t* in_tokens,
 }
 AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
                         void* topp_value, int* topk_indice, void* in_logits,
-                        void* sample_states, int batch_size, int max_k,
+                        void** sample_states, int batch_size, int max_k,
                         int length, int* k_arr, float* p_arr,
                         float* temperature_arr, const DeviceContext* ctx,
                         RuntimeContext* runtime_ctx, void* ws_ptr,
@@ -132,17 +132,8 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
     LOG(ERROR) << "Top-p: temperature_arr should not be nullptr" << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  std::vector<void*> sample_states_vec(batch_size);
-  bool use_torch_sample = ctx->GetUseTorchSample();
-  if (use_torch_sample) {
-    for (int i = 0; i < batch_size; i++) {
-      GenerateContext* gen_ctx = runtime_ctx->is_context
-                                     ? runtime_ctx->GetContextGenCtx()
-                                     : runtime_ctx->GetGenCtx(i);
-      sample_states_vec[i] = gen_ctx->sample_state->GetDataPtr();
-    }
-  }
 
+  bool use_torch_sample = ctx->GetUseTorchSample();
   auto functor = [&]<typename T>() {
     cudaStream_t gpu_stream = static_cast<const CUDAContext*>(ctx)->GetStream();
     T* typed_topk_value = static_cast<T*>(topk_value);
@@ -159,7 +150,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
                                       k_arr, max_k, gpu_stream, device_prop);
       } else {
         cuda::SampleTorchKernelLauncher<T>(
-            out_tokens, sample_states_vec, typed_topk_value, topk_indice,
+            out_tokens, sample_states, typed_topk_value, topk_indice,
             batch_size, k_arr, max_k, gpu_stream, device_prop);
       }
     } else {
@@ -197,7 +188,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
             batch_size, k_arr, topp_length, gpu_stream, device_prop);
       } else {
         cuda::SampleTorchKernelLauncher<T>(
-            out_tokens, sample_states_vec, typed_topk_value, topk_indice,
+            out_tokens, sample_states, typed_topk_value, topk_indice,
             batch_size, k_arr, topp_length, gpu_stream, device_prop);
       }
     }
@@ -207,19 +198,111 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
   DispatchCUDA(dtype, functor);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-void gen_torch_sample_init_gpu(void* sample_states, unsigned long long seed,
-                               int batch_size, const DeviceContext* ctx) {
-  const cudaStream_t gpu_stream =
-      static_cast<const CUDAContext*>(ctx)->GetStream();
-  cuda::SampleTorchKernelInitLauncher(sample_states, seed, batch_size,
-                                      gpu_stream);
-}
+
 void gen_sample_init_gpu(void* sample_states, unsigned long long seed,
                          int batch_size, const DeviceContext* ctx) {
   const cudaStream_t gpu_stream =
       static_cast<const CUDAContext*>(ctx)->GetStream();
-  cuda::SampleKernelInitLauncher(sample_states, seed, batch_size, gpu_stream);
+  if (ctx->GetUseTorchSample())
+    cuda::SampleTorchKernelInitLauncher(sample_states, seed, batch_size,
+                                        gpu_stream);
+  else
+    cuda::SampleKernelInitLauncher(sample_states, seed, batch_size, gpu_stream);
 }
+
+AsStatus fill_generated_ids_gpu(RuntimeContext* runtime_ctx,
+                                std::shared_ptr<AsTensor>& dec_ids,
+                                std::shared_ptr<AsTensor>& gen_ids_ptr,
+                                int64_t* dec_ids_host,
+                                const CUDAContext* cuda_ctx, int rank_id) {
+  cudaStream_t stream = cuda_ctx->GetStream();
+
+  int batch_size = 1;
+  if (!runtime_ctx->is_context) {
+    batch_size = runtime_ctx->GetGenCtxListSize();
+  }
+
+  std::vector<int64_t*> ptrs(batch_size);
+  std::vector<int64_t*> ptrs_host(batch_size);
+  for (int i = 0; i < batch_size; i++) {
+    std::shared_ptr<GenerateContext> gen_ctx;
+    if (runtime_ctx->is_context) {
+      gen_ctx = runtime_ctx->GetContextGenCtx();
+    } else {
+      gen_ctx = runtime_ctx->GetGenCtx(i);
+    }
+    int generated_len = gen_ctx->step + gen_ctx->in_length_bias + 1;
+
+    std::shared_ptr<AsTensor> generated_ids_tensor =
+        gen_ctx->request->interim.at("generated_ids");
+    generated_ids_tensor->SetShape(Shape{1, generated_len});
+    ptrs_host[i] = static_cast<int64_t*>(generated_ids_tensor->GetDataPtr()) +
+                   generated_len - 1;
+
+    std::shared_ptr<AsTensor>& generated_ids_gpu_tensor =
+        gen_ctx->request->interim.at("generated_ids_gpu");
+    generated_ids_gpu_tensor->SetShape(Shape{1, generated_len});
+    ptrs[i] = static_cast<int64_t*>(generated_ids_gpu_tensor->GetDataPtr()) +
+              generated_len - 1;
+  }
+
+  AS_CHECK_CUDA(cudaMemcpyAsync(gen_ids_ptr->GetDataPtr(), ptrs.data(),
+                                ptrs.size() * sizeof(ptrs[0]),
+                                cudaMemcpyHostToDevice, stream));
+
+  // dec_ids -> generated_ids_gpu
+  cuda::CopyToVarsKernelLauncher(
+      static_cast<int64_t**>(gen_ids_ptr->GetDataPtr()),
+      static_cast<const int64_t*>(dec_ids->GetDataPtr()), batch_size, stream);
+
+  // dec_ids -> generated_ids
+  AS_CHECK_CUDA(cudaMemcpyAsync(dec_ids_host, dec_ids->GetDataPtr(),
+                                dec_ids->GetSizeInByte(),
+                                cudaMemcpyDeviceToHost, stream));
+  AS_CHECK_CUDA(cudaStreamSynchronize(stream));
+
+  cpu::CopyToVarsKernelLauncher(
+      ptrs_host.data(), static_cast<const int64_t*>(dec_ids_host), batch_size);
+
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+AsStatus fill_max_dec_ids_gpu(RuntimeContext* runtime_ctx,
+                              std::shared_ptr<AsTensor>& max_dec_ids,
+                              const DeviceContext* ctx) {
+  const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx);
+  cudaStream_t stream = cuda_ctx->GetStream();
+
+  int batch_size = 1;
+  if (!runtime_ctx->is_context) {
+    batch_size = runtime_ctx->GetGenCtxListSize();
+  }
+
+  // AS_CHECK_CUDA(cudaMemsetAsync(max_dec_ids->GetDataPtr(), 0,
+  //                               max_dec_ids->GetSizeInByte(), stream));
+
+  for (int i = 0; i < batch_size; i++) {
+    std::shared_ptr<GenerateContext> gen_ctx;
+    if (runtime_ctx->is_context) {
+      gen_ctx = runtime_ctx->GetContextGenCtx();
+    } else {
+      gen_ctx = runtime_ctx->GetGenCtx(i);
+    }
+
+    std::shared_ptr<AsTensor> generated_ids_tensor =
+        gen_ctx->request->interim.at("generated_ids_gpu");
+
+    void* dst_data = (void*)((int64_t*)max_dec_ids->GetDataPtr() +
+                             gen_ctx->current_batch * ctx->GetModelMaxLength());
+    void* src_data = generated_ids_tensor->GetDataPtr();
+    size_t nbytes = generated_ids_tensor->GetSizeInByte();
+    AS_CHECK_CUDA(cudaMemcpyAsync(dst_data, src_data, nbytes,
+                                  cudaMemcpyDeviceToDevice, stream));
+  }
+
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
 AsStatus NcclBcast(std::shared_ptr<AsTensor> tensor,
                    const CUDAContext* cuda_ctx) {
   void* out = tensor->GetDataPtr();
@@ -230,4 +313,5 @@ AsStatus NcclBcast(std::shared_ptr<AsTensor> tensor,
                           cuda_ctx->GetStream()));
   return AsStatus::ALLSPARK_SUCCESS;
 }
+
 }  // namespace allspark

@@ -339,16 +339,23 @@ __global__ void finalize_new_kernel(T* output, T* final_result,
                                     float* experts_score, int* mid_row_indices,
                                     int* final_row_indices, int total_token,
                                     int k, int cols) {
+  extern __shared__ float shared_experts_score[];
+
   int64_t const original_row = blockIdx.x;
   int64_t const offset = original_row * cols;
   T* reduced_row_ptr = output + offset;
+  for (int k_idx = 0; k_idx < k; ++k_idx) {
+    int64_t origin_row_idx = original_row * k + k_idx;
+    shared_experts_score[k_idx] = experts_score[origin_row_idx];
+  }
+  __syncthreads();  // Synchronize to make sure all shared memory is loaded
   for (int tid = threadIdx.x; tid < cols; tid += blockDim.x) {
     float thread_output{0.f};
     for (int k_idx = 0; k_idx < k; ++k_idx) {
       int64_t origin_row_idx = original_row * k + k_idx;
       int64_t mid_row_idx = mid_row_indices[origin_row_idx];
       int64_t final_row_idx = final_row_indices[mid_row_idx];
-      float const row_scale = (float)experts_score[origin_row_idx];
+      float const row_scale = shared_experts_score[k_idx];
       float const row_value =
           static_cast<float>(final_result[final_row_idx * cols + tid]);
       thread_output =
@@ -365,9 +372,12 @@ void FinalizeMoeRoutingNewKernelLauncher(T* output, T* fianl_result,
                                          int total_token, int top_k,
                                          int hidden_size, cudaStream_t stream) {
   const int64_t block_num = total_token;
-  finalize_new_kernel<<<block_num, THREAD_PER_BLOCK, 0, stream>>>(
-      output, fianl_result, experts_score, mid_row_indices, final_row_indices,
-      total_token, top_k, hidden_size);
+  const int shared_memory_size =
+      top_k * sizeof(float);  // shared memory size in bytes
+  finalize_new_kernel<<<block_num, THREAD_PER_BLOCK, shared_memory_size,
+                        stream>>>(output, fianl_result, experts_score,
+                                  mid_row_indices, final_row_indices,
+                                  total_token, top_k, hidden_size);
 }
 template void FinalizeMoeRoutingNewKernelLauncher<float>(
     float* output, float* fianl_result, float* experts_score,
