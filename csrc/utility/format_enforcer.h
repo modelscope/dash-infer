@@ -59,7 +59,15 @@ class FormatEnforcer {
 
 #ifdef ENABLE_CUDA
   // 存储从GPU拷贝来的logits，类型未必是float，但用float占位可以避免整个类写成模板类
-  static std::vector<float> scores_vec_;
+  // 在GenerateOp::Reshape进行空间申请
+  static float* scores_buf_;
+
+  ~FormatEnforcer() {
+    if (scores_buf_ != nullptr) {
+      cudaFreeHost(scores_buf_);
+      scores_buf_ = nullptr;
+    }
+  }
 #endif
 
   // logits processor
@@ -71,11 +79,10 @@ class FormatEnforcer {
     T* scores = in_ptr;
 #ifdef ENABLE_CUDA
     if (ctx->GetDeviceType() == DeviceType::CUDA) {
-      scores_vec_.resize(model_vocab_size);
-      CopyData(scores_vec_.data(), DeviceType::CPU, (void*)(in_ptr),
+      CopyData((void*)scores_buf_, DeviceType::CPU, (void*)(in_ptr),
                DeviceType::CUDA, dtype_size * model_vocab_size, ctx);
       ctx->Synchronize();
-      scores = (T*)scores_vec_.data();
+      scores = (T*)scores_buf_;
     }
 #endif
     for (auto& token : allowed_tokens) {

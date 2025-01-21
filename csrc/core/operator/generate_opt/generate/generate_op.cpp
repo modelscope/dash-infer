@@ -80,7 +80,7 @@ AsStatus GenerateOp::FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-#endif
+#endif  // ENABLE_JSON_MODE
 
 GenerateOp::~GenerateOp() {
 #ifdef ENABLE_CUDA
@@ -297,6 +297,7 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
       vocab_size_ = in_shape[2];
       beam_size_ = 1;
       max_k_ = 0;
+      need_logprobs_ = false;
       std::vector<int> topk_vec(batch_size_);
       std::vector<float> topp_vec(batch_size_);
       std::vector<float> temperatures(batch_size_);
@@ -307,12 +308,32 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
         } else {
           gen_ctx = runtime_ctx->GetGenCtx(i);
         }
+        if (gen_ctx->gen_cfg.logprobs == true) {
+          need_logprobs_ = true;
+        }
         int real_k =
             gen_ctx->gen_cfg.top_k == 0 ? vocab_size_ : gen_ctx->gen_cfg.top_k;
         max_k_ = std::max(max_k_, real_k);
         topk_vec[i] = real_k;
         topp_vec[i] = gen_ctx->gen_cfg.top_p;
         temperatures[i] = gen_ctx->gen_cfg.temperature;
+#ifdef ENABLE_JSON_MODE
+#ifdef ENABLE_CUDA
+        if (gen_ctx->gen_cfg.response_format.count("type") &&
+            gen_ctx->gen_cfg.response_format["type"] == "json_object") {
+          if (backend == DeviceType::CUDA) {
+            const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
+            if (cuda_ctx->GetRank() == 0) {
+              if (gen_ctx->format_enforcer->scores_buf_ == nullptr) {
+                AS_CHECK_CUDA(cudaMallocHost(
+                    (void**)&gen_ctx->format_enforcer->scores_buf_,
+                    sizeof(float) * vocab_size_));
+              }
+            }
+          }
+        }
+#endif  // ENABLE_CUDA
+#endif  // ENABLE_JSON_MODE
       }
 
       // assert: 1 / min ~= 8.5e37 < max ~= 3.4e38
@@ -409,21 +430,6 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
                         max_batch * vocab_size_ * SizeofType(DataType::INT32);
       // LOG(INFO) << "total_ws_bytes = " << total_ws_bytes;
       // alloc for logprobs_
-      need_logprobs_ = false;
-      if (runtime_ctx->is_context) {
-        std::shared_ptr<GenerateContext> gen_ctx =
-            runtime_ctx->GetContextGenCtx();
-        if (gen_ctx->gen_cfg.logprobs == true) {
-          need_logprobs_ = true;
-        }
-      } else {
-        for (int i = 0; i < batch_size_; i++) {
-          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
-          if (gen_ctx->gen_cfg.logprobs == true) {
-            need_logprobs_ = true;
-          }
-        }
-      }
       if (need_logprobs_) {
         AS_CHECK_STATUS(logprobs_->SetShape(Shape{max_batch, vocab_size_}));
         AS_CHECK_STATUS(token_logprobs_->SetShape(Shape{max_batch, 1}));
@@ -554,7 +560,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
       }
     }
   }
-#endif
+#endif  // ENABLE_JSON_MODE
 
   // don't remove this sync, otherwise wrong token will generate.
   ctx_->Synchronize();
