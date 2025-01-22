@@ -536,13 +536,7 @@ void volta_hgemm_A16W8_f16_f16_128x128x32_mma884(
                                    last_wave_y_divmod);
   }
   // add bias and active func
-  {
-    const uint32_t BLOCK_SIZE = 128;
-    const uint32_t UNROLL = 4;
-    const dim3 grid((N + BLOCK_SIZE - 1) / BLOCK_SIZE, M);
-    add_bias<UNROLL, ActiveFunc>
-        <<<grid, BLOCK_SIZE, 0, stream>>>(bias, C, M, N, alpha);
-  }
+  { add_bias<half, ActiveFunc>(bias, C, M, N, alpha, stream); }
 }
 
 /*

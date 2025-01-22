@@ -22,9 +22,12 @@ inline int64_t perc_qgemm_a8w8_gpu_workspace_size(const int M, const int N,
                 sizeof(int32_t));  // For int32 immediate result of I8GEMM
 }
 
-struct SplitKParams {
-  bool EnableSplitK;
+struct alignas(16) SplitKParams {
   int SplitK;
+  int Mtile;
+  int Ntile;
+  bool EnableFuse;
+  bool EnableSplitK;
 };
 
 enum TileSchedule : uint8_t { M_BLK_CONTINUOUS = 0, N_BLK_CONTINUOUS = 1 };
@@ -73,11 +76,12 @@ struct SM8x_GEMM_A16W8_Params {
   int M;
   int N;
   int K;
+  int SplitK;
   int GroupCnt;
   int GroupSize;
-  FType* C_split_ptr;
-  int SplitK;
-  TileSchedule schedule_mn;
+  FType* C_split_ptr;       // for non-fused splitk reduce
+  float* C_tmp_ptr;         // for fused splitk reduce
+  uint32_t* red_count_ptr;  // for fused splitk reduce
 };
 
 
