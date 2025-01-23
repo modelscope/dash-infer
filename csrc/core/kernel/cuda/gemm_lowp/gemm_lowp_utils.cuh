@@ -603,28 +603,62 @@ __global__ void reduce_sum(const FT* data_in, const FT* bias, FT* data_out,
   }
 }
 
-template <uint32_t UNROLL, template <class> class ActiveFunc>
-__global__ void add_bias(const half* bias, half* data_out, const uint32_t M,
-                         const uint32_t N, const float alpha) {
-  const uint32_t base_idx =
-      blockIdx.x * blockDim.x * UNROLL + threadIdx.x * UNROLL;
-  const uint32_t m_idx = blockIdx.y;
+template <typename FType, int BLOCK, int UNROLL,
+          template <class> class ActiveFunc>
+__global__ void add_bias_kernel(const FType* bias, FType* data_out,
+                                const uint32_t M, const uint32_t N,
+                                const float alpha, const U32DivMod nDivMod,
+                                PackedEltwiseConfig packConfig) {
+  int64_t idx = static_cast<int64_t>(blockIdx.x) * BLOCK + threadIdx.x;
 
-  half* data_out_ptr = data_out + m_idx * N;
+  if (idx < packConfig.nPack) {
+    FType fval_reg[UNROLL];
+
+    *reinterpret_cast<uint4*>(fval_reg) =
+        *(reinterpret_cast<const uint4*>(data_out) + idx);
 
 #pragma unroll
-  for (uint32_t i = 0; i < UNROLL; ++i) {
-    int idx = base_idx + i;
-    if (idx < N) {
-      half bias_val = half(0);
+    for (int i = 0; i < UNROLL; ++i) {
+      fval_reg[i] = static_cast<FType>((float)fval_reg[i] * alpha);
       if (bias != nullptr) {
-        bias_val = bias[idx];
+        int n_idx = nDivMod.Mod(idx * UNROLL + i);
+        fval_reg[i] += bias[n_idx];
       }
-      // C = alpha * A * B
-      half val = static_cast<half>((float)data_out_ptr[idx] * alpha);
-      bias_val = __hadd(val, bias_val);
-      data_out_ptr[idx] = ActiveFunc<half>::Op(bias_val);
+      fval_reg[i] = ActiveFunc<FType>::Op(fval_reg[i]);
     }
+
+    stg128(*reinterpret_cast<uint32_t*>(fval_reg),
+           *reinterpret_cast<uint32_t*>(fval_reg + 2),
+           *reinterpret_cast<uint32_t*>(fval_reg + 4),
+           *reinterpret_cast<uint32_t*>(fval_reg + 6),
+           reinterpret_cast<uint4*>(data_out) + idx);
+  } else if (idx < packConfig.nThread) {
+    idx = idx - packConfig.nPack + packConfig.nPack * UNROLL;
+    FType fval = static_cast<FType>((float)data_out[idx] * alpha);
+    if (bias != nullptr) {
+      int n_idx = nDivMod.Mod(idx);
+      fval += bias[n_idx];
+    }
+    data_out[idx] = ActiveFunc<FType>::Op(fval);
+  }
+}
+
+template <typename FType, template <class> class ActiveFunc>
+void add_bias(const FType* bias, FType* data_out, const uint32_t M,
+              const uint32_t N, const float alpha, cudaStream_t stream) {
+  int packSize = GetPackSize(data_out);
+  const int BLOCK_SIZE = 128;
+  PackedEltwiseConfig packConfig(M * N, packSize, BLOCK_SIZE);
+  U32DivMod nDivMod(N);
+  switch (packSize) {
+    case 8:
+      add_bias_kernel<FType, BLOCK_SIZE, 8, ActiveFunc>
+          <<<packConfig.nBlock, BLOCK_SIZE, 0, stream>>>(
+              bias, data_out, M, N, alpha, nDivMod, packConfig);
+      break;
+    default:
+      LOG(ERROR) << "Now only support in/out ptr is 16-byte aligned";
+      break;
   }
 }
 
@@ -939,4 +973,66 @@ __device__ __forceinline__ T ReduceBlock(const T& val) {
   }
   __syncthreads();
   return val_reg;
+}
+
+/**
+ * @brief fast conversion uint8->f16 (with bias 128)
+ */
+template <typename T>
+__device__ __forceinline__ void cvt_8bx4_to_16bx4_bias128(const uint32_t& idata,
+                                                          T* fdata);
+
+template <>
+// fast convertion: 4xuint8 to 4xhalf, substracting bias = 128
+__device__ __forceinline__ void cvt_8bx4_to_16bx4_bias128<__half2>(
+    const uint32_t& idata, __half2* fdata) {
+  uint32_t i10, i32;
+  asm volatile(
+      "prmt.b32 %0, %2, 0x64, 0x4140;"
+      "prmt.b32 %1, %2, 0x64, 0x4342;"
+      : "=r"(i10), "=r"(i32)
+      : "r"(idata));
+
+  static constexpr uint32_t MAGIC_NUM = 0x64806480;
+  fdata[0] = __hsub2(reinterpret_cast<const __half2&>(i10),
+                     reinterpret_cast<const __half2&>(MAGIC_NUM));
+  fdata[1] = __hsub2(reinterpret_cast<const __half2&>(i32),
+                     reinterpret_cast<const __half2&>(MAGIC_NUM));
+}
+
+template <>
+// fast convertion: 4xuint8 to 4xbfloat16, substracting bias = 128
+__device__ __forceinline__ void cvt_8bx4_to_16bx4_bias128<__nv_bfloat162>(
+    const uint32_t& idata, __nv_bfloat162* fdata) {
+  float fp32_imd[4];
+  uint32_t* fp32_imd_casted = reinterpret_cast<uint32_t*>(fp32_imd);
+  asm volatile(
+      "prmt.b32 %0, %4, 0x4B000000, 0x7650;"
+      "prmt.b32 %1, %4, 0x4B000000, 0x7651;"
+      "prmt.b32 %2, %4, 0x4B000000, 0x7652;"
+      "prmt.b32 %3, %4, 0x4B000000, 0x7653;"
+      : "=r"(fp32_imd_casted[0]), "=r"(fp32_imd_casted[1]),
+        "=r"(fp32_imd_casted[2]), "=r"(fp32_imd_casted[3])
+      : "r"(idata));
+
+  fp32_imd[0] -= 8388736.f;
+  fp32_imd[1] -= 8388736.f;
+  fp32_imd[2] -= 8388736.f;
+  fp32_imd[3] -= 8388736.f;
+
+  uint32_t* bf16_res = reinterpret_cast<uint32_t*>(fdata);
+  asm volatile(
+      "prmt.b32 %0, %2, %3, 0x7632;"
+      "prmt.b32 %1, %4, %5, 0x7632;"
+      : "=r"(bf16_res[0]), "=r"(bf16_res[1])
+      : "r"(fp32_imd_casted[0]), "r"(fp32_imd_casted[1]),
+        "r"(fp32_imd_casted[2]), "r"(fp32_imd_casted[3]));
+}
+
+static __device__ nv_bfloat162 inline num2num2(const nv_bfloat16 x) {
+  return __bfloat162bfloat162(x);
+}
+
+static __device__ half2 inline num2num2(const half x) {
+  return __half2half2(x);
 }

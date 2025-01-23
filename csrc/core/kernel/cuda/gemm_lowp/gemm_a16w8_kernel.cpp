@@ -89,16 +89,48 @@ uint64_t GetWorkSpaceSize(const KernelType k_type, const uint32_t M,
                           sm_count, blocks_per_sm, splitk_params);
       return M * N * grid_z * sizeof(uint16_t);
     }
-    case KernelType::Ampere_A16W8_GEMM_PERC_64x128x32: {
-      // 4 thread block per sm, limited by register and shared memory
-      const int blocks_per_sm = 4;
-      const float SPLIT_THRESHOLD = 0.9;
-      const uint32_t K_low_bound = 256;
+    case KernelType::Ampere_A16W8_GEMM_PERC_MtilexNtilex32: {
+      // Determine the block size and splitk strategy
+      int m16_times = (M + 16 - 1) / 16;
+      int Mtile = m16_times <= 4 ? m16_times * 16 : 64;
+      int grid_x = (M + Mtile - 1) / Mtile;
+      int Ntile =
+          (float(grid_x * ((N + 127) / 128)) / sm_count > 10) || (Mtile < 64)
+              ? 256
+              : 128;
+      int grid_y = (N + Ntile - 1) / Ntile;
+      int grid_z;
 
-      int grid_z =
-          GetSplitKParams(M, N, K, 64, 128, 32, K_low_bound, SPLIT_THRESHOLD,
-                          sm_count, blocks_per_sm, splitk_params);
-      return M * N * grid_z * sizeof(uint16_t);
+      // split-K
+      const float SPLIT_THRESHOLD = 0.8;
+      int n_slice;
+      for (n_slice = 1; n_slice < K / 256; ++n_slice) {
+        int n_block = grid_x * grid_y * n_slice;
+        if (n_block >= sm_count * SPLIT_THRESHOLD &&
+            (n_block % sm_count == 0 || n_block % sm_count >= sm_count * 0.5)) {
+          break;
+        }
+      }
+
+      int k_slice =
+          (K / n_slice) % 32 == 0 ? K / n_slice : K / n_slice / 32 * 32 + 32;
+      grid_z = (K + k_slice - 1) / k_slice;
+      bool enable_fuse = float(grid_x * grid_y) / sm_count >= 0.5 ? 1 : 0;
+
+      size_t ws_size;
+      if (enable_fuse) {
+        ws_size = grid_x * Mtile * grid_y * Ntile * sizeof(float)  // For C_tmp
+                  + grid_x * grid_y * sizeof(uint32_t);  // For red_count
+      } else {
+        ws_size = grid_z * M * N * sizeof(__half);
+      }
+
+      splitk_params.Mtile = Mtile;
+      splitk_params.Ntile = Ntile;
+      splitk_params.SplitK = k_slice;
+      splitk_params.EnableFuse = enable_fuse;
+      splitk_params.EnableSplitK = true;
+      return ws_size;
     }
     case KernelType::A16W8_GEMM_SUBC_16816: {
       constexpr float SPLIT_THRESHOLD = 4;

@@ -146,11 +146,12 @@ void hgemm_a16w8_subc_32x128x32_16816_nn_splitk(
     const int sm_count, const float alpha, cudaStream_t stream);
 
 template <typename FType, typename QType, template <class> class ActiveFunc>
-void ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk(
+void ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk(
     const FType* A, const QType* B, const FType* B_scale, const FType* B_zero,
     const FType* bias, FType* C, const uint32_t M, const uint32_t N,
     const uint32_t K, void* workspace, const int sm_version,
-    const SplitKParams splitk_params, const float alpha, cudaStream_t stream);
+    const SplitKParams fused_gemm_params, const float alpha,
+    cudaStream_t stream);
 
 
 /**
@@ -169,11 +170,12 @@ enum KernelType {
                                             // Non-SplitK
   Volta_A16W8_GEMM_SUBC_128x128x32_SplitK,  // SubC : TensorCore 128x128x32_884
                                             // SplitK
-  Volta_A16W8_GEMM_SUBC_32x128x32,   // SubC : Tensor Core 32x128x32_884 SplitK
-  Volta_A16W8_GEMM_PERC_32x128x32,   // PerC : Tensor Core 32x128x32_884 SplitK
-  A16W8_GEMM_SUBC,                   // SubC : TensorCore 128x128x32_1688
-  A16W8_GEMM_SUBC_16816,             // SubC : TensorCore 32x128x32_16816
-  Ampere_A16W8_GEMM_PERC_64x128x32,  // PerC : TensorCore 64x128x32_16816
+  Volta_A16W8_GEMM_SUBC_32x128x32,  // SubC : Tensor Core 32x128x32_884 SplitK
+  Volta_A16W8_GEMM_PERC_32x128x32,  // PerC : Tensor Core 32x128x32_884 SplitK
+  A16W8_GEMM_SUBC,                  // SubC : TensorCore 128x128x32_1688
+  A16W8_GEMM_SUBC_16816,            // SubC : TensorCore 32x128x32_16816
+  Ampere_A16W8_GEMM_PERC_MtilexNtilex32,      // PerC : TensorCore
+                                              // MtilexNtilex32_16816
 };
 
 /*
@@ -242,10 +244,10 @@ struct SelectKernel<half, QT> {
                         const int sm_version, SplitKParams& splitk_params) {
     // PerChannel
     if (GroupSize == -1) {
-      if (M <= 64) {
+      if (M <= 1024) {
         if (sm_version >= 0x0800) {
           if (K % 16 == 0 && N % 8 == 0) {
-            return KernelType::Ampere_A16W8_GEMM_PERC_64x128x32;
+            return KernelType::Ampere_A16W8_GEMM_PERC_MtilexNtilex32;
           }
           return KernelType::UNDEFINE;
         }
@@ -307,10 +309,10 @@ struct SelectKernel<hie::bfloat16, QT> {
                         const int sm_version, SplitKParams& splitk_params) {
     if (GroupSize == -1) {
       // TODO: PerChannel
-      if (M <= 64) {
+      if (M <= 1024) {
         if (sm_version >= 0x0800) {
           if (K % 16 == 0 && N % 8 == 0) {
-            return KernelType::Ampere_A16W8_GEMM_PERC_64x128x32;
+            return KernelType::Ampere_A16W8_GEMM_PERC_MtilexNtilex32;
           }
         }
       }
@@ -427,8 +429,8 @@ struct KernelLaunch<half, QT, ActiveFunc> {
             workspace, sm_count, alpha, stream);
         break;
       }
-      case KernelType::Ampere_A16W8_GEMM_PERC_64x128x32: {
-        ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+      case KernelType::Ampere_A16W8_GEMM_PERC_MtilexNtilex32: {
+        ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
             FT, QT, ActiveFunc>(lhs, rhs, scales, zeros, bias, data_out, M, N,
                                 K, workspace, sm_version, splitk_params, alpha,
                                 stream);
@@ -465,8 +467,8 @@ struct KernelLaunch<hie::bfloat16, QT, ActiveFunc> {
             workspace, sm_count, alpha, stream);
         break;
       }
-      case KernelType::Ampere_A16W8_GEMM_PERC_64x128x32: {
-        ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+      case KernelType::Ampere_A16W8_GEMM_PERC_MtilexNtilex32: {
+        ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
             FT, QT, ActiveFunc>(lhs, rhs, scales, zeros, bias, data_out, M, N,
                                 K, workspace, sm_version, splitk_params, alpha,
                                 stream);

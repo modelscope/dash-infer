@@ -7,6 +7,7 @@
 
 #include "gemm_a16w8_kernel.h"
 #include "gemm_lowp_utils.cuh"
+#include "utility/check_cuda.h"
 
 namespace allspark {
 namespace cuda {
@@ -281,6 +282,8 @@ void dequantize_rhs_a16w8(const QT* qdata, const FT* scales, const FT* zeros,
 // restore from N32K16 order to original N-major order
 // K % 16 == 0, N % 8 == 0
 // each block process 64(k) * 32(n) result elements
+// Note: for the ampere architecture, restore B to the int8 type range
+// by substracting 128
 template <typename FT, typename QT>
 __global__ void restore_N32_K16_dequantize_rhs_a16w8_perc_kernel(
     const QT* qdata, const FT* scales, const FT* zeros, FT* fdata,
@@ -309,13 +312,16 @@ __global__ void restore_N32_K16_dequantize_rhs_a16w8_perc_kernel(
 
   const int sts_base_offset =
       (warp_id * 16 + (lane_id % 4) * 2) * 32 + lane_id / 4;
+
 #pragma unroll
   for (int ni = 0; ni < 4; ++ni) {
+    cvt_8bx4_to_16bx4_bias128(
+        *reinterpret_cast<uint32_t*>(&qval_reg[ni * 4]),
+        reinterpret_cast<typename HalfType<FT>::T2*>(&(fval_reg[ni * 4])));
 #pragma unroll
     for (int ki = 0; ki < 4; ++ki) {
-      QT val = qval_reg[ni * 4 + ki];
       fval_reg[ni * 4 + ki] =
-          (static_cast<FT>(val) - zero_reg[ni]) * scale_reg[ni];
+          (fval_reg[ni * 4 + ki] - zero_reg[ni]) * scale_reg[ni];
       int sts_offset = sts_base_offset + ((ki / 2) * 8 + (ki % 2)) * 32 +
                        ((ni + lane_id % 4) % 4) * 8;
       smem[sts_offset] = fval_reg[ni * 4 + ki];
@@ -1031,18 +1037,12 @@ void hgemm_A16W8_perchannel_128x128x32_hmma1688_ldg8(
         <<<grid, 128, 0, stream>>>(A, B, B_scale, B_zero, C, M, N, K,
                                    A_ldg_step, B_ldg_step);
   }
-  {
-    const uint32_t BLOCK_SIZE = 128;
-    const uint32_t UNROLL = 4;
-    const dim3 grid((N + BLOCK_SIZE - 1) / BLOCK_SIZE, M);
-    add_bias<UNROLL, ActiveFunc>
-        <<<grid, BLOCK_SIZE, 0, stream>>>(bias, C, M, N, alpha);
-  }
+  { add_bias<half, ActiveFunc>(bias, C, M, N, alpha, stream); }
 }
 
 /*
  * GemmTile manage data movement from Global Memory to Shared Memory
- * FType is half ot bfloat16, QType is int8
+ * FType is half ot bfloat16, QType is uint8
  * requiring N % 8 == 0， K % 16 == 0 by loading uint
  * BN is obtained by padding the original N to a multiple of 32
  * weight B is rearranged as N32K16 order,
@@ -1050,15 +1050,20 @@ void hgemm_A16W8_perchannel_128x128x32_hmma1688_ldg8(
  * in order to put data loaded by the same thread of 32x16 data block together
  * continuously (see
  * https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#matrix-fragments-for-mma-m16n8k16-with-floating-point-type)
+ *
+ * Mtile = 16 or 32 or 48 or 64, Ntile = 128 or 256
  */
-template <typename FType, typename QType, int NStage, int BLOCK_SIZE>
-struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
+template <typename FType, typename QType, int Mtile, int Ntile, int NStage,
+          int BLOCK>
+struct GmemTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK {
   // element num loaded by a LDG inst.
-  const int LDG_ELEMENT_CNT_A = 8;
-  const int LDG_ELEMENT_CNT_B = 16;
-  const int WARP_SIZE = 32;
+  static constexpr int LDG_ELEMENT_CNT_A = 8;
+  static constexpr int LDG_ELEMENT_CNT_B = 16;
+  static constexpr int WARP_SIZE = 32;
+  static constexpr int M_SIZE_ONE_LOAD = (BLOCK * LDG_ELEMENT_CNT_A) / 32;
+  static constexpr int N_SIZE_ONE_LOAD = (BLOCK * LDG_ELEMENT_CNT_B) / 32;
 
-  __device__ GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK(
+  __device__ GmemTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK(
       const SM8x_GEMM_A16W8_Params<FType, QType>& k_params,
       const uint32_t& A_smem_addr, const uint32_t& BQ_smem_addr,
       const uint32_t& A_stage_stride, const uint32_t& BQ_stage_stride)
@@ -1067,25 +1072,25 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
         BQ_smem_base_addr(BQ_smem_addr),
         A_smem_stage_stride(A_stage_stride),
         BQ_smem_stage_stride(BQ_stage_stride) {
-    this_block_A_base_ptr =
-        params.A_ptr + blockIdx.x * 64 * params.K + blockIdx.z * params.SplitK;
+    this_block_A_base_ptr = params.A_ptr + blockIdx.x * Mtile * params.K +
+                            blockIdx.z * params.SplitK;
     // here B is rearranged as N32K16 order, i.e. 4 continuous N-direction
     // 8(N)x16(K) size data blocks are packed together
-    this_block_B_base_ptr = params.B_ptr + blockIdx.y * 128 * params.K +
+    this_block_B_base_ptr = params.B_ptr + blockIdx.y * Ntile * params.K +
                             blockIdx.z * params.SplitK * 4;
 
     const int lane_id = threadIdx.x % WARP_SIZE;
 
-    // For matrix A, a block load/store 64(row) x 32(col) elements in 2 iter
-    // and a block load/store 32(row) * 32(col) elements per iter
-    // 8x4 warp load/store 8(row) x 32(col) elements per iter
+    // For matrix A, a block load/store Mtile(row) x 32(col) elements in (Mtile
+    // / 32) iter and a block load/store 32(row) * 32(col) elements per iter 8x4
+    // warp load/store 8(row) x 32(col) elements per iter
     const int Aldg_row_base_idx = threadIdx.x / 4;
     Aldg_col_idx = (threadIdx.x % 4) * LDG_ELEMENT_CNT_A;
     const int Aldg_base_offset = Aldg_row_base_idx * params.K + Aldg_col_idx;
 
-    // For matrix B, a block load/store  elements of 32(row) x 128(col) of
-    // N32K16_n4k2 packing in 2 iter and a block load/store 16(row) * 128(col)
-    // elements per iter 4x8 warp load/store 16(row) * 128(col) per iter
+    // For matrix B, a block load/store elements of (Ntile / 4) row x 128 col of
+    // N32K16_n4k2 packing in (Ntile / 64) iter and a block load/store 16(row) *
+    // 128(col) elements per iter 4x8 warp load/store 4(row) * 128(col) per iter
     Bldg_col_idx = (threadIdx.x % 8) * LDG_ELEMENT_CNT_B;
     const int Bldg_row_base_idx = threadIdx.x / 8;
     const int Bldg_base_offset =
@@ -1103,13 +1108,13 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
         ((threadIdx.x % 8) ^ (((threadIdx.x / 8) % 2) * 4)) * LDG_ELEMENT_CNT_B;
 
     A_smem_base_addr += sts_a_base_offset * sizeof(FType);
-    BQ_smem_base_addr += sts_bq_base_offset * sizeof(int8_t);
+    BQ_smem_base_addr += sts_bq_base_offset * sizeof(uint8_t);
 
     A_ldg_guard = 0;
     B_ldg_guard = 0;
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      int m_idx = blockIdx.x * 64 + Aldg_row_base_idx + i * 32;
+    for (int i = 0; i < (Mtile + M_SIZE_ONE_LOAD - 1) / M_SIZE_ONE_LOAD; ++i) {
+      int m_idx = blockIdx.x * Mtile + Aldg_row_base_idx + i * M_SIZE_ONE_LOAD;
       if (m_idx < params.M) {
         A_ldg_guard |= (1u << i);
       }
@@ -1117,8 +1122,9 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
 
     const int N_padded = (params.N + 31) / 32 * 32;
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      int n_idx = blockIdx.y * 128 + (Bldg_row_base_idx / 8) * 32 + i * 64;
+    for (int i = 0; i < (Ntile + N_SIZE_ONE_LOAD - 1) / N_SIZE_ONE_LOAD; ++i) {
+      int n_idx = blockIdx.y * Ntile + (Bldg_row_base_idx / 8) * 32 +
+                  i * N_SIZE_ONE_LOAD;
       if (n_idx < N_padded) {
         B_ldg_guard |= (1u << i);
       }
@@ -1131,19 +1137,21 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
     // load A
     const int A_src_size = Aldg_col_idx < first_k_tile ? 16 : 0;
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      cp_async<16>(A_smem_base_addr + (i * 32 * 32) * sizeof(FType),
-                   this_block_A_base_ptr + i * 32 * params.K, A_src_size,
-                   (A_ldg_guard & (1u << i)) != 0);
+    for (int i = 0; i < (Mtile + M_SIZE_ONE_LOAD - 1) / M_SIZE_ONE_LOAD; ++i) {
+      cp_async<16>(
+          A_smem_base_addr + (i * M_SIZE_ONE_LOAD * 32) * sizeof(FType),
+          this_block_A_base_ptr + i * M_SIZE_ONE_LOAD * params.K, A_src_size,
+          (A_ldg_guard & (1u << i)) != 0);
     }
 
     // load B
     const int B_src_size = (Bldg_col_idx / 4) < first_k_tile ? 16 : 0;
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      cp_async<16>(BQ_smem_base_addr + (i * 64 * 32) * sizeof(int8_t),
-                   this_block_B_base_ptr + i * 64 * params.K, B_src_size,
-                   (B_ldg_guard & (1u << i)) != 0);
+    for (int i = 0; i < (Ntile + N_SIZE_ONE_LOAD - 1) / N_SIZE_ONE_LOAD; ++i) {
+      cp_async<16>(
+          BQ_smem_base_addr + (i * N_SIZE_ONE_LOAD * 32) * sizeof(uint8_t),
+          this_block_B_base_ptr + i * N_SIZE_ONE_LOAD * params.K, B_src_size,
+          (B_ldg_guard & (1u << i)) != 0);
     }
 
     cp_async_commit_group();
@@ -1154,19 +1162,21 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
     for (int stage_idx = 1; stage_idx < NStage - 1; ++stage_idx) {
       if (stage_idx < k_tiles) {
 #pragma unroll
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < (Mtile + M_SIZE_ONE_LOAD - 1) / M_SIZE_ONE_LOAD;
+             ++i) {
           cp_async<16>(A_smem_base_addr + stage_idx * A_smem_stage_stride +
-                           (i * 32 * 32) * sizeof(FType),
-                       this_block_A_base_ptr + i * 32 * params.K, 16,
-                       (A_ldg_guard & (1u << i)) != 0);
+                           (i * M_SIZE_ONE_LOAD * 32) * sizeof(FType),
+                       this_block_A_base_ptr + i * M_SIZE_ONE_LOAD * params.K,
+                       16, (A_ldg_guard & (1u << i)) != 0);
         }
 
 #pragma unroll
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < (Ntile + N_SIZE_ONE_LOAD - 1) / N_SIZE_ONE_LOAD;
+             ++i) {
           cp_async<16>(BQ_smem_base_addr + stage_idx * BQ_smem_stage_stride +
-                           (i * 64 * 32) * sizeof(int8_t),
-                       this_block_B_base_ptr + i * 64 * params.K, 16,
-                       (B_ldg_guard & (1u << i)) != 0);
+                           (i * N_SIZE_ONE_LOAD * 32) * sizeof(uint8_t),
+                       this_block_B_base_ptr + i * N_SIZE_ONE_LOAD * params.K,
+                       16, (B_ldg_guard & (1u << i)) != 0);
         }
 
         this_block_A_base_ptr += 32;
@@ -1180,19 +1190,19 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
     const int a_stage_offset = sts_stage_idx * A_smem_stage_stride;
     const int bq_stage_offset = sts_stage_idx * BQ_smem_stage_stride;
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      cp_async<16>(
-          A_smem_base_addr + a_stage_offset + (i * 32 * 32) * sizeof(FType),
-          this_block_A_base_ptr + i * 32 * params.K, 16,
-          (A_ldg_guard & (1u << i)) != 0);
+    for (int i = 0; i < (Mtile + M_SIZE_ONE_LOAD - 1) / M_SIZE_ONE_LOAD; ++i) {
+      cp_async<16>(A_smem_base_addr + a_stage_offset +
+                       (i * M_SIZE_ONE_LOAD * 32) * sizeof(FType),
+                   this_block_A_base_ptr + i * M_SIZE_ONE_LOAD * params.K, 16,
+                   (A_ldg_guard & (1u << i)) != 0);
     }
 
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      cp_async<16>(
-          BQ_smem_base_addr + bq_stage_offset + (i * 64 * 32) * sizeof(int8_t),
-          this_block_B_base_ptr + i * 64 * params.K, 16,
-          (B_ldg_guard & (1u << i)) != 0);
+    for (int i = 0; i < (Ntile + N_SIZE_ONE_LOAD - 1) / N_SIZE_ONE_LOAD; ++i) {
+      cp_async<16>(BQ_smem_base_addr + bq_stage_offset +
+                       (i * N_SIZE_ONE_LOAD * 32) * sizeof(uint8_t),
+                   this_block_B_base_ptr + i * N_SIZE_ONE_LOAD * params.K, 16,
+                   (B_ldg_guard & (1u << i)) != 0);
     }
 
     cp_async_commit_group();
@@ -1216,12 +1226,20 @@ struct GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
 };
 
 /*
- * warp_tile : m64n32k32
+ * Mtile = 16 or 32 or 48 or 64, Ntile = 128 or 256
  * N % 8 == 0
  */
-template <typename FType, typename QType>
-struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
-  __device__ ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK(
+template <typename FType, typename QType, int Mtile, int Ntile, int BLOCK,
+          bool EnableFuse, bool has_zp>
+struct ComputeTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK {
+  static constexpr int WARP_SIZE = 32;
+  static constexpr int WARP_CNT = BLOCK / WARP_SIZE;
+  static constexpr int WARP_NTILE = Ntile / WARP_CNT;
+  static constexpr int WARP_NITER = WARP_NTILE / 8;  // hmma16816
+  static_assert(WARP_NTILE == 32 or WARP_NTILE == 64,
+                "now only support WARP_NTILE = 32 or 64!");
+
+  __device__ ComputeTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK(
       const SM8x_GEMM_A16W8_Params<FType, QType>& k_params,
       const uint32_t& A_smem_addr, const uint32_t& BQ_smem_addr,
       const uint32_t& A_stage_stride, const uint32_t& BQ_stage_stride)
@@ -1230,8 +1248,7 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
         BQ_smem_base_addr(BQ_smem_addr),
         A_smem_stage_stride(A_stage_stride),
         BQ_smem_stage_stride(BQ_stage_stride) {
-    const int WARP_SIZE = 32;
-    const int warp_id = threadIdx.x / WARP_SIZE;
+    warp_id = threadIdx.x / WARP_SIZE;
     lane_id = threadIdx.x % WARP_SIZE;
 
     load_a_base_offset[0] =
@@ -1241,34 +1258,41 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
         (lane_id % 16) * 32 +
         ((lane_id / 16 + 2) ^ (lane_id % 4) ^ ((lane_id / 4) % 2)) * 8;
 
-    load_b_offset[0] = (lane_id / 4 + warp_id * 8) * 32 * 4 +
-                       (lane_id % 4) * 16 + ((lane_id / 4) % 2) * 16 * 4;
-    load_b_offset[1] = (lane_id / 4 + warp_id * 8) * 32 * 4 +
-                       (lane_id % 4) * 16 + (((lane_id / 4) % 2) ^ 1) * 16 * 4;
-    const int C_sts_size = 64 * 32;
-    sts_c_base_offset =
-        warp_id * C_sts_size + (lane_id / 4) * 32 + (lane_id % 4) * 2;
-    lds_c_base_offset = warp_id * C_sts_size + (lane_id / 4) * 32 +
-                        ((lane_id % 4 + lane_id / 8) % 4) * 8;
+    load_b_base_offset[0] =
+        (lane_id / 4 + warp_id * (WARP_NTILE / 4)) * 32 * 4 +
+        (lane_id % 4) * 16 + ((lane_id / 4) % 2) * 16 * 4;
+    load_b_base_offset[1] =
+        (lane_id / 4 + warp_id * (WARP_NTILE / 4)) * 32 * 4 +
+        (lane_id % 4) * 16 + (((lane_id / 4) % 2) ^ 1) * 16 * 4;
 
-    this_block_C_base_ptr = params.C_split_ptr +
-                            blockIdx.z * params.M * params.N +
-                            blockIdx.x * 64 * params.N + blockIdx.y * 128;
-    store_c_row_base_idx = lane_id / 4;
-    store_c_col_idx = warp_id * 32 + (lane_id % 4) * 8;
+    sts_c_base_offset = warp_id * Mtile * WARP_NTILE +
+                        (lane_id / 4) * WARP_NTILE + (lane_id % 4) * 2;
+
+    if (EnableFuse) {
+      this_block_C_base_ptr =
+          params.C_ptr + blockIdx.x * Mtile * params.N + blockIdx.y * Ntile;
+    } else {
+      this_block_C_base_ptr =
+          params.C_split_ptr + blockIdx.z * params.M * params.N +
+          blockIdx.x * Mtile * params.N + blockIdx.y * Ntile;
+    }
+    int store_thds_in_row = WARP_NTILE / 8;
+    store_c_row_base_idx = lane_id / store_thds_in_row;
+    store_c_col_idx = warp_id * WARP_NTILE + (lane_id % store_thds_in_row) * 8;
     store_c_base_offset = store_c_row_base_idx * params.N + store_c_col_idx;
 
 #pragma unroll
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < Mtile / 16; ++i) {
 #pragma unroll
-      for (int j = 0; j < 4; ++j) {
+      for (int j = 0; j < WARP_NITER; ++j) {
 #pragma unroll
         for (int k = 0; k < 4; ++k) {
           C_frag[i][j][k] = 0.f;
         }
       }
     }
-    params_n_idx = blockIdx.y * 128 + (threadIdx.x / 4) * 4;
+    params_n_idx =
+        blockIdx.y * Ntile + warp_id * WARP_NTILE + (lane_id / 4) * 4;
   }
 
   __device__ void lds(const int& smem_stage_idx, const int& reg_buf_idx,
@@ -1279,77 +1303,74 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
         BQ_smem_base_addr + BQ_smem_stage_stride * smem_stage_idx;
 
 #pragma unroll
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < Mtile / 16; ++i) {
       ldsm_4(A_frag[reg_buf_idx][i][0], A_frag[reg_buf_idx][i][1],
              A_frag[reg_buf_idx][i][2], A_frag[reg_buf_idx][i][3],
              A_smem_addr + (load_a_base_offset[k_phase_idx] + i * 16 * 32) *
                                sizeof(FType));
     }
-
-    lds128(BQ_frag[reg_buf_idx][0], BQ_frag[reg_buf_idx][1],
-           BQ_frag[reg_buf_idx][2], BQ_frag[reg_buf_idx][3],
-           B_smem_addr + load_b_offset[k_phase_idx] * sizeof(int8_t));
+#pragma unroll
+    for (int i = 0; i < WARP_NTILE / 32; ++i) {
+      lds128(BQ_frag[reg_buf_idx][4 * i + 0], BQ_frag[reg_buf_idx][4 * i + 1],
+             BQ_frag[reg_buf_idx][4 * i + 2], BQ_frag[reg_buf_idx][4 * i + 3],
+             B_smem_addr + (load_b_base_offset[k_phase_idx] + i * 32 * 32) *
+                               sizeof(uint8_t));
+    }
 
 // dequant B
 #pragma unroll
-    for (int i = 0; i < 2; ++i) {
-      BF_frag[reg_buf_idx][2 * i][0].x =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i].x)) -
-           B_zero[i].x) *
-          B_scale[i].x;
-      BF_frag[reg_buf_idx][2 * i][0].y =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i].y)) -
-           B_zero[i].x) *
-          B_scale[i].x;
-      BF_frag[reg_buf_idx][2 * i][1].x =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i].z)) -
-           B_zero[i].x) *
-          B_scale[i].x;
-      BF_frag[reg_buf_idx][2 * i][1].y =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i].w)) -
-           B_zero[i].x) *
-          B_scale[i].x;
-      BF_frag[reg_buf_idx][2 * i + 1][0].x =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i + 1].x)) -
-           B_zero[i].y) *
-          B_scale[i].y;
-      BF_frag[reg_buf_idx][2 * i + 1][0].y =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i + 1].y)) -
-           B_zero[i].y) *
-          B_scale[i].y;
-      BF_frag[reg_buf_idx][2 * i + 1][1].x =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i + 1].z)) -
-           B_zero[i].y) *
-          B_scale[i].y;
-      BF_frag[reg_buf_idx][2 * i + 1][1].y =
-          (static_cast<typename HalfType<FType>::T1>(
-               static_cast<float>(BQ_frag[reg_buf_idx][2 * i + 1].w)) -
-           B_zero[i].y) *
-          B_scale[i].y;
+    for (int i = 0; i < WARP_NITER / 2; ++i) {
+      cvt_8bx4_to_16bx4_bias128(BQ_frag[reg_buf_idx][2 * i],
+                                BF_frag[reg_buf_idx][2 * i]);
+      if (has_zp) {
+        BF_frag[reg_buf_idx][2 * i][0] =
+            __hsub2(BF_frag[reg_buf_idx][2 * i][0], num2num2(B_zero[i].x));
+        BF_frag[reg_buf_idx][2 * i][1] =
+            __hsub2(BF_frag[reg_buf_idx][2 * i][1], num2num2(B_zero[i].x));
+      }
+
+      BF_frag[reg_buf_idx][2 * i][0] =
+          __hmul2(BF_frag[reg_buf_idx][2 * i][0], num2num2(B_scale[i].x));
+      BF_frag[reg_buf_idx][2 * i][1] =
+          __hmul2(BF_frag[reg_buf_idx][2 * i][1], num2num2(B_scale[i].x));
+
+      cvt_8bx4_to_16bx4_bias128(BQ_frag[reg_buf_idx][2 * i + 1],
+                                BF_frag[reg_buf_idx][2 * i + 1]);
+      if (has_zp) {
+        BF_frag[reg_buf_idx][2 * i + 1][0] =
+            __hsub2(BF_frag[reg_buf_idx][2 * i + 1][0], num2num2(B_zero[i].y));
+        BF_frag[reg_buf_idx][2 * i + 1][1] =
+            __hsub2(BF_frag[reg_buf_idx][2 * i + 1][1], num2num2(B_zero[i].y));
+      }
+
+      BF_frag[reg_buf_idx][2 * i + 1][0] =
+          __hmul2(BF_frag[reg_buf_idx][2 * i + 1][0], num2num2(B_scale[i].y));
+      BF_frag[reg_buf_idx][2 * i + 1][1] =
+          __hmul2(BF_frag[reg_buf_idx][2 * i + 1][1], num2num2(B_scale[i].y));
     }
   }
 
   __device__ void ldg_params() {
     const int N_padded = (params.N + 31) / 32 * 32;
     // load B scale and zero_point
-    ldg64_ca(B_scale[0], B_scale[1], params.B_scale_ptr + params_n_idx,
-             params_n_idx < N_padded);
-    ldg64_ca(B_zero[0], B_zero[1], params.B_zero_ptr + params_n_idx,
-             params_n_idx < N_padded);
+#pragma unroll
+    for (int i = 0; i < WARP_NTILE / 32; ++i) {
+      ldg64_ca(B_scale[2 * i + 0], B_scale[2 * i + 1],
+               params.B_scale_ptr + params_n_idx + i * 32,
+               (params_n_idx + i * 32) < N_padded);
+      if (has_zp) {
+        ldg64_ca(B_zero[2 * i + 0], B_zero[2 * i + 1],
+                 params.B_zero_ptr + params_n_idx + i * 32,
+                 (params_n_idx + i * 32) < N_padded);
+      }
+    }
   }
 
   __device__ void mma(const int& reg_buf_idx) {
 #pragma unroll
-    for (int m_idx = 0; m_idx < 4; ++m_idx) {
+    for (int m_idx = 0; m_idx < Mtile / 16; ++m_idx) {
 #pragma unroll
-      for (int n_idx = 0; n_idx < 4; ++n_idx) {
+      for (int n_idx = 0; n_idx < WARP_NITER; ++n_idx) {
         hmma16816_f32<FType>(
             C_frag[m_idx][n_idx], A_frag[reg_buf_idx][m_idx],
             reinterpret_cast<uint32_t(&)[2]>(BF_frag[reg_buf_idx][n_idx]));
@@ -1357,16 +1378,89 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
     }
   }
 
+  __device__ void fused_splitk_reduce() {
+    // need splitk-reduce if enable splitk
+    if (gridDim.z > 1) {
+      int blk_red_idx = blockIdx.x * gridDim.y + blockIdx.y;
+      // Wait for all previous blocks in the splitk direction to accumulate the
+      // results into C_tmp
+      if (threadIdx.x == 0) {
+        uint32_t* red_count_ptr = params.red_count_ptr + blk_red_idx;
+        uint32_t count;
+        do {
+          // make sure the ld.cg inside the do-wile loop
+          __threadfence_block();
+          asm volatile("ld.global.cg.b32 %0, [%1];"
+                       : "=r"(count)
+                       : "l"(red_count_ptr));
+        } while (count != blockIdx.z);
+      }
+      __syncthreads();
+
+      int C_tmp_base_offset = blk_red_idx * Mtile * Ntile + threadIdx.x * 4;
+      if (blockIdx.z != 0) {
+        // expecting that temporary register here reuses the previous A&B frag
+        // register
+        float temp_frag[Mtile / 16][WARP_NITER][4];
+#pragma unroll
+        for (int m_idx = 0; m_idx < Mtile / 16; ++m_idx) {
+#pragma unroll
+          for (int n_idx = 0; n_idx < WARP_NITER; ++n_idx) {
+            int offset =
+                C_tmp_base_offset + (m_idx * WARP_NITER + n_idx) * BLOCK * 4;
+            *reinterpret_cast<int4*>(temp_frag[m_idx][n_idx]) =
+                *reinterpret_cast<int4*>(params.C_tmp_ptr + offset);
+          }
+        }
+#pragma unroll
+        for (int m_idx = 0; m_idx < Mtile / 16; ++m_idx) {
+#pragma unroll
+          for (int n_idx = 0; n_idx < WARP_NITER; ++n_idx) {
+#pragma unroll
+            for (int idx = 0; idx < 4; ++idx) {
+              C_frag[m_idx][n_idx][idx] += temp_frag[m_idx][n_idx][idx];
+            }
+          }
+        }
+      }
+
+      // first splitk - 1 blocks need to write partial results into C_tmp
+      if (blockIdx.z != gridDim.z - 1) {
+#pragma unroll
+        for (int m_idx = 0; m_idx < Mtile / 16; ++m_idx) {
+#pragma unroll
+          for (int n_idx = 0; n_idx < WARP_NITER; ++n_idx) {
+            int offset =
+                C_tmp_base_offset + (m_idx * WARP_NITER + n_idx) * BLOCK * 4;
+            asm volatile(
+                "{st.global.cg.v4.b32 [%0], {%1, %2, %3, %4};}\n"
+                :
+                : "l"(params.C_tmp_ptr + offset), "f"(C_frag[m_idx][n_idx][0]),
+                  "f"(C_frag[m_idx][n_idx][1]), "f"(C_frag[m_idx][n_idx][2]),
+                  "f"(C_frag[m_idx][n_idx][3]));
+          }
+        }
+        __threadfence();
+        __syncthreads();
+        if (threadIdx.x == 0) {
+          uint32_t* red_count_ptr = params.red_count_ptr + blk_red_idx;
+          atomicInc(red_count_ptr, gridDim.z);
+        }
+      }
+    }
+  }
+
   __device__ void stg(char* smem) {
+    if (EnableFuse) {
+      if (blockIdx.z != gridDim.z - 1) return;
+    }
     uint32_t* C_sts_ptr =
         reinterpret_cast<uint32_t*>(smem + sts_c_base_offset * sizeof(FType));
-    uint4* C_lds_ptr =
-        reinterpret_cast<uint4*>(smem + lds_c_base_offset * sizeof(FType));
-// C_tile sts
+    // C_tile sts
 #pragma unroll
-    for (int m_idx = 0; m_idx < 4; ++m_idx) {
+    for (int m_idx = 0; m_idx < Mtile / 16; ++m_idx) {
 #pragma unroll
-      for (int n_idx = 0; n_idx < 4; ++n_idx) {
+      for (int n_idx = 0; n_idx < WARP_NITER; ++n_idx) {
 #pragma unroll
         for (int k_idx = 0; k_idx < 2; ++k_idx) {
           FType low16 = static_cast<FType>(C_frag[m_idx][n_idx][k_idx * 2]);
@@ -1374,8 +1468,11 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
               static_cast<FType>(C_frag[m_idx][n_idx][k_idx * 2 + 1]);
           uint32_t tmp = (reinterpret_cast<uint32_t&>(low16) & 0xffff) |
                          (reinterpret_cast<uint32_t&>(high16) << 16);
-          C_sts_ptr[m_idx * 16 * 16 + (((lane_id / 8) + n_idx) % 4) * 4 +
-                    k_idx * 8 * 16] = tmp;
+          int sts_offset =
+              m_idx * 16 * (WARP_NTILE / 2) +
+              (((lane_id / (32 / WARP_NITER)) + n_idx) % WARP_NITER) * (8 / 2) +
+              k_idx * 8 * (WARP_NTILE / 2);
+          C_sts_ptr[sts_offset] = tmp;
         }
       }
     }
@@ -1384,23 +1481,42 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
 
     FType* C_base_ptr = this_block_C_base_ptr + store_c_base_offset;
     // C_tile lds and stg
-    int m_base_idx = store_c_row_base_idx + blockIdx.x * 64;
-    bool n_guard = (store_c_col_idx + blockIdx.y * 128) < params.N;
+    int m_base_idx = store_c_row_base_idx + blockIdx.x * Mtile;
+    bool n_guard = (store_c_col_idx + blockIdx.y * Ntile) < params.N;
+    if (WARP_NTILE == 32) {
+      int lds_c_base_offset = warp_id * Mtile * WARP_NTILE +
+                              (lane_id / 4) * WARP_NTILE +
+                              ((lane_id % 4 + lane_id / 8) % 4) * 8;
+      uint4* C_lds_ptr =
+          reinterpret_cast<uint4*>(smem + lds_c_base_offset * sizeof(FType));
 #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-      uint4 stg_reg = C_lds_ptr[i * 8 * 4];
-      stg128(stg_reg.x, stg_reg.y, stg_reg.z, stg_reg.w,
-             C_base_ptr + i * 8 * params.N,
-             (m_base_idx + i * 8) < params.M && n_guard);
+      for (int i = 0; i < (Mtile / 16) * (WARP_NITER / 2); ++i) {
+        uint4 stg_reg = C_lds_ptr[i * 8 * 4];
+        stg128(stg_reg.x, stg_reg.y, stg_reg.z, stg_reg.w,
+               C_base_ptr + i * 8 * params.N,
+               (m_base_idx + i * 8) < params.M && n_guard);
+      }
+    } else if (WARP_NTILE == 64) {
+      int lds_c_base_offset =
+          warp_id * Mtile * WARP_NTILE + (lane_id / 8) * WARP_NTILE;
+#pragma unroll
+      for (int i = 0; i < (Mtile / 16) * (WARP_NITER / 2); ++i) {
+        int lds_c_offset = lds_c_base_offset + i * 4 * WARP_NTILE +
+                           ((lane_id % 8 + lane_id / 8 + (i % 2) * 4) % 8) * 8;
+        uint4 stg_reg =
+            *reinterpret_cast<uint4*>(smem + lds_c_offset * sizeof(FType));
+        stg128(stg_reg.x, stg_reg.y, stg_reg.z, stg_reg.w,
+               C_base_ptr + i * 4 * params.N,
+               (m_base_idx + i * 4) < params.M && n_guard);
+      }
     }
   }
 
   const SM8x_GEMM_A16W8_Params<FType, QType>& params;
 
   int load_a_base_offset[2];
-  int load_b_offset[2];
+  int load_b_base_offset[2];
   int sts_c_base_offset;
-  int lds_c_base_offset;
 
   int store_c_base_offset;
 
@@ -1412,49 +1528,67 @@ struct ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK {
   const uint32_t A_smem_stage_stride, BQ_smem_stage_stride;
 
   int lane_id;
-  // 2 denotes double buffer, first 4 denotes M direction
-  uint32_t A_frag[2][4][4];
+  int warp_id;
+  // first 2 denotes double buffer, second dim denotes M direction
+  uint32_t A_frag[2][Mtile / 16][4];
 
-  typename HalfType<FType>::T2 B_scale[2];
-  typename HalfType<FType>::T2 B_zero[2];
-  char4 BQ_frag[2][4];
-  // 2 denotes double buffer, first 4 denotes N direction, second 2 denotes K
-  // direction
-  typename HalfType<FType>::T2 BF_frag[2][4][2];
-  // first 4 denotes M direction, second 4 denotes N direction
-  float C_frag[4][4][4];
+  typename HalfType<FType>::T2 B_scale[WARP_NITER / 2];
+  typename HalfType<FType>::T2 B_zero[WARP_NITER / 2];
+  uint32_t BQ_frag[2][WARP_NITER];
+  // first 2 denotes double buffer, second dim denotes N direction, last 2
+  // denotes K direction
+  typename HalfType<FType>::T2 BF_frag[2][WARP_NITER][2];
+  // first dim denotes M direction, second dim denotes N direction
+  float C_frag[Mtile / 16][WARP_NITER][4];
 };
 
 /*
- *  C = A x B
- *  matrix A: M x K, matrix B: N x K(N32K16), matrix C: M x N (NTN)
- *  N % 8 == 0, K % 16 == 0
- *  accumulator precision: FP32
- *  output datatype: FP16
+ *  @brief A16W8 Perchannel Quantization GEMM,
+ *         requires N % 8 == 0, K % 16 == 0
+ *         accumulator precision: FP32
+ *  @tparam FType: DataType for A, B_scale and C, support half or nv_bfloat16
+ *  @tparam QType: DataType for B, support uint8
+ *  @tparam NStage: Num of stages for ascync copy
+ *  @tparam EnableFuse: If true, use fused splitk-reduce, otherwise use
+ * non-fused splitk-reduce
  *
- *  BLOCK_TILE: m64n128k32
- *  BLOCK_SIZE: 128
- *  WARP_TILE:  m64n32k32
- *  NStage is 4 or 3
+ *  @fparam params struct consists of following parameters:
+ *      @param A_ptr: Matrix A value ptr, A = (M, K)
+ *      @param B_ptr: Matrix B value ptr, B = (N, K) (N32K16 special format)
+ *      @param B_scale_ptr: 1-D B_scale value ptr, B_scale = (N,)
+ *      @param B_zero_ptr: 1-D B_zero value ptr, B_zero = (N,)
+ *      @param C_ptr: Matrix C value ptr, C = (M, N)
+ *      @param M: dimnesion m
+ *      @param N: dimnesion n
+ *      @param K: dimnesion k
+ *      @param SplitK: split size along K-dimension
+ *      @param C_split_ptr: Matrix C_split value ptr, used only in non-fused
+ * splitk-reduce
+ *      @param C_tmp_ptr: Matrix C_tmp value ptr, used only in fused
+ * splitk-reduce
+ *      @param red_count_ptr: 1-D red_count value ptr, used only in fused
+ * splitk-reduce
  */
-template <typename FType, typename QType, int NStage>
-__global__ void __launch_bounds__(128)
-    ampere_hgemm_A16W8_perc_f16_f16_64x128x32_hmma16816_multistage_NT16N_nonfused_splitk_kernel(
+template <typename FType, typename QType, int Mtile, int Ntile, int NStage,
+          int BLOCK, bool EnableFuse, bool has_zp>
+__global__ void __launch_bounds__(BLOCK)
+    ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_hmma16816_multistage_AN_BTN32K16_CN_splitk_kernel(
         const SM8x_GEMM_A16W8_Params<FType, QType> params) {
   // A smem size = 64 * 32 * 2B/elem * 4(stage) = 16KB
   // B smem size = 128 * 32 * 1B/elem * 4(stage) = 16KB
-  __shared__ char smem[NStage * 8 * 1024];
+  constexpr int smem_size_one_stage = Mtile * 32 * 2 + Ntile * 32;
+  __shared__ char smem[NStage * smem_size_one_stage];
   char* A_smem = smem;
-  char* BQ_smem = smem + 64 * 32 * 2 * NStage;
+  char* BQ_smem = smem + Mtile * 32 * 2 * NStage;
 
   uint32_t A_smem_addr = smem_u32addr(A_smem);
   uint32_t BQ_smem_addr = smem_u32addr(BQ_smem);
-  uint32_t A_smem_stage_stride = 64 * 32 * 2;
-  uint32_t BQ_smem_stage_stride = 128 * 32;
+  uint32_t A_smem_stage_stride = Mtile * 32 * 2;
+  uint32_t BQ_smem_stage_stride = Ntile * 32;
 
   // initialize the data move process from GM to SMEM for this block
-  GmemTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK<FType, QType, NStage,
-                                                       128>
+  GmemTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK<
+      FType, QType, Mtile, Ntile, NStage, BLOCK>
       gmem_tile(params, A_smem_addr, BQ_smem_addr, A_smem_stage_stride,
                 BQ_smem_stage_stride);
 
@@ -1470,7 +1604,8 @@ __global__ void __launch_bounds__(128)
   // load first three tiles to shared memory
   gmem_tile.ldgsts_first_ktiles(first_k_tile, k_tiles);
   sts_stage_idx += (NStage - 2);
-  ComputeTile_A16W8_PerC_64x128x32_multistage_SM8x_SplitK<FType, QType>
+  ComputeTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK<
+      FType, QType, Mtile, Ntile, BLOCK, EnableFuse, has_zp>
       compute_tile(params, A_smem_addr, BQ_smem_addr, A_smem_stage_stride,
                    BQ_smem_stage_stride);
   compute_tile.ldg_params();
@@ -1521,50 +1656,118 @@ __global__ void __launch_bounds__(128)
     }
   }
 
+  if (EnableFuse) {
+    compute_tile.fused_splitk_reduce();
+  }
   compute_tile.stg(smem);
 }
 
+#define __CALL_IF(MTILE, NTILE, NUM_THREADS, ENABLE_FUSE, HAS_ZP)                                     \
+  else if (Mtile == MTILE && Ntile == NTILE && BLOCK == NUM_THREADS &&                                \
+           enable_fuse == ENABLE_FUSE && has_zp == HAS_ZP) {                                          \
+    ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_hmma16816_multistage_AN_BTN32K16_CN_splitk_kernel< \
+        FType, uint8_t, MTILE, NTILE, 4, NUM_THREADS, ENABLE_FUSE, HAS_ZP>                            \
+        <<<grid, block, 0, stream>>>(params);                                                         \
+  }
+
 template <typename FType, typename QType, template <class> class ActiveFunc>
-void ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk(
+void ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk(
     const FType* A, const QType* B, const FType* B_scale, const FType* B_zero,
     const FType* bias, FType* C, const uint32_t M, const uint32_t N,
     const uint32_t K, void* workspace, const int sm_version,
-    const SplitKParams splitk_params, const float alpha, cudaStream_t stream) {
-  FType* C_split = static_cast<FType*>(workspace);
-  int grid_x = (M + 63) / 64;
-  int grid_y = (N + 127) / 128;
-  int grid_z = (K + splitk_params.SplitK - 1) / splitk_params.SplitK;
+    const SplitKParams fused_gemm_params, const float alpha,
+    cudaStream_t stream) {
+  int Mtile = fused_gemm_params.Mtile;
+  int grid_x = (M + Mtile - 1) / Mtile;
+  int Ntile = fused_gemm_params.Ntile;
+  int grid_y = (N + Ntile - 1) / Ntile;
+  int SplitK = fused_gemm_params.SplitK;
+  int grid_z = (K + SplitK - 1) / SplitK;
+  ;
+
+  int BLOCK = (Ntile == 256) ? 256 : 128;
 
   dim3 grid(grid_x, grid_y, grid_z);
-  dim3 block(128);
+  dim3 block(BLOCK);
 
-  SM8x_GEMM_A16W8_Params<FType, QType> params{
-      A,      B,      B_scale, B_zero, C,       (int)M,
-      (int)N, (int)K, 0,       -1,     C_split, splitk_params.SplitK};
+  bool enable_fuse = fused_gemm_params.EnableFuse;
+  bool has_zp = B_zero != nullptr;
+  if (enable_fuse) {
+    float* C_tmp = reinterpret_cast<float*>(workspace);
+    uint32_t* red_count = reinterpret_cast<uint32_t*>(
+        (char*)workspace + grid_x * Mtile * grid_y * Ntile * sizeof(float));
+    AS_CHECK_CUDA(cudaMemsetAsync(red_count, 0,
+                                  grid_x * grid_y * sizeof(uint32_t), stream));
+    // for uint8 to f16 fast convertion, reinterpret_cast B ptr
+    SM8x_GEMM_A16W8_Params<FType, uint8_t> params{
+        A,       reinterpret_cast<const uint8_t*>(B),
+        B_scale, B_zero,
+        C,       (int)M,
+        (int)N,  (int)K,
+        SplitK,  0,
+        -1,      nullptr,
+        C_tmp,   red_count};
 
-  if (sm_version == 0x0800) {
-    ampere_hgemm_A16W8_perc_f16_f16_64x128x32_hmma16816_multistage_NT16N_nonfused_splitk_kernel<
-        FType, QType, 4><<<grid, block, 0, stream>>>(params);
+    if (false) {
+    }
+    __CALL_IF(16, 256, 256, true, false)
+    __CALL_IF(32, 256, 256, true, false)
+    __CALL_IF(48, 256, 256, true, false)
+    __CALL_IF(64, 128, 128, true, false)
+    __CALL_IF(64, 256, 256, true, false)
+    __CALL_IF(16, 256, 256, true, true)
+    __CALL_IF(32, 256, 256, true, true)
+    __CALL_IF(48, 256, 256, true, true)
+    __CALL_IF(64, 128, 128, true, true)
+    __CALL_IF(64, 256, 256, true, true)
+
+    // Add bias and active func
+    add_bias<FType, ActiveFunc>(bias, C, M, N, alpha, stream);
   } else {
-    ampere_hgemm_A16W8_perc_f16_f16_64x128x32_hmma16816_multistage_NT16N_nonfused_splitk_kernel<
-        FType, QType, 3><<<grid, block, 0, stream>>>(params);
-  }
+    FType* C_split = reinterpret_cast<FType*>(workspace);
+    // for uint8 to f16 fast convertion, reinterpret_cast B ptr
+    SM8x_GEMM_A16W8_Params<FType, uint8_t> params{
+        A,       reinterpret_cast<const uint8_t*>(B),
+        B_scale, B_zero,
+        C,       (int)M,
+        (int)N,  (int)K,
+        SplitK,  0,
+        -1,      C_split,
+        nullptr, nullptr};
 
-  // SplitK reduce
-  gemm_f16_splitk_reduce<FType, ActiveFunc>(C_split, nullptr, bias, C, M, N,
-                                            grid_z, alpha, stream);
+    if (false) {
+    }
+    __CALL_IF(16, 256, 256, false, false)
+    __CALL_IF(32, 256, 256, false, false)
+    __CALL_IF(48, 256, 256, false, false)
+    __CALL_IF(64, 128, 128, false, false)
+    __CALL_IF(64, 256, 256, false, false)
+    __CALL_IF(16, 256, 256, false, true)
+    __CALL_IF(32, 256, 256, false, true)
+    __CALL_IF(48, 256, 256, false, true)
+    __CALL_IF(64, 128, 128, false, true)
+    __CALL_IF(64, 256, 256, false, true)
+
+    // SplitK reduce
+    gemm_f16_splitk_reduce<FType, ActiveFunc>(C_split, nullptr, bias, C, M, N,
+                                              grid_z, alpha, stream);
+  }
 }
 
 
 // Rearrange B to facilitate Ampere Tensor Core load data
 // reorder B from (K, N) to (N_32align / 4, K * 4)
 // K % 16 == 0, N % 16 == 0, N_32align % 32 == 0
+// Note: for the ampere architecture, convert the int8 type B to the uint8 type
+// range by adding 128 to facilitate uint8 to f16 fast conversion
 template <typename FType>
 __global__ void __launch_bounds__(128)
     rearrange_kn_weight_as_n32k16_order_ldg16_kernel(
         const int8_t* B, const FType* B_scale, const FType* B_zero,
         int8_t* B_result, FType* B_scale_result, FType* B_zero_result,
         const int K, const int N, const int N_32align) {
+  using DType = uint8_t;
+
   const int lane_id = threadIdx.x % 32;
   const int warp_id = threadIdx.x / 32;
 
@@ -1590,14 +1793,15 @@ __global__ void __launch_bounds__(128)
     }
 
     // reorder B
-    char B_reorder_frag[8][8];
+    DType B_reorder_frag[8][8];
 #pragma unroll
     for (int i = 0; i < 4; ++i) {
 #pragma unroll
       for (int j = 0; j < 16; ++j) {
         int dst_i = j % 8;
         int dst_j = i + (j / 8) * 4;
-        B_reorder_frag[dst_i][dst_j] = B_frag[i][j];
+        B_reorder_frag[dst_i][dst_j] =
+            static_cast<DType>((int)B_frag[i][j] + 128);
       }
     }
 
@@ -1737,7 +1941,7 @@ hgemm_A16W8_perchannel_128x128x32_hmma1688_ldg8<int8_t, hie::activation::Silu>(
     cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     hie::bfloat16, int8_t, hie::activation::Identity>(
     const hie::bfloat16*, const int8_t*, const hie::bfloat16*,
     const hie::bfloat16*, const hie::bfloat16*, hie::bfloat16*, const uint32_t,
@@ -1745,7 +1949,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
     const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     hie::bfloat16, int8_t, hie::activation::Gelu>(
     const hie::bfloat16*, const int8_t*, const hie::bfloat16*,
     const hie::bfloat16*, const hie::bfloat16*, hie::bfloat16*, const uint32_t,
@@ -1753,7 +1957,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
     const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     hie::bfloat16, int8_t, hie::activation::GeluTanh>(
     const hie::bfloat16*, const int8_t*, const hie::bfloat16*,
     const hie::bfloat16*, const hie::bfloat16*, hie::bfloat16*, const uint32_t,
@@ -1761,7 +1965,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
     const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     hie::bfloat16, int8_t, hie::activation::Relu>(
     const hie::bfloat16*, const int8_t*, const hie::bfloat16*,
     const hie::bfloat16*, const hie::bfloat16*, hie::bfloat16*, const uint32_t,
@@ -1769,7 +1973,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
     const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     hie::bfloat16, int8_t, hie::activation::Silu>(
     const hie::bfloat16*, const int8_t*, const hie::bfloat16*,
     const hie::bfloat16*, const hie::bfloat16*, hie::bfloat16*, const uint32_t,
@@ -1777,14 +1981,14 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
     const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     half, int8_t, hie::activation::Identity>(
     const half*, const int8_t*, const half*, const half*, const half*, half*,
     const uint32_t, const uint32_t, const uint32_t, void*, const int,
     const SplitKParams, const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     half, int8_t, hie::activation::Gelu>(const half*, const int8_t*,
                                          const half*, const half*, const half*,
                                          half*, const uint32_t, const uint32_t,
@@ -1793,14 +1997,14 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
                                          cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     half, int8_t, hie::activation::GeluTanh>(
     const half*, const int8_t*, const half*, const half*, const half*, half*,
     const uint32_t, const uint32_t, const uint32_t, void*, const int,
     const SplitKParams, const float, cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     half, int8_t, hie::activation::Relu>(const half*, const int8_t*,
                                          const half*, const half*, const half*,
                                          half*, const uint32_t, const uint32_t,
@@ -1809,7 +2013,7 @@ ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
                                          cudaStream_t);
 
 template void
-ampere_hgemm_A16W8_perc_f16_f16_64x128x32_mma16816_multistage_nonfused_splitk<
+ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32K16_CN_splitk<
     half, int8_t, hie::activation::Silu>(const half*, const int8_t*,
                                          const half*, const half*, const half*,
                                          half*, const uint32_t, const uint32_t,

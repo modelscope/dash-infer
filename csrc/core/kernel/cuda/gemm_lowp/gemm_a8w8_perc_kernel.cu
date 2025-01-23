@@ -295,6 +295,8 @@ void per_channel_symm_dynamic_quantization(const FType* fdata, int8_t* qdata,
 
 // restore from N32K16 order to K-major order
 // K % 16 = 0, N_32align % 32 = 0
+// Note: for the ampere architecture, restore B to the int8 type range
+// by substracting 128
 template <typename FType>
 __global__ void __launch_bounds__(256)
     restore_n32k16_weight_to_nk_kernel(const int8_t* B_n32k16,
@@ -320,7 +322,10 @@ __global__ void __launch_bounds__(256)
               *(reinterpret_cast<uint32_t*>(in_reg) + 2),
               *(reinterpret_cast<uint32_t*>(in_reg) + 3), B_n32k16 + src_offset,
               ldg_guard);
-
+#pragma unroll
+    for (int i = 0; i < 16; ++i) {
+      in_reg[i] = int(reinterpret_cast<uint8_t&>(in_reg[i])) - 128;
+    }
     __shared__ char smem[32 * 128];
     uint32_t smem_addr = smem_u32addr(smem);
 

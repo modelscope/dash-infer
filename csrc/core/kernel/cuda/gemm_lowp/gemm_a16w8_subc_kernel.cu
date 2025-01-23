@@ -481,13 +481,7 @@ void hgemm_A16W8_subc_128x128x32_hmma1688_ldg8(
                                    B_ldg_step);
   }
 
-  {
-    const uint32_t BLOCK_SIZE = 128;
-    const uint32_t UNROLL = 4;
-    const dim3 grid((N + BLOCK_SIZE - 1) / BLOCK_SIZE, M);
-    add_bias<UNROLL, ActiveFunc>
-        <<<grid, BLOCK_SIZE, 0, stream>>>(bias, C, M, N, alpha);
-  }
+  { add_bias<half, ActiveFunc>(bias, C, M, N, alpha, stream); }
 }
 
 /*
