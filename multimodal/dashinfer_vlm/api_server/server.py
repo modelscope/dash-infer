@@ -88,7 +88,7 @@ def init():
         user_set_data_type=data_type,
         trust_remote_code=True,
         vision_engine=context.get("vision_engine"),
-        fp8=context.get("fp8"),
+        quant_type=context.get("quant_type"),
     )
     (
         model_loader.load_model(direct_load=False, load_format="auto")
@@ -97,7 +97,6 @@ def init():
     )
     as_graph_path = os.path.join(output_dir, model_name + ".asgraph")
     as_weight_path = os.path.join(output_dir, model_name + ".asparam")
-    # vit_model_path = os.path.join(output_dir, model_name + ".onnx")
     vit_model_path = model_loader.vision_model_path
 
     context.set("output_dir", output_dir)
