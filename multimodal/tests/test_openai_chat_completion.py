@@ -104,7 +104,7 @@ def main(args, client):
         model = "model"
 
     test_cases = {
-        "singe_image": test_text_image_1,
+        "single_image": test_text_image_1,
         "multi_images": test_text_multi_images,
         "video": test_text_video_file
     }
@@ -119,7 +119,7 @@ def main(args, client):
     else:
         print(f"running {test_cases.keys()} cases")
         func = test_cases[args.type]
-        response = func(client)
+        response = func(client, model)
         for chunk in response:
             print(chunk.choices[0].delta.content, end='', flush=True)
 
@@ -130,7 +130,7 @@ if __name__ == "__main__":
                         default="0.0.0.0")
     parser.add_argument('--port', type=str,
                         default="8000")
-    parser.add_argument('--type', type=str, default="all", choices=["all", "singe_image", "multi_images", "video"])
+    parser.add_argument('--type', type=str, default="all", choices=["all", "single_image", "multi_images", "video"])
     args = parser.parse_args()
     
     openai_api_key = "EMPTY"
