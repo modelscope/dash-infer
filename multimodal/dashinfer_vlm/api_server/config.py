@@ -72,14 +72,15 @@ def add_context_args(parser):
         help="Enables prefix caching.",
     )
     group.add_argument(
-        "--fp8",
-        action="store_true",
-        help="enable FP8",
+        "--quant-type",
+        default=None,
+        choices=["gptq", "gptq_weight_only", "a8w8", "a16w4", "a16w8", "fp8"],
+        help="The default strategy of GPTQ models is activation quantization. To disable activation quantization, please use gptq_weight_only mode. The quantization type 'axwy' means x-bit activations and y-bit weights, which will use dynamic quantization for models that haven't undergone quantization fine-tuning"
     )
     group.add_argument(
         "--dtype",
         default="bfloat16",
-        choices=["bfloat16", "float16"],
+        choices=["bfloat16", "float16", "float32"],
     )
     group.add_argument(
         "--min-pixels",

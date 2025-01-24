@@ -29,6 +29,7 @@ def dtype_to_torch_dtype(dtype):
     else:
         raise ValueError("unsupported data type: {}".format(dtype))
 
+
 class HuggingFaceVLModel(HuggingFaceModel):
     def __init__(
         self,
@@ -38,7 +39,7 @@ class HuggingFaceVLModel(HuggingFaceModel):
         user_set_data_type="bfloat16",
         trust_remote_code=True,
         vision_engine="hie",
-        fp8=False
+        quant_type=None
     ):
         super().__init__(
             pretrain_model_name_or_path,
@@ -49,7 +50,7 @@ class HuggingFaceVLModel(HuggingFaceModel):
         )
 
         self.vision_engine = vision_engine
-        self.fp8 = fp8
+        self.quant_type = quant_type
 
     def load_model(
         self, override_data_type=None, direct_load=False, load_format="auto", **kwargs
@@ -105,7 +106,6 @@ class HuggingFaceVLModel(HuggingFaceModel):
             self.as_model_config = self.adapter.model_config
             if self.user_set_data_type is None:
                 self.data_type = self.adapter.get_model_data_type()
-            print(f"model data type: {self.data_type}")
         return self
 
     def serialize(
@@ -137,12 +137,29 @@ class HuggingFaceVLModel(HuggingFaceModel):
             self.vision_model_path = visual_model
         else:
             raise ValueError(f"unsupported engine {self.vision_engine}")
+        
         # Convert Allspark LLM
-        enable_quant = self.fp8
+        enable_quant = False
         weight_only_quant=False
         quant_config = None
-        if self.fp8:
-            quant_config = {"quant_method": "instant_quant", "weight_format": "fp8_e4m3", "compute_method": "activate_quant"}
+        if self.quant_type is not None:
+            enable_quant = True
+            if self.quant_type == "fp8":
+                weight_only_quant = False
+                quant_config = {"quant_method": "instant_quant", "weight_format": "fp8_e4m3", "compute_method": "activate_quant"}
+            elif self.quant_type == "gptq":
+                weight_only_quant=False
+            elif self.quant_type == "gptq_weight_only":
+                weight_only_quant = True
+            elif self.quant_type == "a8w8":
+                quant_config = {"quant_method": "instant_quant", "weight_format": "int8", "compute_method" : "activate_quant"}
+            elif self.quant_type == "a16w4":
+                weight_only_quant = True
+                quant_config = {"quant_method": "instant_quant", "weight_format": "uint4"}
+            elif self.quant_type == "a16w8":
+                weight_only_quant = True
+                quant_config = {"quant_method": "instant_quant", "weight_format": "int8"}
+
         return super().serialize(
             engine, model_output_dir, enable_quant, customized_quant_config=quant_config, weight_only_quant=weight_only_quant
         )
