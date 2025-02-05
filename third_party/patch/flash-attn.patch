@@ -1,9 +1,18 @@
+diff --git a/.gitmodules b/.gitmodules
+deleted file mode 100644
+index 8d501cb..0000000
+--- a/.gitmodules
++++ /dev/null
+@@ -1,3 +0,0 @@
+-[submodule "csrc/cutlass"]
+-	path = csrc/cutlass
+-	url = https://github.com/NVIDIA/cutlass.git
 diff --git a/csrc/CMakeLists.txt b/csrc/CMakeLists.txt
 new file mode 100644
-index 0000000..cc91698
+index 0000000..5cb0691
 --- /dev/null
 +++ b/csrc/CMakeLists.txt
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,215 @@
 +cmake_minimum_required(VERSION 3.18)
 +
 +project(FLASHATTN LANGUAGES CXX CUDA)
@@ -21,10 +30,12 @@ index 0000000..cc91698
 +set(FLASHATTN_USE_CUDA_STATIC
 +    OFF
 +    CACHE BOOL "use static CUDA")
++
 +# Generate SASS for each architecture
 +foreach(arch ${FLASHATTN_GPU_ARCHS})
 +  list(APPEND GENCODES "${arch}-real")
 +endforeach()
++
 +# Generate PTX for the last architecture
 +list(GET FLASHATTN_GPU_ARCHS -1 LATEST_GPU_ARCH)
 +list(APPEND GENCODES "${LATEST_GPU_ARCH}-virtual")
@@ -71,11 +82,107 @@ index 0000000..cc91698
 +set(FLASHATTN_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/flash_attn/src
 +                          ${PROJECT_SOURCE_DIR})
 +file(GLOB_RECURSE FLASHATTN_SRCS ${FLASHATTN_ROOT}/*.cu)
++
 +# no bwd
 +file(GLOB_RECURSE FLASHATTN_BWD_SRCS ${FLASHATTN_ROOT}/*_bwd_*.cu)
 +foreach(file ${FLASHATTN_BWD_SRCS})
 +  list(REMOVE_ITEM FLASHATTN_SRCS "${file}")
 +endforeach()
++
++#############
++
++# Define allowed HEADDIM values
++set(ALLOWED_HEADDIMS_LIST "32;64;96;128;160;192;224;256" CACHE STRING "List of allowed HEADDIM values")
++set(TARGET_HEADDIM_LIST "" CACHE STRING "List of target HEADDIM values (overrides ALLOWED_HEADDIMS_LIST)")
++
++# Use default values if the user hasn't specified TARGET_HEADDIM_LIST
++if(TARGET_HEADDIM_LIST STREQUAL "")
++    set(TARGET_HEADDIM_LIST "${ALLOWED_HEADDIMS_LIST}")
++endif()
++
++message(STATUS "ALLOWED_HEADDIMS_LIST: ${ALLOWED_HEADDIMS_LIST}")
++message(STATUS "TARGET_HEADDIM_LIST: ${TARGET_HEADDIM_LIST}")
++
++# Validate that each value in TARGET_HEADDIM_LIST is in ALLOWED_HEADDIMS_LIST
++foreach(dim IN LISTS TARGET_HEADDIM_LIST)
++    list(FIND ALLOWED_HEADDIMS_LIST ${dim} index)
++    if(${index} EQUAL -1)
++        message(FATAL_ERROR "Unsupported HEADDIM value: ${dim}")
++    endif()
++endforeach()
++
++# Sort TARGET_HEADDIM_LIST to ensure ascending order
++list(SORT TARGET_HEADDIM_LIST)
++
++# Generate the content of the HEADDIM_SWITCH macro
++set(HEADDIM_SWITCH_CONTENT "")
++string(APPEND HEADDIM_SWITCH_MACRO "/* Auto-generated HEADDIM dispatcher */\n")
++set(HEADDIM_SWITCH_CONTENT "    if (false) {} /* to allow else if */ \\\n")
++foreach(dim IN LISTS TARGET_HEADDIM_LIST)
++    string(APPEND HEADDIM_SWITCH_CONTENT
++        "    else if (HEADDIM == ${dim}) { \\\n"
++        "        constexpr static int kHeadDim = ${dim}; \\\n"
++        "        return __VA_ARGS__(); \\\n"
++        "    } \\\n")
++endforeach()
++
++# Add the final else statement for unsupported HEADDIM values
++string(APPEND HEADDIM_SWITCH_CONTENT
++    "    else { \\\n"
++    "        throw std::runtime_error(\"Unsupported HEADDIM: \" + std::to_string(HEADDIM)); \\\n"
++    "    } \\\n")
++
++# Generate the HEADDIM_SWITCH macro definition
++set(HEADDIM_SWITCH_MACRO "")
++string(APPEND HEADDIM_SWITCH_MACRO "/* Auto-generated HEADDIM dispatcher */\n")
++string(APPEND HEADDIM_SWITCH_MACRO "#pragma once\n\n")
++string(APPEND HEADDIM_SWITCH_MACRO "#include <string>\n\n")
++string(APPEND HEADDIM_SWITCH_MACRO "#define HEADDIM_SWITCH(HEADDIM, ...) \\\n")
++string(APPEND HEADDIM_SWITCH_MACRO "  [&] { \\\n")
++string(APPEND HEADDIM_SWITCH_MACRO "${HEADDIM_SWITCH_CONTENT}")
++string(APPEND HEADDIM_SWITCH_MACRO "  }()\n")
++
++# Generate a header file containing the HEADDIM_SWITCH macro
++set(HEADDIM_SWITCH_HEADER "${FLASHATTN_ROOT}/headdim_switch.h")
++file(WRITE ${HEADDIM_SWITCH_HEADER} "${HEADDIM_SWITCH_MACRO}\n")
++
++# Create an empty list to store the files to be kept
++set(FILES_TO_KEEP)
++
++file(GLOB FLASH_FWD_FILES "${FLASHATTN_ROOT}/flash_fwd*.cu")
++
++# Iterate over all found .cu files
++foreach(file_path IN LISTS FLASH_FWD_FILES)
++    # Get the file name
++    get_filename_component(file_name ${file_path} NAME)
++
++    # Use a regex to extract the hdim value
++    # Assuming filename format: flash_fwd_*hdim<value>*.cu
++    string(REGEX MATCH "flash_fwd_.*hdim([0-9]+).*\\.cu" _ "${file_name}")
++
++    if(NOT "${CMAKE_MATCH_1}" STREQUAL "")
++        set(file_hdim "${CMAKE_MATCH_1}")
++
++        # Check if file_hdim is in TARGET_HEADDIM_LIST
++        list(FIND TARGET_HEADDIM_LIST ${file_hdim} index)
++        if(NOT ${index} EQUAL -1)
++            # Add to FILES_TO_KEEP
++            list(APPEND FILES_TO_KEEP "${file_path}")
++            message(STATUS "Including CUDA file: ${file_path} with hdim=${file_hdim}")
++        else()
++            # Exclude the file and log the information
++            message(STATUS "Excluding CUDA file: ${file_path} with hdim=${file_hdim} not in HEADDIM_LIST")
++        endif()
++    endif()
++endforeach()
++
++list(REMOVE_ITEM FLASH_FWD_FILES ${FILES_TO_KEEP}) # remain files to remove
++foreach(file ${FLASH_FWD_FILES})
++  list(REMOVE_ITEM FLASHATTN_SRCS "${file}")
++endforeach()
++message("Flash Attention build source list: ${FLASHATTN_SRCS}")
++
++###############
 +
 +list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_HALF_OPERATORS__")
 +list(APPEND FLASHATTN_CUDA_FLAGS "-U__CUDA_NO_HALF_CONVERSIONS__")
@@ -368,3 +475,22 @@ index eb8bcea..30c9a2e 100644
      }
      // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
      DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+diff --git a/csrc/flash_attn/src/static_switch.h b/csrc/flash_attn/src/static_switch.h
+index 20c2afd..01014a4 100644
+--- a/csrc/flash_attn/src/static_switch.h
++++ b/csrc/flash_attn/src/static_switch.h
+@@ -87,6 +87,9 @@
+     }                                        \
+   }()
+ 
++#include "headdim_switch.h"
++
++#ifndef HEADDIM_SWITCH
+ #define HEADDIM_SWITCH(HEADDIM, ...)   \
+   [&] {                                    \
+     if (HEADDIM <= 32) {                   \
+@@ -115,3 +118,4 @@
+       return __VA_ARGS__();                \
+     }                                      \
+   }()
++#endif
