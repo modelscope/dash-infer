@@ -13,6 +13,10 @@
 #include <lmfe/jsonschemaparser.hpp>
 #include <lmfe/tokenenforcer.hpp>
 
+#ifdef ENABLE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 namespace allspark {
 namespace util {
 

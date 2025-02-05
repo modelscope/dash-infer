@@ -19,8 +19,10 @@ set(FLASHATTN_USE_CUDA_STATIC
     CACHE BOOL "flash-attn use static CUDA")
 
 set(FLASHATTN_USE_STATIC_LIB
-    OFF
+    ON
     CACHE BOOL "use flash-attn static lib")
+
+set(TARGET_HEADDIM_LIST "128" CACHE STRING "List of target HEADDIM values (overrides ALLOWED_HEADDIMS_LIST)")
 
 # only static link when needed, to reduce size.
 if(ENABLE_NV_STATIC_LIB)
@@ -69,6 +71,7 @@ include(ExternalProject)
         -DFLASHATTN_USE_CUDA_STATIC=${FLASHATTN_USE_CUDA_STATIC}
         -DCMAKE_INSTALL_PREFIX=${FLASHATTN_INSTALL}
         -DCUTLASS_INSTALL_PATH=${CUTLASS_INSTALL}
+        -DTARGET_HEADDIM_LIST=${TARGET_HEADDIM_LIST}
   )
 
   ExternalProject_Get_Property(project_flashattn SOURCE_DIR)
@@ -93,6 +96,7 @@ set_target_properties(flash-attention::flash-attn PROPERTIES
 include_directories(${FLASHATTN_INCLUDE_DIR})
 set(FLASHATTN_LIBRARY flash-attention::flash-attn)
 
+unset(TARGET_HEADDIM_LIST)
 unset(FLASHATTN_CUDA_VERSION)
 unset(FLASHATTN_GPU_ARCHS)
 unset(FLASHATTN_USE_EXTERNAL_CUTLASS)
