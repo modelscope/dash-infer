@@ -15,21 +15,23 @@ jobs:
     strategy:
       matrix:
         arch: [X64, ARM64]
-        image: ["dev-centos7-x86:v2", "dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        image: ["dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        enable_cuda: [0, 1]
         exclude:
           - arch: X64
             image: "dev-centos8-arm:v2"
           - arch: ARM64
-            image: "dev-centos7-x86:v2"
-          - arch: ARM64
             image: "dev-centos7-cu124:v1"
+          - arch: ARM64
+            enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
     env:
       # force use node16 instead of node20
       # otherwise it may cause GLIBCXX_2.27 not found
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      ENABLE_CUDA: ${{ matrix.enable_cuda }}
     defaults:
       run:
         shell: bash -l {0}
@@ -37,7 +39,7 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v3
       with:
-        lfs: true
+        lfs: false
 
     - name: Pull LFS
       run: |
@@ -50,32 +52,41 @@ jobs:
         git submodule update
 
     - name: Build tgz package
+      shell: bash
       run: |
+        source /root/.bashrc
+        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
+            source /miniconda/etc/profile.d/conda.sh
+        fi
+        source activate ds_py
+
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-        source /root/.bashrc
 
         export AS_RELEASE_VERSION=$VERSION_NUMBER
         export AS_BUILD_PACKAGE=ON
 
-        if command -v nvcc &> /dev/null
-        then
-            export AS_PLATFORM="cuda"
-            export AS_CUDA_SM="'70;75;80;86;89;90a'"
-            bash scripts/release/cpp_build_cuda.sh
+        echo "ENABLE_CUDA value: $ENABLE_CUDA"
+
+        # export ENABLE_MULTINUMA="ON"
+        if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
+            export AS_PLATFORM="armclang"
+            bash build.sh
         else
-            # export ENABLE_MULTINUMA="ON"
-            if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
-                export AS_PLATFORM="armclang"
+            if [ "$ENABLE_CUDA" -eq "1" ];
+            then
+                export AS_PLATFORM="cuda"
+                export AS_CUDA_SM="'70;75;80;86;89;90a'"
+                bash scripts/release/cpp_build_cuda.sh
             else
                 export AS_PLATFORM="x86"
+                bash build.sh
             fi
-            bash build.sh
         fi
-  
+
     - name: Upload tgz package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dashinfer-tgz-${{ matrix.arch }}
         path: build/*.tar.gz
@@ -85,26 +96,28 @@ jobs:
     strategy:
       matrix:
         arch: [X64, ARM64]
-        image: ["dev-centos7-x86:v2", "dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        image: ["dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        enable_cuda: [0, 1]
         exclude:
           - arch: X64
             image: "dev-centos8-arm:v2"
           - arch: ARM64
-            image: "dev-centos7-x86:v2"
-          - arch: ARM64
             image: "dev-centos7-cu124:v1"
+          - arch: ARM64
+            enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: registry-1.docker.io/dashinfer/${{ matrix.image }}
     env:
       # force use node16 instead of node20
       # otherwise it may cause GLIBCXX_2.27 not found
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      ENABLE_CUDA: ${{ matrix.enable_cuda }}
     steps:
     - name: Check out code
       uses: actions/checkout@v3
       with:
-        lfs: true
+        lfs: false
         
     - name: Pull LFS
       run: |
@@ -117,59 +130,39 @@ jobs:
         git submodule update
 
     - name: Build manylinux wheels
+      shell: bash
       run: |
+        source /root/.bashrc
+        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
+            source /miniconda/etc/profile.d/conda.sh
+        fi
+
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        source /root/.bashrc
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+
         export AS_RELEASE_VERSION=$VERSION_NUMBER
 
-        if command -v nvcc &> /dev/null
-        then
-            export AS_CUDA_SM="'70;75;80;86;89;90a'"
-            bash scripts/release/python_manylinux_build_cuda.sh
-        else
+        echo "ENABLE_CUDA value: $ENABLE_CUDA"
+
+        if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
             bash scripts/release/python_manylinux_build.sh
+        else
+            if [ "$ENABLE_CUDA" -eq "1" ];
+            then
+              export AS_PLATFORM="cuda"
+              export AS_CUDA_SM="'70;75;80;86;89;90a'"
+              bash scripts/release/python_manylinux_build_cuda.sh
+            else
+              bash scripts/release/python_manylinux_build.sh
+            fi
         fi
 
     - name: Upload wheels
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python-manylinux-wheels-${{ matrix.arch }}
         path: python/wheelhouse/*-manylinux*.whl
-        
-  # test:
-  #   strategy:
-  #     matrix:
-  #       arch: [X64, ARM64]
-  #       image: ["test-ubuntu-x86:v1", "test-centos-arm:v1"]
-  #       exclude:
-  #         - arch: X64
-  #           image: "test-centos-arm:v1"
-  #         - arch: ARM64
-  #           image: "test-ubuntu-x86:v1"
-  #   runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
-  #   container:
-  #     image: registry-1.docker.io/dashinfer/${{ matrix.image }}
-  #     volumes:
-  #       - /mnt/data0/models/modelscope:/github/home/.cache/modelscope
-  #     options: "--ipc=host --cap-add SYS_NICE --cap-add SYS_PTRACE"
-  #   needs: build-wheels
-  #   steps:
-  #   - name: Check out code
-  #     uses: actions/checkout@v3
-        
-  #   - name: Download wheels
-  #     uses: actions/download-artifact@v3
-  #     with:
-  #       name: python-manylinux-wheels-${{ matrix.arch }}
-  #       path: python/wheelhouse
-        
-  #   - name: Test manylinux wheels
-  #     run: |
-  #       TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-  #       VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
-  #       AS_RELEASE_VERSION=$VERSION_NUMBER bash scripts/release/python_manylinux_test.sh
 
   publish:
     runs-on: [self-hosted, Linux]
