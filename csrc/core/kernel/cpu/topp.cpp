@@ -32,5 +32,15 @@ void TopPKernel(T* input, int* k_arr, float* p_arr, int batch, int length) {
 template void TopPKernel<float>(float* input, int* k_arr, float* p_arr,
                                 int batch, int length);
 
+#ifdef ENABLE_FP16
+template void TopPKernel<half>(half* input, int* k_arr, float* p_arr,
+                                int batch, int length);
+
+#endif
+#ifdef ENABLE_BF16
+template void TopPKernel<hie::bfloat16>(hie::bfloat16* input, int* k_arr, float* p_arr,
+                                int batch, int length);
+#endif
+
 }  // namespace cpu
 }  // namespace allspark

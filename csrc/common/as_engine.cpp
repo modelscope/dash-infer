@@ -725,6 +725,9 @@ AsStatus AsEngineImpl::BuildModelFromConfigStruct(AsModelConfig& model_config) {
       this->BuildModel(model_name.c_str(), model_proto, model_weight_handler));
   // TODO: store model weight handler in model state, so the weight can be
   // freeed later.
+
+  LOG(INFO) << "Build model success...";
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -884,7 +887,7 @@ AsStatus AsEngineImpl::BuildModel(
                                       weight_handler, device_ctx_.get(),
                                       prefix_cache_coordinator_);
 
-        LOG(INFO) << "Finish Build model for rank: " << i;
+        LOG(INFO) << "Finish Build model for rank, Set to Future: " << i << " Ret: " << (int)ret;
         promise_vec[i].set_value(ret);
 
       } catch (std::exception& e) {
@@ -901,6 +904,7 @@ AsStatus AsEngineImpl::BuildModel(
     try {
       auto status = promise_vec[i].get_future().get();
       if (status != AsStatus::ALLSPARK_SUCCESS) {
+        LOG(INFO) << "Build Model task " << i << " Get From Future: " << (int)status;
         build_status = status;
       }
     } catch (std::exception& e) {
@@ -915,6 +919,8 @@ AsStatus AsEngineImpl::BuildModel(
   }
 
   model_irs_[model_name] = std::move(model_ir);
+
+  LOG(INFO) << "BuildModel Return  " << (int)build_status;
 
   return build_status;
 }
@@ -2789,9 +2795,11 @@ static void PrintEngineStat(AsEngineStat& stat) {
 void AsEngineImpl::ModelRunningThread(
     std::string model_name, std::shared_ptr<ModelControlState> model_state) {
   std::string s = "ModelRunningThread";
+#if 0
   pthread_setname_np(pthread_self(),
                      s.c_str());  // set the name (pthread_self() returns the
                                   // pthread_t of the current thread)
+#endif
   bool looping = true;
   int continues_error_count = 0;  // accumulated error on run continue.
   const int k_main_loop_error_threshold =

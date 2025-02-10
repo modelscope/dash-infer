@@ -214,4 +214,8 @@ AsStatus GemmOpCPU::Forward() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+#ifdef __APPLE__
+REGISTER_OP(Gemm, CPU, GemmOpCPU)
+#endif
+
 }  // namespace allspark

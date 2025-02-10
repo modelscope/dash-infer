@@ -7,6 +7,17 @@
 #include <common.h>
 #include <stdint.h>
 
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
+
+#ifdef ENABLE_FP16
+#include <common/float16.h>
+#endif
+#ifdef ENABLE_BF16
+#include <common/hie_bfloat16.hpp>
+#endif
+
 #include <vector>
 namespace allspark {
 namespace cpu {

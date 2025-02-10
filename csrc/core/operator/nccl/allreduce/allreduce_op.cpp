@@ -50,8 +50,7 @@ AsStatus AllReduceOp::Init(const OperatorProto& op_proto,
       }
       mpi_dtype_ = GetMpiType(dtype);
 #else
-      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
-      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      // Single CPU support is not require any setting.
 #endif
       break;
     }
@@ -110,8 +109,8 @@ AsStatus AllReduceOp::Forward() {
         MPI_Allreduce(in, out, count_, mpi_dtype_, MPI_SUM, MPI_COMM_WORLD);
       }
 #else
-      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
-      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      // single numa cpu all reduce don't require operation.
+      return AsStatus::ALLSPARK_SUCCESS;
 #endif
       break;
     default:

@@ -107,6 +107,7 @@ void GemmOpARM::PackWeightBf16(const uint32_t N, const uint32_t K,
   cpu::gemm_pack_weight_FP32toBF16_arm(N, K, K_pack, b_fp32, b_bf16);
 }
 
+#error "build this"
 REGISTER_OP(Gemm, CPU, GemmOpARM)
 }  // namespace allspark
 #endif

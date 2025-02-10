@@ -85,8 +85,7 @@ void mpi_allgather_launcher(DataType dtype, void* out, void* in, void* tmp_data,
     memcpy(out, in, count * SizeofType(dtype));
   }
 #else
-  LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
-  AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  memcpy(out, in, count * SizeofType(dtype));
 #endif
 }
 
@@ -121,8 +120,9 @@ AsStatus AllGatherOp::Init(const OperatorProto& op_proto,
         return AsStatus::ALLSPARK_RUNTIME_ERROR;
       }
 #else
-      LOG(ERROR) << "Multi-NUMA codes are not compiled" << std::endl;
-      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      kernel_launcher = mpi_allgather_launcher;
+
+      LOG(ERROR) << "CPU AllSpark without MULTI-NUMA support, will use memcpy." << std::endl;
 #endif
       break;
     }

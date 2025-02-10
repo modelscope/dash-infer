@@ -110,6 +110,11 @@ else()
     add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 endif()
 
+if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    message("This is a macOS system")
+    set(OSX_BUILD ON)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_definitions(-DALLSPARK_DEBUG_MODE)
     if(CMAKE_COMPILER_IS_GNUCXX)
@@ -140,9 +145,14 @@ find_package(Protobuf REQUIRED)
 # thirdparty
 set(INSTALL_LOCATION
       ${CMAKE_CURRENT_BINARY_DIR}/third_party/install/${CMAKE_BUILD_TYPE})
-
 include(threading)
-include(cpp-ipc)
+
+if (NOT OSX_BUILD)
+  include(cpp-ipc)
+  add_definitions(-DENABLE_CPP_IPC)
+else()
+endif()
+
 include(smhasher)
 
 if (ENABLE_ARMCL)
@@ -150,6 +160,20 @@ if (ENABLE_ARMCL)
 endif()
 
 include(AutoCCache)
+
+add_definitions(-DENABLE_DNNL)
+
+if (OSX_BUILD)
+# include(tbb)
+  find_package(TBB REQUIRED)
+  message(TBB_ROOT: ${TBB_ROOT})
+  set(TBB_ROOT  /opt/homebrew/Cellar/tbb/2022.0.0)
+  set(TBB_LIB_STATIC /opt/homebrew/Cellar/tbb/2022.0.0/lib/libtbb.a)
+  message(TBB_ROOT: ${TBB_ROOT})
+  find_package(TBB REQUIRED)
+  message(TBB_ROOT: ${TBB_ROOT})
+endif()
+
 include(dnnl)
 include(cblas)
 

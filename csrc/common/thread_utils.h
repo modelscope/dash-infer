@@ -17,7 +17,11 @@ static inline void setThreadName(int id, const std::string& baseName) {
   std::ostringstream threadName;
   threadName << baseName << ":" << id;
   auto handle = pthread_self();
+  #if 0
   pthread_setname_np(handle, threadName.str().c_str());
+  #else
+  pthread_setname_np(threadName.str().c_str());
+  #endif
 }
 #elif defined(_WIN32)
 

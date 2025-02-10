@@ -81,6 +81,7 @@ std::string ConcatString(Args&&... args) {
   do {                                  \
     AsStatus err_status = status;       \
     if (not AS_STATUS_OK(err_status)) { \
+      LOG(ERROR) << "AllSpark AS_CHECK_STATUS FAILED"; \
       return err_status;                \
     }                                   \
   } while (0)

@@ -10,9 +10,13 @@
 #include <common/device_context.h>
 #include <core/kernel/cpu/cpu_common.h>
 
+#if ENABLE_DNNL
 #include <dnnl.hpp>
+#endif
+
 namespace allspark {
 
+#if ENABLE_DNNL
 class DNNLEngine {
  public:
   static DNNLEngine& GetInstance() {
@@ -32,6 +36,27 @@ class DNNLEngine {
  private:
   dnnl::engine dnnl_engine_;
 };
+#else
+
+class DNNLEngine {
+ public:
+  static DNNLEngine& GetInstance() {
+    static DNNLEngine myInstance;
+    return myInstance;
+  }
+  DNNLEngine(DNNLEngine const&) = delete;             // Copy construct
+  DNNLEngine(DNNLEngine&&) = delete;                  // Move construct
+  DNNLEngine& operator=(DNNLEngine const&) = delete;  // Copy assign
+  DNNLEngine& operator=(DNNLEngine&&) = delete;       // Move assign
+  dnnl::engine& GetEngine() { return dnnl_engine_; }
+
+ protected:
+  DNNLEngine() : dnnl_engine_(dnnl::engine::kind::cpu, 0) {}
+  ~DNNLEngine() {}
+
+ private:
+};
+#endif
 
 class CPUContext : public DeviceContext {
  public:

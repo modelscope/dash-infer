@@ -10,7 +10,10 @@
 #include <core/tensor/tensor.h>
 #include <utility/model_profiler.h>
 
+#if ENABLE_DNNL
 #include <dnnl.hpp>
+#endif
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -23,6 +26,8 @@ class WeightManager;
 class LoraManager;
 
 struct DNNLOpContext {
+#if ENABLE_DNNL
+
   std::vector<std::unique_ptr<dnnl::primitive>> pr_fwd_;
   std::vector<std::unique_ptr<dnnl::memory>> ins_;
   std::vector<std::unique_ptr<dnnl::memory>> outs_;
@@ -30,6 +35,7 @@ struct DNNLOpContext {
   std::unique_ptr<dnnl::primitive_attr> attr_;
   static std::map<UnaryType, dnnl::algorithm> unary_algo_map_;
   static std::map<BinaryType, dnnl::algorithm> binary_algo_map_;
+#endif
 };
 
 /*!

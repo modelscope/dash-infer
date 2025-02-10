@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
 
 if (DEFINED ENV{DASHINFER_INCLUDE_PATH})
+  message("add include folder: $ENV{DASHINFER_INCLUDE_PATH}")
   include_directories($ENV{DASHINFER_INCLUDE_PATH})
 endif()
 

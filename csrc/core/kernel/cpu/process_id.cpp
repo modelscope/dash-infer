@@ -7,6 +7,7 @@
 
 #include "cpu_common.h"  // NOLINT
 #include "cpu_kernel.h"
+
 namespace allspark {
 namespace cpu {
 
@@ -18,6 +19,15 @@ void CopyMatrix(const int M, const int N, const T* A, const int lda, T* B,
 }
 template void CopyMatrix<float>(const int M, const int N, const float* A,
                                 const int lda, float* B, const int ldb);
+#ifdef ENABLE_FP16
+template void CopyMatrix<half>(const int M, const int N, const half* A,
+                                const int lda, half* B, const int ldb);
+#endif
+#ifdef ENABLE_BF16
+template void CopyMatrix<hie::bfloat16>(const int M, const int N, const hie::bfloat16* A,
+                               const int lda, hie::bfloat16* B, const int ldb);
+#endif
+
 template <typename T>
 void PreProcessForGeneration(T* dec_ids, T* max_dec_ids, const T* in_ids, T bos,
                              int batch_size, int num_beam, int max_len,

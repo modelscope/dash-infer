@@ -1514,7 +1514,7 @@ AsStatus AsModel::Warmup(int64_t bytes_available, int64_t bytes_runtime) {
             << runtime_mem_ratio;
 
   const int64_t bytes_cache = std::max(
-      0L, bytes_available - static_cast<int64_t>(
+      0LL, bytes_available - static_cast<int64_t>(
                                 std::ceil(bytes_runtime * runtime_mem_ratio)));
 
 #if ENABLE_SPAN_ATTENTION

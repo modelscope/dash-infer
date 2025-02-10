@@ -33,6 +33,15 @@ void TopKKernel(T* output, int* output_indices, const T* input, int batch_size,
 template void TopKKernel<float>(float* output, int* output_indices,
                                 const float* input, int batch_size, int length,
                                 int64_t k);
-
+#ifdef ENABLE_FP16
+template void TopKKernel<half>(half* output, int* output_indices,
+                                const half* input, int batch_size, int length,
+                                int64_t k);
+#endif
+#ifdef ENABLE_BF16
+template void TopKKernel<hie::bfloat16>(hie::bfloat16* output, int* output_indices,
+                                const hie::bfloat16* input, int batch_size, int length,
+                                int64_t k);
+#endif
 }  // namespace cpu
 }  // namespace allspark

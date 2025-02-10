@@ -5,8 +5,10 @@
 
 #include "cpu/cpu_context.h"
 
+#ifdef ENABLE_CPP_IPC
 #include <libipc/condition.h>
 #include <libipc/shm.h>
+#endif
 
 #include <csignal>
 

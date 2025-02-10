@@ -351,7 +351,11 @@ AsStatus AsOperator::CallInit(
   rank_info_ = rankInfo;
   TensorMap stub_weight;  // weight already handle by weight manager, create a
                           // fake one make interface compile pass.
-  return InitV2(op_proto, ctx, stub_weight, stub_weight, tensor_map);
+  auto status = InitV2(op_proto, ctx, stub_weight, stub_weight, tensor_map);
+  if (status != AsStatus::ALLSPARK_SUCCESS) {
+    LOG(ERROR) << "OP " << op_proto.op_name() << " init failed with status: " << (int) status;
+  }
+  return status;
 }
 
 AsStatus AsOperator::InitV2(const OperatorProto& op_proto,
@@ -377,8 +381,13 @@ OpFactory& OpFactory::getInstance() {
 
 OpConstructor OpFactory::GetOperator(const OpRegistType& op_reg_type) {
   if (op_set_.find(op_reg_type) == op_set_.end()) {
-    LOG(ERROR) << "Unsupported op type: " << op_reg_type.op_type_str
+    LOG(ERROR) << "Get Op failed: Unsupported op type: " << op_reg_type.op_type_str << " OP Type: "
+               << op_reg_type.op_type_str << " Device Type: " << op_reg_type.device_type
                << std::endl;
+    LOG(INFO) << "Supported OP list: " << std::endl;
+    for (auto &op : op_set_) {
+      LOG(INFO) << "op: " << op.first.op_type_str << std::endl;
+    }
     throw AsException("Unsupported op type.");
   }
   return op_set_[op_reg_type];

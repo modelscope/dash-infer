@@ -70,5 +70,18 @@ void ChunkBinary(T* out, T* in, int batch, int seq_len, int hidden_size,
 template void ChunkBinary<float>(float* output, float* input, int batch,
                                  int seq_len, int hidden_size, int chunk_split,
                                  int type);
+
+
+#ifdef ENABLE_FP16
+template void ChunkBinary<half>(half* output, half* input, int batch,
+                                 int seq_len, int hidden_size, int chunk_split,
+                                 int type);
+
+#endif
+#ifdef ENABLE_BF16
+template void ChunkBinary<hie::bfloat16>(hie::bfloat16* output, hie::bfloat16* input, int batch,
+                                 int seq_len, int hidden_size, int chunk_split,
+                                 int type);
+#endif
 }  // namespace cpu
 }  // namespace allspark

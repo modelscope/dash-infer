@@ -50,10 +50,15 @@ if(ENABLE_ARMCL MATCHES "ON")
     message(STATUS "ARMCL_LIBRARY:${ARMCL_LIBRARY} ONEDNN_LIBRARY: ${ONEDNN_LIBRARY}")
     list(APPEND ALLSPARK_3RD_LIBS ${ARMCL_LIBRARY})
 endif()
+
 if (ENABLE_CUDA)
     list(APPEND ALLSPARK_3RD_LIBS
         ${CUDA_3RD_PARTY_LIBS}
     )
+endif()
+
+if (OSX_BUILD)
+    list(APPEND ALLSPARK_3RD_LIBS ${TBB_LIB_STATIC})
 endif()
 
 if (ENABLE_MULTINUMA)
@@ -105,6 +110,7 @@ file(GLOB ALLSPARK_HOST_COMMON
 
 # host special for arm
 if (CONFIG_HOST_CPU_TYPE STREQUAL "ARM")
+     message("build with ARM op support.")
      file(GLOB_RECURSE ALLSPARK_HOST_SPECIAL
         ${CMAKE_CURRENT_SOURCE_DIR}/device/cpu/arm/*.cpp
         )
@@ -128,7 +134,6 @@ target_link_libraries(allspark_objects
     PRIVATE
         ${ONEDNN_LIBRARY}
         git_version
-        stdc++fs
         allspark_kernel
         CONAN_PKG::glog
         CONAN_PKG::protobuf
@@ -159,7 +164,7 @@ if (ENABLE_CUDA_PINNED_WEIGHT_LOAD)
     target_compile_definitions(allspark_objects PRIVATE -DENABLE_CUDA_PINNED_WEIGHT)
 endif()
 
-add_dependencies(allspark_objects project_dnnl)
+# add_dependencies(allspark_objects project_dnnl)
 
 if (ENABLE_CUDA)
 if(${CUDA_VERSION} VERSION_GREATER_EQUAL "11.8")

@@ -55,6 +55,14 @@ void DispatchCPU(DataType dtype, Functor&& F, Args&&... args) {
           std::forward<Args>(args)...);
       break;
     }
+#ifdef ENABLE_FP16
+    case DataType::FLOAT16: {
+      std::forward<Functor>(F).template operator()<half>(
+          std::forward<Args>(args)...);
+      break;
+    }
+#endif
+
     default: {
       LOG(ERROR) << "unsupported datatype " << DataType_Name(dtype)
                  << " for CPU dispatch";

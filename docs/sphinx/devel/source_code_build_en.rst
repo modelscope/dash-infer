@@ -33,7 +33,7 @@ CUDA
 Conan
 ,,,,,
 
- + **conan**:  C++ package management tools, can be installed by : ``pip install conan==1.60.0``, only 1.60.0 is supported.
+ + **conan**:  C++ package management tools, can be installed by : ``pip install conan==1.66.0``, only 1.x is supported.
 
  .. note:: if there is any package-not-found issue, please make sure your conan center is available. Reset it with this command: `conan remote add conancenter https://center.conan.io`
 
@@ -64,6 +64,7 @@ For multi-NUMA inference, ``numactl``, ``openmpi`` are required:
 .. code-block:: shell
 
   yum install numactl openmpi-devel openssh-clients -y
+
 
 .. _docker-label:
 
@@ -167,6 +168,35 @@ Build C++ Libraries
   export PATH=$PATH:$ARM_COMPILER_ROOT/bin
 
   AS_PLATFORM="armclang" AS_BUILD_PACKAGE="ON" ./build.sh
+
+4. Build C++ libraries for macos (M1-M3)
+
+ - install openmp
+
+  download openmp and copy to /usr/local/ by this site: https://mac.r-project.org/openmp/
+
+   make sure you get this message in cmake step:
+
+  -- Found OpenMP_C: -Xclang -fopenmp (found version "5.0")
+  -- Found OpenMP_CXX: -Xclang -fopenmp (found version "5.0")
+  -- Found OpenMP: TRUE (found version "5.0")
+
+.. code-block:: bash
+  mkdir build && cd build
+  conan install ../conan/conanfile.txt -b missing -b protobuf -b gtest -b glog
+  . activate.sh
+
+  # if build with armv9 (Apple M4)
+  # cmake ../ -DCONFIG_ACCELERATOR_TYPE=NONE -DALLSPARK_CBLAS=None -DCONFIG_HOST_CPU_TYPE=ARM -DBUILD_PYTHON=OFF -DENABLE_CUDA=OFF -DENABLE_ARM_V84_V9=ON -DENABLE_SPAN_ATTENTION=OFF
+  # build with armv8 (Apple M1-M3)
+  cmake ../ -DCONFIG_ACCELERATOR_TYPE=NONE -DALLSPARK_CBLAS=None -DCONFIG_HOST_CPU_TYPE=X86 -DBUILD_PYTHON=OFF -DENABLE_CUDA=OFF -DENABLE_SPAN_ATTENTION=OFF
+  make -j8
+
+  # running c++ benchmark.
+  export DYLD_LIBRARY_PATH=`pwd`/lib:$DYLD_LIBRARY_PATH
+
+  # put a serialized model on ../model_output
+  bin/model_stress_test  -t 2000 -f 1 -r 10000 -b 1  -N 1 -l 512 -C 1 -d  ../model_output/   -m qwen_Qwen2-7B-Instruct
 
 Profiling
 ---------
