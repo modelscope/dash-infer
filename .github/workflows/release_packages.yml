@@ -88,7 +88,7 @@ jobs:
     - name: Upload tgz package
       uses: actions/upload-artifact@v4
       with:
-        name: dashinfer-tgz-${{ matrix.arch }}
+        name: dashinfer-tgz-${{ matrix.arch }}-${{ matrix.enable_cuda }}
         path: build/*.tar.gz
 
 
@@ -161,7 +161,7 @@ jobs:
     - name: Upload wheels
       uses: actions/upload-artifact@v4
       with:
-        name: python-manylinux-wheels-${{ matrix.arch }}
+        name: python-manylinux-wheels-${{ matrix.arch }}-${{ matrix.enable_cuda }}
         path: python/wheelhouse/*-manylinux*.whl
 
   publish:
@@ -170,17 +170,21 @@ jobs:
     strategy:
       matrix:
         arch: [X64, ARM64]
+        enable_cuda: [0, 1]
+        exclude:
+          - arch: ARM64
+            enable_cuda: 1
     steps:
     - name: Download tgz packages
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: dashinfer-tgz-${{ matrix.arch }}
+        name: dashinfer-tgz-${{ matrix.arch }}-${{ matrix.enable_cuda }}
         path: release/
 
     - name: Download python wheels
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: python-manylinux-wheels-${{ matrix.arch }}
+        name: python-manylinux-wheels-${{ matrix.arch }}-${{ matrix.enable_cuda }}
         path: release/
 
     - name: Release all packages
