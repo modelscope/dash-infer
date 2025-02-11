@@ -1030,7 +1030,15 @@ __device__ __forceinline__ void cvt_8bx4_to_16bx4_bias128<__nv_bfloat162>(
 }
 
 static __device__ nv_bfloat162 inline num2num2(const nv_bfloat16 x) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   return __bfloat162bfloat162(x);
+#else
+#if __CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 3
+  __builtin_unreachable();
+#else
+  return nv_bfloat162{};
+#endif  // __CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 3
+#endif  // defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 }
 
 static __device__ half2 inline num2num2(const half x) {

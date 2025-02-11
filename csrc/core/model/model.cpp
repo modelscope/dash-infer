@@ -959,6 +959,7 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
   }
 #endif
   request->extra_embedding.clear();
+  request->interim.clear();
   int last_batch = runtime_ctx_->GetGenCtxListSize() - 1;
 
   // don't remove this sync, make sure finish with correct state.

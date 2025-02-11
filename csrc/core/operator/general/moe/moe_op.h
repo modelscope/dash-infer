@@ -9,7 +9,7 @@
 
 #include <dnnl.hpp>
 #ifdef ENABLE_CUDA
-#include <core/kernel/cuda/moe/moe_kernel.h>
+#include <core/kernel/cuda/moe/moe_dnn.h>
 #endif
 namespace allspark {
 
@@ -40,9 +40,7 @@ class MoeOp : public AsOperator {
   std::unique_ptr<AsTensor> mid_row_indices_;
   std::unique_ptr<AsTensor> mid_expert_indices_;
   std::unique_ptr<AsTensor> final_row_indices_;
-  std::unique_ptr<AsTensor> hWs_;
-  void* hWs;
-  size_t hWsSize, dWsSize;
+  size_t dWsSize;
   // use_dnn_over
   std::unique_ptr<AsTensor> experts_score_;
   std::unique_ptr<AsTensor> float_gate_score_;
