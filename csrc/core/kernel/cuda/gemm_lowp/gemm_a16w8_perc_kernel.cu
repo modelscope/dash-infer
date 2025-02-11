@@ -1320,33 +1320,32 @@ struct ComputeTile_A16W8_PerC_MtilexNtilex32_multistage_SM8x_SplitK {
 // dequant B
 #pragma unroll
     for (int i = 0; i < WARP_NITER / 2; ++i) {
-      cvt_8bx4_to_16bx4_bias128(BQ_frag[reg_buf_idx][2 * i],
-                                BF_frag[reg_buf_idx][2 * i]);
+      typename HalfType<FType>::T2 B_zero_x2 =
+          num2num2(static_cast<typename HalfType<FType>::T1>(0.f));
+      typename HalfType<FType>::T2 B_zero_y2 =
+          num2num2(static_cast<typename HalfType<FType>::T1>(0.f));
       if (has_zp) {
-        BF_frag[reg_buf_idx][2 * i][0] =
-            __hsub2(BF_frag[reg_buf_idx][2 * i][0], num2num2(B_zero[i].x));
-        BF_frag[reg_buf_idx][2 * i][1] =
-            __hsub2(BF_frag[reg_buf_idx][2 * i][1], num2num2(B_zero[i].x));
+        B_zero_x2 = num2num2(B_zero[i].x);
+        B_zero_y2 = num2num2(B_zero[i].y);
       }
 
-      BF_frag[reg_buf_idx][2 * i][0] =
-          __hmul2(BF_frag[reg_buf_idx][2 * i][0], num2num2(B_scale[i].x));
-      BF_frag[reg_buf_idx][2 * i][1] =
-          __hmul2(BF_frag[reg_buf_idx][2 * i][1], num2num2(B_scale[i].x));
+      cvt_8bx4_to_16bx4_bias128(BQ_frag[reg_buf_idx][2 * i],
+                                BF_frag[reg_buf_idx][2 * i]);
+
+      BF_frag[reg_buf_idx][2 * i][0] = dequantize_func(
+          BF_frag[reg_buf_idx][2 * i][0], num2num2(B_scale[i].x), B_zero_x2);
+      BF_frag[reg_buf_idx][2 * i][1] = dequantize_func(
+          BF_frag[reg_buf_idx][2 * i][1], num2num2(B_scale[i].x), B_zero_x2);
 
       cvt_8bx4_to_16bx4_bias128(BQ_frag[reg_buf_idx][2 * i + 1],
                                 BF_frag[reg_buf_idx][2 * i + 1]);
-      if (has_zp) {
-        BF_frag[reg_buf_idx][2 * i + 1][0] =
-            __hsub2(BF_frag[reg_buf_idx][2 * i + 1][0], num2num2(B_zero[i].y));
-        BF_frag[reg_buf_idx][2 * i + 1][1] =
-            __hsub2(BF_frag[reg_buf_idx][2 * i + 1][1], num2num2(B_zero[i].y));
-      }
 
       BF_frag[reg_buf_idx][2 * i + 1][0] =
-          __hmul2(BF_frag[reg_buf_idx][2 * i + 1][0], num2num2(B_scale[i].y));
+          dequantize_func(BF_frag[reg_buf_idx][2 * i + 1][0],
+                          num2num2(B_scale[i].y), B_zero_y2);
       BF_frag[reg_buf_idx][2 * i + 1][1] =
-          __hmul2(BF_frag[reg_buf_idx][2 * i + 1][1], num2num2(B_scale[i].y));
+          dequantize_func(BF_frag[reg_buf_idx][2 * i + 1][1],
+                          num2num2(B_scale[i].y), B_zero_y2);
     }
   }
 
@@ -1677,6 +1676,10 @@ void ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32
     const uint32_t K, void* workspace, const int sm_version,
     const SplitKParams fused_gemm_params, const float alpha,
     cudaStream_t stream) {
+  if (sm_version < 0x0800) {
+    throw std::runtime_error(
+        "this kernel is not supported on devices below sm80");
+  }
   int Mtile = fused_gemm_params.Mtile;
   int grid_x = (M + Mtile - 1) / Mtile;
   int Ntile = fused_gemm_params.Ntile;

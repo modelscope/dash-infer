@@ -66,6 +66,11 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
   num_expert_ = *(int*)(attr_map.at("num_experts").c_str());
+  if (num_expert_ < 0 || num_expert_ > 256) {
+    LOG(ERROR) << "MoeOp : not support num_expert = " << num_expert_
+               << std::endl;
+    return AsStatus::ALLSPARK_PARAM_ERROR;
+  }
   if (attr_map.find("num_experts_per_tok") == attr_map.end()) {
     LOG(ERROR) << "MoeOp : can't find num_expert_per_tok attribute."
                << std::endl;
@@ -77,6 +82,12 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   hidden_size_ = weights_[0]->GetShape()[1];
   proj_size_ = weights_[0]->GetShape()[2] / 2;
   total_token_ = ctx_->GetModelMaxLength();
+#ifdef ENABLE_CUDA
+  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+    dWsSize = cuda::GetWorkspaceSizeLauncher(
+        total_token_ * num_expert_pertoken_, num_expert_);
+  }
+#endif
   // default
   if (use_dnn_) {
     float_gate_score_ = std::make_unique<AsTensor>(
@@ -100,14 +111,6 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
     final_row_indices_ = std::make_unique<AsTensor>(
         "final_row_indices_", backend, DataType::INT32, DataMode::DENSE,
         Shape{ctx_->GetModelMaxLength(), num_expert_pertoken_});
-
-#ifdef ENABLE_CUDA
-    if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-      cuda::GetWorkspaceSize(&hWsSize, &dWsSize,
-                             total_token_ * num_expert_pertoken_, num_expert_);
-      cudaMallocHost(&hWs, hWsSize);
-    }
-#endif
   } else {
     block_size_ = 64;
     float_gate_score_ = std::make_unique<AsTensor>(
@@ -220,6 +223,7 @@ AsStatus MoeOp::Reshape() {
         cudaStream_t cu_stream =
             static_cast<const CUDAContext*>(ctx_)->GetStream();
         auto functor = [&]<typename T>() {
+          if (use_dnn_) {
             void* ws_ptr = tensor_map_->at("workspace")->GetDataPtr();
             gate_up_proj_out = (char*)ws_ptr;
             mid_result = (char*)gate_up_proj_out +
@@ -231,6 +235,39 @@ AsStatus MoeOp::Reshape() {
             dnn_ws = (char*)final_result +
                      aligned_size(max_total_tokens * hidden_size_ *
                                   SizeofType(dtype_));
+          } else {
+            int64_t max_block = get_max_block(
+                total_token_, num_expert_, num_expert_pertoken_, block_size_);
+            void* ws_ptr = tensor_map_->at("workspace")->GetDataPtr();
+            reorder_data = ws_ptr;
+            gate_up_proj_out = (char*)reorder_data + max_total_tokens *
+                                                         hidden_size_ *
+                                                         SizeofType(dtype_);
+            mid_result = (char*)gate_up_proj_out +
+                         max_total_tokens * proj_size_ * 2 * SizeofType(dtype_);
+            final_result = (char*)mid_result +
+                           max_total_tokens * proj_size_ * SizeofType(dtype_);
+            gate_up_proj_array = (void**)gate_up_proj_array_ptr->GetDataPtr();
+            down_proj_array = (void**)down_proj_array_ptr->GetDataPtr();
+            reorder_data_array = (void**)reorder_data_array_ptr->GetDataPtr();
+            gate_up_proj_out_array =
+                (void**)gate_up_proj_out_array_ptr->GetDataPtr();
+            mid_result_array = (void**)mid_result_array_ptr->GetDataPtr();
+            final_result_array = (void**)final_result_array_ptr->GetDataPtr();
+            cuda::MOEGetBatchArrayLauncher(
+                nullptr, nullptr, (T*)reorder_data, reorder_data_array,
+                max_block, block_size_ * hidden_size_, block_size_, cu_stream);
+            cuda::MOEGetBatchArrayLauncher(
+                nullptr, nullptr, (T*)gate_up_proj_out, gate_up_proj_out_array,
+                max_block, block_size_ * proj_size_ * 2, block_size_,
+                cu_stream);
+            cuda::MOEGetBatchArrayLauncher(
+                nullptr, nullptr, (T*)mid_result, mid_result_array, max_block,
+                block_size_ * proj_size_, block_size_, cu_stream);
+            cuda::MOEGetBatchArrayLauncher(
+                nullptr, nullptr, (T*)final_result, final_result_array,
+                max_block, block_size_ * hidden_size_, block_size_, cu_stream);
+          }
         };
         DispatchCUDA(dtype_, functor);
         break;
@@ -283,13 +320,14 @@ AsStatus MoeOp::Forward() {
                                  (int*)topk_indice_->GetDataPtr(),
                                  (float*)topk_value_->GetDataPtr(),
                                  total_token_, num_expert_, top_k, cu_stream);
+        if (use_dnn_) {
           cuda::MoeBatchedGemmLauncher<T>(
               (T*)in_tensor->GetDataPtr(),
               (T*)gate_up_proj_weight_tensor->GetDataPtr(),
               (uint32_t*)topk_indice_->GetDataPtr(), (T*)gate_up_proj_out,
-              (uint32_t*)mid_row_indices_->GetDataPtr(), hWs, hWsSize, dnn_ws,
-              dWsSize, total_token_, proj_size_ * 2, hidden_size_, num_expert_,
-              top_k, cu_stream);
+              (uint32_t*)mid_row_indices_->GetDataPtr(), dnn_ws, dWsSize,
+              total_token_, proj_size_ * 2, hidden_size_, num_expert_, top_k,
+              cu_stream);
 
           cuda::UnaryGLUKernelLauncher((T*)mid_result, (T*)gate_up_proj_out,
                                        total_token_ * top_k, proj_size_,
@@ -303,15 +341,69 @@ AsStatus MoeOp::Forward() {
           cuda::MoeBatchedGemmLauncher<T>(
               (T*)mid_result, (T*)down_proj_weight_tensor->GetDataPtr(),
               (uint32_t*)mid_expert_indices_->GetDataPtr(), (T*)final_result,
-              (uint32_t*)final_row_indices_->GetDataPtr(), hWs, hWsSize, dnn_ws,
-              dWsSize, total_token_ * top_k, hidden_size_, proj_size_,
-              num_expert_, 1, cu_stream);
+              (uint32_t*)final_row_indices_->GetDataPtr(), dnn_ws, dWsSize,
+              total_token_ * top_k, hidden_size_, proj_size_, num_expert_, 1,
+              cu_stream);
           cuda::FinalizeMoeRoutingNewKernelLauncher(
               (T*)out_tensor->GetDataPtr(), (T*)final_result,
               (float*)experts_score_->GetDataPtr(),
               (int*)mid_row_indices_->GetDataPtr(),
               (int*)final_row_indices_->GetDataPtr(), total_token_, top_k,
               hidden_size_, cu_stream);
+        } else {
+          // int total_token_post_pad = 0;
+          cuda::ReorderAndPaddingMOE(
+              (int64_t*)experts_idx_->GetDataPtr(),
+              (int64_t*)experts_seq_->GetDataPtr(),
+              (int64_t*)indice_source_->GetDataPtr(),
+              (int*)topk_indice_->GetDataPtr(), total_token_, num_expert_,
+              top_k, block_size_, (int*)total_tokens_post_pad_->GetDataPtr(),
+              cu_stream);
+
+          int* total_tokens_pad_ptr =
+              (int*)total_tokens_post_pad_->GetDataPtr();
+          int max_block = get_max_block(total_token_, num_expert_,
+                                        num_expert_pertoken_, block_size_);
+          int max_total_tokens = max_block * block_size_;
+          // LOG(INFO) << "max_block=" << max_block;
+          cuda::GetReorderData((T*)reorder_data, (T*)in_tensor->GetDataPtr(),
+                               (int64_t*)experts_idx_->GetDataPtr(),
+                               (int64_t*)experts_seq_->GetDataPtr(),
+                               total_tokens_pad_ptr, max_total_tokens,
+                               total_token_ * top_k, top_k, hidden_size_,
+                               block_size_, cu_stream);
+
+          cuda::MOEGetBatchArrayLauncher(
+              (int64_t*)experts_idx_->GetDataPtr(), total_tokens_pad_ptr,
+              (T*)gate_up_proj_weight_tensor->GetDataPtr(), gate_up_proj_array,
+              max_block, gate_up_proj_weight_tensor->GetShape().Count(1),
+              block_size_, cu_stream);
+          cuda::MOEGetBatchArrayLauncher(
+              (int64_t*)experts_idx_->GetDataPtr(), total_tokens_pad_ptr,
+              (T*)down_proj_weight_tensor->GetDataPtr(), down_proj_array,
+              max_block, down_proj_weight_tensor->GetShape().Count(1),
+              block_size_, cu_stream);
+          cuda::BatchGemmWraper<T>(gate_up_proj_out_array, reorder_data_array,
+                                   gate_up_proj_array, block_size_,
+                                   proj_size_ * 2, hidden_size_, false, false,
+                                   1.0f, 0.0f, hidden_size_, proj_size_ * 2,
+                                   proj_size_ * 2, max_block, cublas_handle);
+          cuda::UnaryGLUKernelLauncher((T*)mid_result, (T*)gate_up_proj_out,
+                                       max_total_tokens, proj_size_,
+                                       UnaryType::SILU, cu_stream);
+          // cuda::MulAndSilu((T*)mid_result, (T*)gate_out, (T*)up_proj_out,
+          //                  max_total_tokens, proj_size_, cu_stream);
+          cuda::BatchGemmWraper<T>(
+              final_result_array, mid_result_array, down_proj_array,
+              block_size_, hidden_size_, proj_size_, false, false, 1.0f, 0.0f,
+              proj_size_, hidden_size_, hidden_size_, max_block, cublas_handle);
+          cuda::FinalizeMoeRoutingKernelLauncher(
+              (T*)out_tensor->GetDataPtr(), (T*)final_result,
+              (float*)experts_score_->GetDataPtr(),
+              (int64_t*)indice_source_->GetDataPtr(),
+              (int*)topk_indice_->GetDataPtr(), total_tokens_pad_ptr,
+              total_token_, top_k, hidden_size_, cu_stream);
+        }
       };
       DispatchCUDA(dtype_, functor);
       break;
