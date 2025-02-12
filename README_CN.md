@@ -143,8 +143,32 @@ DashInfer 为 LLM 权重提供了多种量化技术，例如 int{8,4} 仅权重�
 
 # 子项目
 
-1. [HIE-DNN](https://github.com/modelscope/dash-infer/tree/main/HIE-DNN) 为DashInfer所使用的计算库。
-2. [Span Attention](https://github.com/modelscope/dash-infer/tree/main/span-attention) 为DashInfer GPU实现的GPU PageAttention
+1. [HIE-DNN](https://github.com/modelscope/dash-infer/tree/main/HIE-DNN) 为 DashInfer 所使用的算子库。
+2. [SpanAttention](https://github.com/modelscope/dash-infer/tree/main/span-attention) 为 DashInfer GPU 实现的分页 attention 算子。
+
+# 引用
+
+DashInfer 的高性能 MoE 算子基于 [这篇论文](https://arxiv.org/abs/2501.16103) 实现，此外，DashInfer 使用了高效的 top-k 算子 [*RadiK*](https://arxiv.org/abs/2501.14336).
+如果我们的工作对您有帮助，欢迎引用：
+
+```bibtex
+@misc{dashinfermoe2025,
+  title = {Static Batching of Irregular Workloads on GPUs: Framework and Application to Efficient MoE Model Inference}, 
+  author = {Yinghan Li and Yifei Li and Jiejing Zhang and Bujiao Chen and Xiaotong Chen and Lian Duan and Yejun Jin and Zheng Li and Xuanyu Liu and Haoyu Wang and Wente Wang and Yajie Wang and Jiacheng Yang and Peiyang Zhang and Laiwen Zheng and Wenyuan Yu},
+  year = {2025},
+  eprint = {2501.16103},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.DC},
+  url = {https://arxiv.org/abs/2501.16103}
+}
+
+@inproceedings{radik2024,
+  title = {RadiK: Scalable and Optimized GPU-Parallel Radix Top-K Selection},
+  author = {Li, Yifei and Zhou, Bole and Zhang, Jiejing and Wei, Xuechao and Li, Yinghan and Chen, Yingda},
+  booktitle = {Proceedings of the 38th ACM International Conference on Supercomputing},
+  year = {2024}
+}
+```
 
 # License
 

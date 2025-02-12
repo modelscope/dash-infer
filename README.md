@@ -167,7 +167,34 @@ We compared the guided output (in JSON format) between different engines using t
 
 ![dashinfer-benchmark-json-mode.png](docs/resources/image/dashinfer-benchmark-json-mode.png)
 
+# Subprojects
 
+1. [HIE-DNN](https://github.com/modelscope/dash-infer/tree/main/HIE-DNN): an operator library for high-performance inference of deep neural network (DNN).
+2. [SpanAttention](https://github.com/modelscope/dash-infer/tree/main/span-attention): a high-performance decode-phase attention with paged KV cache for LLM inference on CUDA-enabled devices.
+
+# Citation
+
+The high-performance implementation of DashInfer MoE operator is introduced in [this paper](https://arxiv.org/abs/2501.16103), and DashInfer employs the efficient top-k operator [*RadiK*](https://arxiv.org/abs/2501.14336).
+If you find them useful, please feel free to cite these papers:
+
+```bibtex
+@misc{dashinfermoe2025,
+  title = {Static Batching of Irregular Workloads on GPUs: Framework and Application to Efficient MoE Model Inference}, 
+  author = {Yinghan Li and Yifei Li and Jiejing Zhang and Bujiao Chen and Xiaotong Chen and Lian Duan and Yejun Jin and Zheng Li and Xuanyu Liu and Haoyu Wang and Wente Wang and Yajie Wang and Jiacheng Yang and Peiyang Zhang and Laiwen Zheng and Wenyuan Yu},
+  year = {2025},
+  eprint = {2501.16103},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.DC},
+  url = {https://arxiv.org/abs/2501.16103}
+}
+
+@inproceedings{radik2024,
+  title = {RadiK: Scalable and Optimized GPU-Parallel Radix Top-K Selection},
+  author = {Li, Yifei and Zhou, Bole and Zhang, Jiejing and Wei, Xuechao and Li, Yinghan and Chen, Yingda},
+  booktitle = {Proceedings of the 38th ACM International Conference on Supercomputing},
+  year = {2024}
+}
+```
 
 # Future Plans
 - [x] GPU Support
