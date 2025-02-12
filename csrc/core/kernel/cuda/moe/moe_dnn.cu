@@ -2819,6 +2819,8 @@ __global__ void hgemm_f32_n256k64_hgmma_ldg8_kernel(
     uint32_t COffset = batchInfo.COffset;
     uint32_t ctaIdXY = vCtaId - batchInfo.ctaOffset;
 
+    __syncthreads();  // solve shared memory WAR conflict
+
     if (m > 96) {
       // m_tile 128, n_tile 256, k_tile 64x4, warpgroup tile 64x256
 
