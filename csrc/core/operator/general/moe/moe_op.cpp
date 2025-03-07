@@ -58,6 +58,7 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                  << " device type" << std::endl;
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
+
   tensor_map_->at(out_names_[0])->SetDataType(dtype_);
   // attr
   auto& attr_map = op_proto.attr();
@@ -77,8 +78,45 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
     return AsStatus::ALLSPARK_PARAM_ERROR;
   }
   num_expert_pertoken_ = *(int*)(attr_map.at("num_experts_per_tok").c_str());
-  first_moe_ = true;
+  int nranks = 0;
+  int rank = 0;
+  switch (backend) {
+#ifdef ENABLE_CUDA
+    case DeviceType::CUDA: {
+      const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+      nranks = gpu_ctx->GetNranks();
+      rank = gpu_ctx->GetRank();
+      break;
+    }
+#endif
+    case DeviceType::CPU: {
+      const CPUContext* cpu_ctx = static_cast<const CPUContext*>(ctx_);
+      nranks = cpu_ctx->GetNranks();
+      rank = cpu_ctx->GetRank();
+      break;
+    }
+    default:
+      LOG(ERROR) << op_type_ << " Operator does not support "
+                 << DeviceType_Name(backend) << " device type" << std::endl;
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+  }
+  if (attr_map.find("use_ep") != attr_map.end()) {
+    use_ep_ = true;
+    ep_num_ = num_expert_ / nranks;
+  } else {
+    use_ep_ = false;
+    ep_num_ = num_expert_;
+  }
+  ep_group_ = std::make_unique<AsTensor>("ep_group_", backend, DataType::INT32,
+                                         DataMode::DENSE, Shape{ep_num_});
+  std::vector<int> ep_list(ep_num_);
+  for (int i = 0; i < ep_num_; i++) {
+    ep_list[i] = i + rank * ep_num_;
+  }
+  CopyData(ep_group_->GetDataPtr(), backend, ep_list.data(), DeviceType::CPU,
+           ep_num_ * sizeof(int), ctx_);
 
+  first_moe_ = true;
   hidden_size_ = weights_[0]->GetShape()[1];
   proj_size_ = weights_[0]->GetShape()[2] / 2;
   total_token_ = ctx_->GetModelMaxLength();
@@ -101,6 +139,9 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
         Shape{ctx_->GetModelMaxLength(), num_expert_pertoken_});
     topk_indice_ = std::make_unique<AsTensor>(
         "topk_indice_", backend, DataType::INT32, DataMode::DENSE,
+        Shape{ctx_->GetModelMaxLength(), num_expert_pertoken_});
+    topk_indice_tmp = std::make_unique<AsTensor>(
+        "topk_indice_tmp", backend, DataType::INT32, DataMode::DENSE,
         Shape{ctx_->GetModelMaxLength(), num_expert_pertoken_});
     mid_row_indices_ = std::make_unique<AsTensor>(
         "mid_row_indices_", backend, DataType::INT32, DataMode::DENSE,
@@ -179,6 +220,7 @@ AsStatus MoeOp::Reshape() {
       topk_value_->SetShape(Shape{total_token_, num_expert_});
       experts_score_->SetShape(Shape{total_token_, num_expert_pertoken_});
       topk_indice_->SetShape(Shape{total_token_, num_expert_pertoken_});
+      topk_indice_tmp->SetShape(Shape{total_token_, num_expert_pertoken_});
     } else {
       int64_t max_block = get_max_block(total_token_, num_expert_,
                                         num_expert_pertoken_, block_size_);
@@ -321,35 +363,46 @@ AsStatus MoeOp::Forward() {
                                  (float*)topk_value_->GetDataPtr(),
                                  total_token_, num_expert_, top_k, cu_stream);
         if (use_dnn_) {
+          if (use_ep_) {
+            cudaMemcpyAsync(topk_indice_tmp->GetDataPtr(),
+                            topk_indice_->GetDataPtr(),
+                            total_token_ * top_k * sizeof(int32_t),
+                            cudaMemcpyDeviceToDevice, cu_stream);
+            cuda::FilteringExperts((int*)topk_indice_->GetDataPtr(),
+                                   (const int*)topk_indice_tmp->GetDataPtr(),
+                                   total_token_, num_expert_, top_k, ep_num_,
+                                   (int*)ep_group_->GetDataPtr(), cu_stream);
+          }
           cuda::MoeBatchedGemmLauncher<T>(
               (T*)in_tensor->GetDataPtr(),
               (T*)gate_up_proj_weight_tensor->GetDataPtr(),
               (uint32_t*)topk_indice_->GetDataPtr(), (T*)gate_up_proj_out,
               (uint32_t*)mid_row_indices_->GetDataPtr(), dnn_ws, dWsSize,
-              total_token_, proj_size_ * 2, hidden_size_, num_expert_, top_k,
+              total_token_, proj_size_ * 2, hidden_size_, ep_num_, top_k,
               cu_stream);
 
           cuda::UnaryGLUKernelLauncher((T*)mid_result, (T*)gate_up_proj_out,
                                        total_token_ * top_k, proj_size_,
                                        UnaryType::SILU, cu_stream);
-
+          cudaMemsetAsync(mid_expert_indices_->GetDataPtr(), 0xFF,
+                          total_token_ * top_k * sizeof(int32_t), cu_stream);
           cuda::GetExpertByIndice((int*)mid_expert_indices_->GetDataPtr(),
                                   (int*)topk_indice_->GetDataPtr(),
                                   (int*)mid_row_indices_->GetDataPtr(),
-                                  total_token_, top_k, num_expert_, cu_stream);
+                                  total_token_, top_k, ep_num_, cu_stream);
 
           cuda::MoeBatchedGemmLauncher<T>(
               (T*)mid_result, (T*)down_proj_weight_tensor->GetDataPtr(),
               (uint32_t*)mid_expert_indices_->GetDataPtr(), (T*)final_result,
               (uint32_t*)final_row_indices_->GetDataPtr(), dnn_ws, dWsSize,
-              total_token_ * top_k, hidden_size_, proj_size_, num_expert_, 1,
+              total_token_ * top_k, hidden_size_, proj_size_, ep_num_, 1,
               cu_stream);
           cuda::FinalizeMoeRoutingNewKernelLauncher(
               (T*)out_tensor->GetDataPtr(), (T*)final_result,
               (float*)experts_score_->GetDataPtr(),
               (int*)mid_row_indices_->GetDataPtr(),
               (int*)final_row_indices_->GetDataPtr(), total_token_, top_k,
-              hidden_size_, cu_stream);
+              hidden_size_, ep_num_, (int*)ep_group_->GetDataPtr(), cu_stream);
         } else {
           // int total_token_post_pad = 0;
           cuda::ReorderAndPaddingMOE(
@@ -358,7 +411,7 @@ AsStatus MoeOp::Forward() {
               (int64_t*)indice_source_->GetDataPtr(),
               (int*)topk_indice_->GetDataPtr(), total_token_, num_expert_,
               top_k, block_size_, (int*)total_tokens_post_pad_->GetDataPtr(),
-              cu_stream);
+              ep_num_, (int*)ep_group_->GetDataPtr(), cu_stream);
 
           int* total_tokens_pad_ptr =
               (int*)total_tokens_post_pad_->GetDataPtr();
@@ -402,7 +455,8 @@ AsStatus MoeOp::Forward() {
               (float*)experts_score_->GetDataPtr(),
               (int64_t*)indice_source_->GetDataPtr(),
               (int*)topk_indice_->GetDataPtr(), total_tokens_pad_ptr,
-              total_token_, top_k, hidden_size_, cu_stream);
+              total_token_, top_k, hidden_size_, ep_num_,
+              (int*)ep_group_->GetDataPtr(), cu_stream);
         }
       };
       DispatchCUDA(dtype_, functor);

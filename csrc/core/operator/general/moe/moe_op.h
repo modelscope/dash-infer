@@ -46,6 +46,7 @@ class MoeOp : public AsOperator {
   std::unique_ptr<AsTensor> float_gate_score_;
   std::unique_ptr<AsTensor> topk_value_;
   std::unique_ptr<AsTensor> topk_indice_;
+  std::unique_ptr<AsTensor> topk_indice_tmp;
   std::unique_ptr<AsTensor> experts_idx_;
   std::unique_ptr<AsTensor> experts_seq_;
   std::unique_ptr<AsTensor> indice_source_;
@@ -70,6 +71,11 @@ class MoeOp : public AsOperator {
   void** gate_up_proj_out_array;
   void** mid_result_array;
   void** final_result_array;
+  // ep
+
+  int ep_num_;
+  bool use_ep_ = false;
+  std::unique_ptr<AsTensor> ep_group_;
 };
 
 }  // namespace allspark

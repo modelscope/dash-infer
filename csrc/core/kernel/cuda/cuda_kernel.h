@@ -396,7 +396,8 @@ void CalcExpertKernelLauncher(T* output, T* input, T* expert_weight,
 void ReorderAndPaddingMOE(int64_t* experts_idx, int64_t* experts_seq,
                           int64_t* indice_source, int* input, int batch,
                           int num_experts, int top_k, int block_size,
-                          int* total_token_post_pad, cudaStream_t stream);
+                          int* total_token_post_pad, int ep_num, int* ep_group,
+                          cudaStream_t stream);
 template <typename T>
 void GetReorderData(T* reorder_data, T* input, int64_t* experts_idx,
                     int64_t* experts_seq, int* total_tokens_post_pad,
@@ -414,14 +415,13 @@ template <typename T>
 void FinalizeMoeRoutingKernelLauncher(
     T* output, T* fianl_result, float* experts_score, int64_t* indice_source,
     int* expert_for_source_row, int* total_tokens_pad_ptr, int total_token,
-    int top_k, int hidden_size, cudaStream_t stream);
+    int top_k, int hidden_size, int ep_num_, int* ep_group,
+    cudaStream_t stream);
 template <typename T>
-void FinalizeMoeRoutingNewKernelLauncher(T* output, T* fianl_result,
-                                         float* experts_score,
-                                         int* mid_row_indices,
-                                         int* final_row_indices,
-                                         int total_token, int top_k,
-                                         int hidden_size, cudaStream_t stream);
+void FinalizeMoeRoutingNewKernelLauncher(
+    T* output, T* fianl_result, float* experts_score, int* mid_row_indices,
+    int* final_row_indices, int total_token, int top_k, int hidden_size,
+    int ep_num_, int* ep_group, cudaStream_t stream);
 template <typename T>
 void RotaryMultimodalSections(T* output, T* input, float* inv_freq, int batch,
                               int seq_len, int head, int size_per_head,
@@ -433,5 +433,8 @@ void SoftmaxLowReduceKernelLauncher(const T* input, T* output, int out_dim,
 void GetExpertByIndice(int* expert_indices, const int* in_expert_indices,
                        const int* row_indices, int total_token, int topk,
                        int num_expert, cudaStream_t stream);
+void FilteringExperts(int* topk_indice, const int* topk_indice_in,
+                      int total_token, int num_expert, int top_k, int ep_num,
+                      int* ep_group, cudaStream_t stream);
 }  // namespace cuda
 }  // namespace allspark

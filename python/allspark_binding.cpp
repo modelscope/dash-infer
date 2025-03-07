@@ -265,6 +265,7 @@ PYBIND11_MODULE(_allspark, m) {
   m.attr("BATCH_VSPLIT") = py::int_(int(SplitMode::BATCH_VSPLIT));
   m.attr("BATCH_HSPLIT") = py::int_(int(SplitMode::BATCH_HSPLIT));
   m.attr("BATCH_KVSPLIT") = py::int_(int(SplitMode::BATCH_KVSPLIT));
+  m.attr("EPSPLIT") = py::int_(int(SplitMode::EPSPLIT));
 
   m.attr("DATATYPE_UNDEFINED") = py::int_(int(DataType::DATATYPE_UNDEFINED));
   m.attr("FLOAT32") = py::int_(int(DataType::FLOAT32));

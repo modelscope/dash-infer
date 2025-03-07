@@ -53,7 +53,6 @@ class Qwen_v20_MOE(Model):
     def _build_graph(self, torch_cfg, derive_type):
         cfg = self.model.model_conf
         cfg.dtype = self.dtype
-
         cfg.ln_eps = torch_cfg.get('rms_norm_eps', 1e-6)
         cfg.num_heads = torch_cfg.get('num_attention_heads', 16)
         cfg.multi_query_group_num = torch_cfg.get('num_key_value_heads', 0)
@@ -66,7 +65,7 @@ class Qwen_v20_MOE(Model):
         cfg.size_per_head = torch_cfg.get('size_per_head', 128)
         cfg.intermediate_size = torch_cfg.get('intermediate_size', 0)
         cfg.is_generate = self.is_generate
-
+        self.use_ep = torch_cfg.get('use_ep', False)
         # daoxian added for span version
         cfg.dtype = self.dtype
 
@@ -175,9 +174,12 @@ class Qwen_v20_MOE(Model):
                                "attention.output.dense.weight"] = HSPLIT
                 self.split_map[prefix + "shared_expert.gate_up_proj.weight"] = KVSPLIT
                 self.split_map[prefix + "shared_expert.down_proj.weight"] = HSPLIT
-                
-                self.split_map[prefix + "mlp.experts.gate_up_proj.weight"] = BATCH_KVSPLIT
-                self.split_map[prefix + "mlp.experts.down_proj.weight"] = BATCH_HSPLIT
+                if self.use_ep:
+                    self.split_map[prefix + "mlp.experts.gate_up_proj.weight"] = EPSPLIT
+                    self.split_map[prefix + "mlp.experts.down_proj.weight"] = EPSPLIT
+                else:
+                    self.split_map[prefix + "mlp.experts.gate_up_proj.weight"] = BATCH_KVSPLIT
+                    self.split_map[prefix + "mlp.experts.down_proj.weight"] = BATCH_HSPLIT
         if self.do_dynamic_quantize_convert is True:
             if self.quant_config != None:
                 print(self.quant_config.quantize_mode)
@@ -333,6 +335,7 @@ class Qwen_v20_MOE(Model):
                 {
                     "num_experts":cfg.num_experts,
                     "num_experts_per_tok":cfg.num_experts_per_tok,
+                    "use_ep":self.use_ep
                 }
             )()
             all_reduce_moe = AllReduce(

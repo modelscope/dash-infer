@@ -850,7 +850,73 @@ class WeightSplitterVSplitMQA : public WeightSplitter {
     }
   }
 };
+class WeightSplitterEPSplit : public WeightSplitter {
+ public:
+  WeightSplitterEPSplit(RankInfo rank_info)
+      : WeightSplitter(SplitMode::EPSPLIT, rank_info){};
 
+  bool IsSplittable(TensorInfo& info) {
+    // check the outer dim can div by nrank or not.
+    if (info.shape.Size() == 3) {  // it's the ep weight matrix.
+      if (info.shape[0] % rank_info_.rank_size != 0) {
+        LOG(ERROR) << " weight split: epsplit: rank: "
+                   << " tensor shape[0]: " << info.shape[0]
+                   << " cannot div by nrank: " << rank_info_.rank_size;
+        return false;
+      }
+    } else {
+      LOG(ERROR) << " weight split: EPSplitt: try to div not 3 dim matrix "
+                 << info.shape.Size();
+      return false;
+    }
+    return true;
+  }
+
+  void SetShape(TensorInfo dst_tensor_info,
+                std::shared_ptr<AsTensor> dst_tensor) {
+    Shape new_shape(dst_tensor_info.shape);
+    if (new_shape.Size() == 3) {
+      new_shape[0] /= rank_info_.rank_size;
+      dst_tensor->Free();
+      dst_tensor->SetShape(Shape(new_shape));  // set new shape will allocate.
+    }
+  }
+
+  void CopyWeight(TensorInfo dst_tensor_info,
+                  std::shared_ptr<AsTensor> dst_tensor,
+                  std::shared_ptr<AsTensor> opt_whole_tensor,
+                  const void* whole_weight_ptr, size_t len) {
+    // offset, not by bytes.
+    if (opt_whole_tensor) {
+      Shape new_shape(dst_tensor_info.shape);
+      if (new_shape.Size() == 3) {
+        int batch = new_shape[0] / rank_info_.rank_size;
+        int batch_offset = batch * rank_info_.rank_id;
+        int sub_matrix_height = new_shape[1];
+        int sub_matrix_width = new_shape[2];
+        size_t matrix_size = sub_matrix_height * sub_matrix_width;
+        size_t base_src_idx = batch_offset * matrix_size;
+        size_t base_dst_idx = 0;
+        AsTensor* dst = dst_tensor.get();
+        AsTensor* src = opt_whole_tensor.get();
+        size_t data_size = SizeofType(src->GetDataType());
+        void* src_ptr_with_offsets =
+            (char*)src->GetDataPtr() + base_src_idx * data_size;
+        void* dst_ptr_with_offsets =
+            (char*)dst->GetDataPtr() + base_dst_idx * data_size;
+        TensorUtils::CopyMatrix2D(
+            dst_ptr_with_offsets, src_ptr_with_offsets, dst->GetDeviceType(),
+            src->GetDeviceType(), matrix_size * data_size,
+            matrix_size * data_size, batch, matrix_size * data_size);
+      }
+    } else {
+      assert(-1);
+      // TODO: impl later.
+    }
+  }
+
+  bool IsModelProcessable(SplitMode mode) { return mode == SplitMode::EPSPLIT; }
+};
 // TODO: change to regsiter pattern if there is more split mode comming
 std::unique_ptr<WeightSplitter> WeightSplitterFactory::GetSplitterByMode(
     SplitMode mode, RankInfo rankInfo) {
@@ -889,6 +955,9 @@ std::unique_ptr<WeightSplitter> WeightSplitterFactory::GetSplitterByMode(
       break;
     case SplitMode::BATCH_KVSPLIT:
       splitter.reset(new WeightSplitterBatchKVerticalSplit(rankInfo));
+      break;
+    case SplitMode::EPSPLIT:
+      splitter.reset(new WeightSplitterEPSplit(rankInfo));
       break;
     default:
       assert(-1);

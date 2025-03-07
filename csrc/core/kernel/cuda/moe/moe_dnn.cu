@@ -2752,7 +2752,7 @@ __device__ __forceinline__ void hgemm_f32_m16n256_k64x6_hgmma64x16_ldg8_loop(
   }
 }
 
-template <typename T16, int MAX_NMATB = 256>
+template <typename T16, int MAX_NMATB>
 __global__ void hgemm_f32_n256k64_hgmma_ldg8_kernel(
     const T16* A, const T16* B, T16* C,
     const uint32_t* ctaIdBarriers,  // {MAX_NMATB}
@@ -2890,7 +2890,9 @@ __global__ void matA_row_idx_kernel(
   if (idx < size) {
     matARowIdx = idx >> matARowIdxRShift;
     matBIdx = matBIndices[idx];
-    stgOffset = atomicAdd(smem + matBIdx, 1);
+    if (matBIdx != 0xffffffff) {
+      stgOffset = atomicAdd(smem + matBIdx, 1);
+    }
   }
   __syncthreads();
 
@@ -2903,9 +2905,13 @@ __global__ void matA_row_idx_kernel(
   __syncthreads();
 
   if (idx < size) {
-    stgOffset += smem[matBIdx];
-    matCRowBatchOffset[idx] = stgOffset;
-    matARowIndices[matBIdx * m + stgOffset] = matARowIdx;
+    if (matBIdx != 0xffffffff) {
+      stgOffset += smem[matBIdx];
+      matCRowBatchOffset[idx] = stgOffset;
+      matARowIndices[matBIdx * m + stgOffset] = matARowIdx;
+    } else {
+      matCRowBatchOffset[idx] = 0xffffffff;
+    }
   }
 }
 
@@ -3073,19 +3079,21 @@ __global__ void prepare_moe_parameters_kernel(
       return;
     }
 
-    asm volatile(
-        "{.reg .b32 r0, r1;\n"
-        " .reg .b64 r2;\n"
-        " ld.global.cg.b32 r0, [%0];\n"
-        " ld.global.cg.b32 r1, [%2];\n"
-        " cvta.to.global.u64 r2, %1;\n"
-        " mad.wide.u32 r2, r0, %3, r2;\n"
-        " ld.global.nc.b32 r0, [r2];\n"
-        " add.u32 r1, r1, r0;\n"
-        " st.global.b32 [%2], r1;}"
-        :
-        : "l"(matBIndices + idx), "l"(gemmMPrefixSum),
-          "l"(matCRowIndices + idx), "n"(sizeof(uint32_t)));
+    uint32_t matBIdx = matBIndices[idx];
+    if (matBIdx != 0xffffffff) {
+      asm volatile(
+          "{.reg .b32 r0, r1;\n"
+          " .reg .b64 r2;\n"
+          " ld.global.cg.b32 r0, [%2];\n"
+          " cvta.to.global.u64 r2, %1;\n"
+          " mad.wide.u32 r2, %0, %3, r2;\n"
+          " ld.global.nc.b32 r1, [r2];\n"
+          " add.u32 r0, r0, r1;\n"
+          " st.global.b32 [%2], r0;}"
+          :
+          : "r"(matBIdx), "l"(gemmMPrefixSum), "l"(matCRowIndices + idx),
+            "n"(sizeof(uint32_t)));
+    }
   }
 }
 
@@ -3152,19 +3160,7 @@ size_t GetWorkspaceSize(uint32_t matARows, uint32_t nMatB) {
                    batchedGemmMSize + matARowIdxSize;
   return ws_size;
 }
-template size_t GetWorkspaceSize<64>(uint32_t, uint32_t);
-template size_t GetWorkspaceSize<128>(uint32_t, uint32_t);
-template size_t GetWorkspaceSize<256>(uint32_t, uint32_t);
-size_t GetWorkspaceSizeLauncher(uint32_t matARows, uint32_t nMatB) {
-  if (nMatB <= 64) {
-    return GetWorkspaceSize<64>(matARows, nMatB);
-  } else if (nMatB <= 128) {
-    return GetWorkspaceSize<128>(matARows, nMatB);
-  } else if (nMatB <= 256) {
-    return GetWorkspaceSize<256>(matARows, nMatB);
-  }
-  return 0;
-}
+
 template <typename T16, int MAX_NMATB>
 void MoeBatchedGemm(const T16* A, const T16* B, const uint32_t* matBIndices,
                     T16* C, uint32_t* matCRowIndices, void* ws, size_t wsSize,
@@ -3318,5 +3314,18 @@ void MoeBatchedGemmLauncher<hie::bfloat16>(
   }
 }
 #endif
+template size_t GetWorkspaceSize<64>(uint32_t, uint32_t);
+template size_t GetWorkspaceSize<128>(uint32_t, uint32_t);
+template size_t GetWorkspaceSize<256>(uint32_t, uint32_t);
+size_t GetWorkspaceSizeLauncher(uint32_t matARows, uint32_t nMatB) {
+  if (nMatB <= 64) {
+    return GetWorkspaceSize<64>(matARows, nMatB);
+  } else if (nMatB <= 128) {
+    return GetWorkspaceSize<128>(matARows, nMatB);
+  } else if (nMatB <= 256) {
+    return GetWorkspaceSize<256>(matARows, nMatB);
+  }
+  return 0;
+}
 }  // namespace cuda
 }  // namespace allspark
