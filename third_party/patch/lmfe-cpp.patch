@@ -523,7 +523,7 @@ index 9a529c3..3f2d711 100644
  
  JsonSchemaPtr get_any_json_object_schema()
 diff --git a/src/tokenizerdata.cpp b/src/tokenizerdata.cpp
-index 9c49ca3..8f8598d 100644
+index 9c49ca3..c85221f 100644
 --- a/src/tokenizerdata.cpp
 +++ b/src/tokenizerdata.cpp
 @@ -1,7 +1,129 @@
@@ -600,7 +600,7 @@ index 9c49ca3..8f8598d 100644
 +        if (tokenStr[i] == '\"' && i < tokenStr.size() - 1) {
 +            has_quote_before_end = true;
 +        }
-+        if (tokenStr[i] == '\n' || tokenStr[i] == '\r' || tokenStr[i] == '\f' || tokenStr[i] == '\v') {
++        if (tokenStr[i] != '\t' && ((tokenStr[i] >= 0 && tokenStr[i] <= 31) || tokenStr[i] == 127)) {
 +            has_newline = true;
 +        }
 +    }

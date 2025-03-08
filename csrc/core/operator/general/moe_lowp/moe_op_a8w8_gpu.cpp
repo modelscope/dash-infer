@@ -443,7 +443,7 @@ void MoeA8W8Gpu::DispatchKernel() {
       (int64_t*)experts_seq_->GetDataPtr(),
       (int64_t*)indice_source_->GetDataPtr(), (int*)topk_indice_->GetDataPtr(),
       total_token_, num_expert_, num_expert_pertoken_, block_size_,
-      (int*)total_tokens_post_pad_->GetDataPtr(), cu_stream);
+      (int*)total_tokens_post_pad_->GetDataPtr(), 0, nullptr, cu_stream);
 
   int* total_tokens_pad_ptr = (int*)total_tokens_post_pad_->GetDataPtr();
   int max_block = get_max_block(total_token_, num_expert_, num_expert_pertoken_,
@@ -512,8 +512,8 @@ void MoeA8W8Gpu::DispatchKernel() {
       (FT*)out_tensor->GetDataPtr(), (FT*)final_result,
       (float*)experts_score_->GetDataPtr(),
       (int64_t*)indice_source_->GetDataPtr(), (int*)topk_indice_->GetDataPtr(),
-      total_tokens_pad_ptr, total_token_, num_expert_pertoken_, hidden_size_,
-      cu_stream);
+      total_tokens_pad_ptr, total_token_, num_expert_pertoken_, hidden_size_, 0,
+      nullptr, cu_stream);
 }
 AsStatus MoeA8W8Gpu::Reshape() {
   Shape out_shape = tensor_map_->at(in_names_[0])->GetShape();

@@ -30,6 +30,7 @@ enum SplitMode{
     BATCH_VSPLIT = 8;
     BATCH_HSPLIT = 9;
     BATCH_KVSPLIT = 10;
+    EPSPLIT = 11;
 }
 enum DataType {
     DATATYPE_UNDEFINED = 0;

@@ -20,7 +20,8 @@ __device__ __forceinline__ int64_t index(int64_t total_col, int64_t row,
 __global__ void run_kernel(int64_t* expert_ids, int64_t* sorted_token_ids,
                            int64_t* indice_source, int* topk_ids, int batch,
                            int num_experts, int top_k, int block_size,
-                           int* total_tokens_post_pad) {
+                           int* total_tokens_post_pad, int ep_num,
+                           int* ep_group) {
   int64_t numel = (int64_t)batch * top_k;
   const size_t tokens_per_thread = CEILDIV(numel, blockDim.x);
   const size_t start_idx = threadIdx.x * tokens_per_thread;
@@ -41,7 +42,22 @@ __global__ void run_kernel(int64_t* expert_ids, int64_t* sorted_token_ids,
    * assigned to expert expert_index.
    */
   for (int i = start_idx; i < numel && i < start_idx + tokens_per_thread; ++i) {
-    ++tokens_cnts[index(num_experts, threadIdx.x + 1, topk_ids[i])];
+    if (ep_num == 0) {
+      ++tokens_cnts[index(num_experts, threadIdx.x + 1, topk_ids[i])];
+    } else {
+      bool find_expert = false;
+      int expert_id = 0;
+      for (int j = 0; j < ep_num; j++) {
+        if (topk_ids[i] == ep_group[j]) {
+          find_expert = true;
+          expert_id = j;
+          break;
+        }
+      }
+      if (find_expert) {
+        ++tokens_cnts[index(num_experts, threadIdx.x + 1, expert_id)];
+      }
+    }
   }
 
   __syncthreads();
@@ -96,23 +112,45 @@ __global__ void run_kernel(int64_t* expert_ids, int64_t* sorted_token_ids,
      * processed by the expert with expert_id within the current thread's token
      * shard.
      */
-    int64_t rank_post_pad =
-        tokens_cnts[index(num_experts, threadIdx.x, expert_id)] +
-        cumsum[expert_id];
-    sorted_token_ids[rank_post_pad] = i;
-    indice_source[i] = rank_post_pad;
-    ++tokens_cnts[index(num_experts, threadIdx.x, expert_id)];
+    if (ep_num == 0) {
+      int64_t rank_post_pad =
+          tokens_cnts[index(num_experts, threadIdx.x, expert_id)] +
+          cumsum[expert_id];
+      sorted_token_ids[rank_post_pad] = i;
+      indice_source[i] = rank_post_pad;
+      ++tokens_cnts[index(num_experts, threadIdx.x, expert_id)];
+    } else {
+      bool find_expert = false;
+      for (int j = 0; j < ep_num; j++) {
+        if (topk_ids[i] == ep_group[j]) {
+          find_expert = true;
+          expert_id = j;
+          break;
+        }
+      }
+      if (find_expert) {
+        int64_t rank_post_pad =
+            tokens_cnts[index(num_experts, threadIdx.x, expert_id)] +
+            cumsum[expert_id];
+        sorted_token_ids[rank_post_pad] = i;
+        indice_source[i] = rank_post_pad;
+        ++tokens_cnts[index(num_experts, threadIdx.x, expert_id)];
+      } else {
+        indice_source[i] = -1;
+      }
+    }
   }
 }
 void ReorderAndPaddingMOE(int64_t* experts_idx, int64_t* experts_seq,
                           int64_t* indice_source, int* input, int batch,
                           int num_experts, int top_k, int block_size,
-                          int* total_token_post_pad, cudaStream_t stream) {
+                          int* total_token_post_pad, int ep_num, int* ep_group,
+                          cudaStream_t stream) {
   const int64_t shared_mem =
       ((num_experts + 1) * num_experts + (num_experts + 1)) * sizeof(int64_t);
   run_kernel<<<1, num_experts, shared_mem, stream>>>(
       experts_idx, experts_seq, indice_source, input, batch, num_experts, top_k,
-      block_size, total_token_post_pad);
+      block_size, total_token_post_pad, ep_num, ep_group);
 }
 template <typename T>
 __global__ void get_reorder_data_kernel(int64_t N, T* reorder_data, T* input,
@@ -271,7 +309,7 @@ template <typename T>
 __global__ void finalize_kernel(T* output, T* expanded_permuted_rows,
                                 float* experts_score, int64_t* indice_source,
                                 int* expert_for_source_row, int* num_valid_ptr,
-                                int k, int cols) {
+                                int k, int cols, int ep_num, int* ep_group) {
   int64_t const original_row = blockIdx.x;
   int64_t const offset = original_row * cols;
   T* reduced_row_ptr = output + offset;
@@ -282,12 +320,22 @@ __global__ void finalize_kernel(T* output, T* expanded_permuted_rows,
       int64_t const expanded_original_row = original_row * k + k_idx;
       int64_t const expanded_permuted_row =
           indice_source[expanded_original_row];
-      if (expanded_permuted_row >= num_valid) {
-        // should impossable
+      if (expanded_permuted_row >= num_valid || expanded_permuted_row < 0) {
+        // for ep
         continue;
       }
-      // int64_t const k_offset = original_row * k + k_idx;
-      // int64_t const expert_idx = expert_for_source_row[k_offset];
+      if (ep_num != 0) {
+        int const expert_idx = expert_for_source_row[expanded_original_row];
+        bool find_expert = false;
+        for (int j = 0; j < ep_num; j++) {
+          if (expert_idx == ep_group[j]) {
+            find_expert = true;
+          }
+        }
+        if (!find_expert) {
+          continue;  // skip unused expert in this worker
+        }
+      }
       float const row_scale = (float)experts_score[expanded_original_row];
 
       // T const* bias_ptr = bias + expert_idx * cols;
@@ -309,36 +357,38 @@ template <typename T>
 void FinalizeMoeRoutingKernelLauncher(
     T* output, T* fianl_result, float* experts_score, int64_t* indice_source,
     int* expert_for_source_row, int* total_tokens_pad_ptr, int total_token,
-    int top_k, int hidden_size, cudaStream_t stream) {
+    int top_k, int hidden_size, int ep_num, int* ep_group,
+    cudaStream_t stream) {
   const int block_num = total_token;
   finalize_kernel<<<block_num, THREAD_PER_BLOCK, 0, stream>>>(
       output, fianl_result, experts_score, indice_source, expert_for_source_row,
-      total_tokens_pad_ptr, top_k, hidden_size);
+      total_tokens_pad_ptr, top_k, hidden_size, ep_num, ep_group);
 }
 template void FinalizeMoeRoutingKernelLauncher<float>(
     float* output, float* fianl_result, float* experts_score,
     int64_t* indice_source, int* expert_for_source_row,
     int* total_tokens_pad_ptr, int total_token, int top_k, int hidden_size,
-    cudaStream_t stream);
+    int ep_num, int* ep_group, cudaStream_t stream);
 #ifdef ENABLE_FP16
 template void FinalizeMoeRoutingKernelLauncher<half>(
     half* output, half* fianl_result, float* experts_score,
     int64_t* indice_source, int* expert_for_source_row,
     int* total_tokens_pad_ptr, int total_token, int top_k, int hidden_size,
-    cudaStream_t stream);
+    int ep_num, int* ep_group, cudaStream_t stream);
 #endif
 #ifdef ENABLE_BF16
 template void FinalizeMoeRoutingKernelLauncher<hie::bfloat16>(
     hie::bfloat16* output, hie::bfloat16* fianl_result, float* experts_score,
     int64_t* indice_source, int* expert_for_source_row,
     int* total_tokens_pad_ptr, int total_token, int top_k, int hidden_size,
-    cudaStream_t stream);
+    int ep_num, int* ep_group, cudaStream_t stream);
 #endif
 template <typename T>
 __global__ void finalize_new_kernel(T* output, T* final_result,
                                     float* experts_score, int* mid_row_indices,
                                     int* final_row_indices, int total_token,
-                                    int k, int cols) {
+                                    int k, int cols, int ep_num,
+                                    int* ep_group) {
   extern __shared__ float shared_experts_score[];
 
   int64_t const original_row = blockIdx.x;
@@ -354,46 +404,46 @@ __global__ void finalize_new_kernel(T* output, T* final_result,
     for (int k_idx = 0; k_idx < k; ++k_idx) {
       int64_t origin_row_idx = original_row * k + k_idx;
       int64_t mid_row_idx = mid_row_indices[origin_row_idx];
-      int64_t final_row_idx = final_row_indices[mid_row_idx];
-      float const row_scale = shared_experts_score[k_idx];
-      float const row_value =
-          static_cast<float>(final_result[final_row_idx * cols + tid]);
-      thread_output =
-          static_cast<float>(thread_output) + row_scale * (row_value);
+      if (mid_row_idx != -1) {
+        int64_t final_row_idx = final_row_indices[mid_row_idx];
+        float const row_scale = shared_experts_score[k_idx];
+        float const row_value =
+            static_cast<float>(final_result[final_row_idx * cols + tid]);
+        thread_output =
+            static_cast<float>(thread_output) + row_scale * (row_value);
+      }
     }
     reduced_row_ptr[tid] = static_cast<T>(thread_output);
   }
 }
 template <typename T>
-void FinalizeMoeRoutingNewKernelLauncher(T* output, T* fianl_result,
-                                         float* experts_score,
-                                         int* mid_row_indices,
-                                         int* final_row_indices,
-                                         int total_token, int top_k,
-                                         int hidden_size, cudaStream_t stream) {
+void FinalizeMoeRoutingNewKernelLauncher(
+    T* output, T* fianl_result, float* experts_score, int* mid_row_indices,
+    int* final_row_indices, int total_token, int top_k, int hidden_size,
+    int ep_num, int* ep_group, cudaStream_t stream) {
   const int64_t block_num = total_token;
   const int shared_memory_size =
       top_k * sizeof(float);  // shared memory size in bytes
   finalize_new_kernel<<<block_num, THREAD_PER_BLOCK, shared_memory_size,
-                        stream>>>(output, fianl_result, experts_score,
-                                  mid_row_indices, final_row_indices,
-                                  total_token, top_k, hidden_size);
+                        stream>>>(
+      output, fianl_result, experts_score, mid_row_indices, final_row_indices,
+      total_token, top_k, hidden_size, ep_num, ep_group);
 }
 template void FinalizeMoeRoutingNewKernelLauncher<float>(
     float* output, float* fianl_result, float* experts_score,
     int* mid_row_indices, int* final_row_indices, int total_token, int top_k,
-    int hidden_size, cudaStream_t stream);
+    int hidden_size, int ep_num, int* ep_group, cudaStream_t stream);
 #ifdef ENABLE_FP16
 template void FinalizeMoeRoutingNewKernelLauncher<half>(
     half* output, half* fianl_result, float* experts_score,
     int* mid_row_indices, int* final_row_indices, int total_token, int top_k,
-    int hidden_size, cudaStream_t stream);
+    int hidden_size, int ep_num, int* ep_group, cudaStream_t stream);
 #endif
 #ifdef ENABLE_BF16
 template void FinalizeMoeRoutingNewKernelLauncher<hie::bfloat16>(
     hie::bfloat16* output, hie::bfloat16* fianl_result, float* experts_score,
     int* mid_row_indices, int* final_row_indices, int total_token, int top_k,
-    int hidden_size, cudaStream_t stream);
+    int hidden_size, int ep_num, int* ep_group, cudaStream_t stream);
 #endif
 __global__ void get_expert_kernel(int N, int* expert_indices,
                                   const int* in_expert_indices,
@@ -416,6 +466,37 @@ void GetExpertByIndice(int* expert_indices, const int* in_expert_indices,
   get_expert_kernel<<<block_num, THREAD_PER_BLOCK, 0, stream>>>(
       N, expert_indices, in_expert_indices, row_indices, total_token, topk,
       num_expert);
+}
+__global__ void filtering_experts_kernel(int N, int* topk_indice,
+                                         const int* topk_indice_in,
+                                         int total_token, int num_expert,
+                                         int top_k, int ep_num, int* ep_group) {
+  int64_t tid = (int64_t)blockDim.x * blockIdx.x + threadIdx.x;
+  if (tid < N) {
+    int expert_idx = topk_indice_in[tid];
+    bool find_expert = false;
+    for (int j = 0; j < ep_num; j++) {
+      if (expert_idx == ep_group[j]) {
+        find_expert = true;
+        expert_idx = j;
+        break;
+      }
+    }
+    if (!find_expert) {
+      topk_indice[tid] = -1;
+    } else {
+      topk_indice[tid] = expert_idx;
+    }
+  }
+}
+void FilteringExperts(int* topk_indice, const int* topk_indice_in,
+                      int total_token, int num_expert, int top_k, int ep_num,
+                      int* ep_group, cudaStream_t stream) {
+  const int64_t N = (int64_t)total_token * top_k;
+  const int64_t block_num = (N + THREAD_PER_BLOCK - 1) / THREAD_PER_BLOCK;
+  filtering_experts_kernel<<<block_num, THREAD_PER_BLOCK, 0, stream>>>(
+      N, topk_indice, topk_indice_in, total_token, num_expert, top_k, ep_num,
+      ep_group);
 }
 }  // namespace cuda
 }  // namespace allspark
