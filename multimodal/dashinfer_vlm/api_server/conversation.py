@@ -166,7 +166,7 @@ class Conversation:
         system_prompt = ""
         system_message = self.get_system_message()
         if len(system_message) > 0:
-            system_prompt = self.system_template.format(system_message)
+            system_prompt = self.system_template.format(system_message=system_message)
 
         if self.sep_style == SeparatorStyle.ADD_COLON_SINGLE:
             ret = system_prompt + self.sep
