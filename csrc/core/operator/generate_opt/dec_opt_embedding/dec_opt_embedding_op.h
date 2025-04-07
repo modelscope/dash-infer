@@ -26,8 +26,7 @@ class DecOptEmbeddingOp : public AsOperator {
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
-  AsStatus RunOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
-                       int current_batch);
+  AsStatus RunOneBatch(GenerateContext* gen_ctx, int current_batch);
 
  private:
   DataType dtype_ = DATATYPE_UNDEFINED;

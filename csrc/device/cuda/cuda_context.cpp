@@ -54,14 +54,6 @@ CUDAContext::~CUDAContext() {
 void CUDAContext::SetDeviceId(int device_id) {
   DLOG(INFO) << "CUDAContext::SetDeviceId()" << device_id << std::endl;
 
-  LOG(INFO) << "local id : " << last_device_id_of_this_thread_
-            << " setting value: " << device_id;
-  if (last_device_id_of_this_thread_ == device_id) {
-    LOG(INFO) << " CUDAContext::by pass thread id setting, since last thread "
-                 "have same value";
-    return;
-  }
-
   // if have old handler, destory the device id and handler.
   if (hiednn_handle_) {
     AS_CHECK_CUDA(cudaSetDevice(device_id_));
@@ -160,7 +152,8 @@ void CUDAContext::SetDtype(DataType new_dtype) {
 }
 
 void CUDAContext::InitNCCL(int rank, const ncclUniqueId& id, int nRanks) {
-  DLOG(INFO) << "CUDAContext::InitNCCL()  rank: " << rank;
+  DLOG(INFO) << "CUDAContext::InitNCCL()"
+             << ", rank_id: " << rank;
   if (comm_) {
     AS_CHECK_NCCL(ncclCommDestroy(comm_));
   }

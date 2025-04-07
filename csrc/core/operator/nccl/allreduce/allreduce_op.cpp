@@ -63,30 +63,20 @@ AsStatus AllReduceOp::Init(const OperatorProto& op_proto,
   tensor_map_->at(out_names_[0])->SetDataType(dtype);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus AllReduceOp::Reshape() {
+AsStatus AllReduceOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape out_shape = tensor_map_->at(in_names_[0])->GetShape();
   count_ = out_shape.Count();
   AS_CHECK_STATUS(
       tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus AllReduceOp::Forward() {
+AsStatus AllReduceOp::Forward(RuntimeContext* runtime_ctx) {
   void* in = tensor_map_->at(in_names_[0])->GetDataPtr();
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
   DeviceType backend = ctx_->GetDeviceType();
 
   if (nranks_ == 1) {
     return AsStatus::ALLSPARK_SUCCESS;
-  }
-
-  auto coodinator = WorkerCoodinator(nranks_, rank_id_,
-                                     WorkerCoodinator::GetDefaultTimeout());
-
-  int ret = coodinator.StateSyncWithTimeout();
-  if (ret) {
-    LOG(ERROR) << "AllReduce: Sync state timeout, something wrong..." << ret;
-    coodinator.ResetCounter();
-    return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
 
   switch (backend) {
@@ -97,6 +87,7 @@ AsStatus AllReduceOp::Forward() {
       AS_CHECK_NCCL(ncclAllReduce(in, out, count_, nccl_dtype_, ncclSum,
                                   cuda_ctx->GetNCCLComm(),
                                   cuda_ctx->GetStream()));
+      ctx_->Synchronize();
       break;
     }
 #endif
@@ -119,8 +110,6 @@ AsStatus AllReduceOp::Forward() {
                  << DeviceType_Name(backend) << " device type" << std::endl;
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-
-  coodinator.ResetCounter();
 
   return AsStatus::ALLSPARK_SUCCESS;
 }

@@ -30,7 +30,13 @@ typedef RequestHandle* RequestHandle_t;
 // AllSpark Inference Engine Interface
 using DLTensorMap = std::map<std::string, DLManagedTensor*>;
 using DLTensorListMap = std::map<std::string, std::vector<DLManagedTensor*>>;
+class ITensor {
+ public:
+  virtual DLManagedTensor* ToDLPack() const = 0;
 
+ protected:
+  ~ITensor() {}
+};
 enum class AsMHAPrefill {
   AsPrefillDefault = 0,
   AsPrefillFlashV2 = 10,
@@ -155,6 +161,7 @@ struct GenerateConfig {
       "Default-User-UUID";  /// This uuid should  only use for logging.
 
   int input_len = 0;  ///< deprecated option, will filled by engine internally.
+  bool enable_tensors_from_model_inference = false;
 };
 
 class AsModelConfig {
@@ -379,7 +386,8 @@ class AsEngine final {
     /**
      * Tensor outputs from model inference.
      */
-    DLTensorMap tensors_from_model_inference;
+    std::vector<std::unordered_map<std::string, std::shared_ptr<ITensor>>>
+        tensors_from_model_inference;
 
     /**
      * Cached prefix token length.
@@ -392,11 +400,17 @@ class AsEngine final {
       add new single element to the end.
     */
     void AppendNewSingleElementToEnd(GeneratedElements& rhs) {
-      ids_from_generate.push_back(rhs.ids_from_generate[0]);
-      if (rhs.log_probs_list.size() > 0)
-        log_probs_list.push_back(rhs.log_probs_list[0]);
-      if (rhs.token_logprobs_list.size() > 0)
-        token_logprobs_list.push_back(rhs.token_logprobs_list[0]);
+      int size = rhs.ids_from_generate.size();
+      for (int i = 0; i < size; i++) {
+        ids_from_generate.push_back(rhs.ids_from_generate[i]);
+        if (rhs.log_probs_list.size() > 0)
+          log_probs_list.push_back(rhs.log_probs_list[i]);
+        if (rhs.token_logprobs_list.size() > 0)
+          token_logprobs_list.push_back(rhs.token_logprobs_list[i]);
+        if (rhs.tensors_from_model_inference.size() > 0)
+          tensors_from_model_inference.push_back(
+              rhs.tensors_from_model_inference[i]);
+      }
       prefix_cache_len = rhs.prefix_cache_len;
       prefix_len_gpu = rhs.prefix_len_gpu;
       prefix_len_cpu = rhs.prefix_len_cpu;
@@ -777,6 +791,7 @@ inline std::string ToString(
       return "Unknown";
   }
 }
+
 }  // namespace allspark
 
 inline static std::ostream& operator<<(

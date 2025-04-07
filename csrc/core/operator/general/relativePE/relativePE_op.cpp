@@ -99,7 +99,7 @@ AsStatus RelativePEOp::Reshape() {
     seq_length_ = std::max((int)in_shape[1], max_seq_);
 
   } else {
-    seq_length_ = gen_ctx_->max_length;
+    seq_length_ = ctx_->GetModelMaxLength();
   }
   Shape out_shape = Shape{batch_size_, seq_length_, k_, seq_length_};
   AS_CHECK_STATUS(
@@ -108,6 +108,10 @@ AsStatus RelativePEOp::Reshape() {
 }
 
 AsStatus RelativePEOp::Forward() {
+  LOG(ERROR) << "not support in allspark2.X";
+  return AsStatus::ALLSPARK_RUNTIME_ERROR;
+
+#if 0
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   const int64_t* in =
       static_cast<const int64_t*>(tensor_map_->at(in_names_[0])->GetDataPtr());
@@ -115,6 +119,7 @@ AsStatus RelativePEOp::Forward() {
                   weights_[0]->GetDataPtr(), batch_size_, seq_length_, k_,
                   (gen_ctx_->step + 1), is_decoder_, ctx_);
   return AsStatus::ALLSPARK_SUCCESS;
+#endif
 }
 
 REGISTER_OP(RelativePE, CUDA, RelativePEOp)

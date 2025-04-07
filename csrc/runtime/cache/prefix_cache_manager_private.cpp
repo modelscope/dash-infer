@@ -331,10 +331,10 @@ void PrefixCacheManager::filter_timeout_hash(
                 1000.0;
             if (duration_in_s > time_to_live_sec_) {
               delete_node(hash_str, DeviceType::CUDA);
-              LOG(INFO) << "[PrefixCacheManager] "
-                        << "time to last_access_time: " << duration_in_s
-                        << " sec, time_to_live_sec_: " << time_to_live_sec_
-                        << " sec";
+              DLOG(INFO) << "[PrefixCacheManager] "
+                         << "time to last_access_time: " << duration_in_s
+                         << " sec, time_to_live_sec_: " << time_to_live_sec_
+                         << " sec";
               return true;
             }
             return false;
@@ -796,6 +796,8 @@ bool PrefixCacheManager::swap_node_to_gpu(PrefixNodePtr& src_node,
 #endif
 
 void PrefixCacheManager::evict_unrefered_by_num(int node_num) {
+  if (node_num <= 0) return;
+
   std::vector<std::string> victim_hash_list =
       gpu_union_->evictor.FindMultiVictims(node_num);
 

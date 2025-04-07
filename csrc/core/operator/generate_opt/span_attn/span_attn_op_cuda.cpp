@@ -62,7 +62,8 @@ span::DataType to_span_data_type<hie::bfloat16>() {
 }  // anonymous namespace
 
 void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
-                                         int beam_size) {
+                                         GenerateContext* gen_ctx) {
+  int beam_size = gen_ctx->num_beams;
   constexpr int current_batch = 0;
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
@@ -85,7 +86,7 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
     char* optr = (char*)out_tensor->GetDataPtr();
     char* wptr = (char*)wss_tensor->GetDataPtr();
 
-    if (gen_ctx_->prefix_len == 0) {
+    if (gen_ctx->prefix_len == 0) {
       cuda::flashv2_set_runtime_param(flash_v2_params_, qptr, kptr, vptr, optr,
                                       wptr, alpha_);
       cuda::flashv2_dispatch(
@@ -104,7 +105,7 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
       DispatchCUDA(dtype_, [&]<typename T>() {
         cuda::UpdateKVLauncher(
             (T*)k_cache_buf, (T*)v_cache_buf, (const T*)kptr, (const T*)vptr, 1,
-            gen_ctx_->prefix_len, seq_len_, attn_head_->KVStride(), seq_len_,
+            gen_ctx->prefix_len, seq_len_, attn_head_->KVStride(), seq_len_,
             attn_head_->QKVStride(),
             static_cast<const CUDAContext*>(ctx_)->GetStream());
       });
@@ -125,7 +126,7 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
     char* vptr = kptr + attn_head_->KVStride() * SizeofType(dtype_);
     char* optr = (char*)out_tensor->GetDataPtr();
     char* wptr = (char*)wss_tensor->GetDataPtr();
-    if (gen_ctx_->prefix_len == 0) {
+    if (gen_ctx->prefix_len == 0) {
       allspark::cuda::xformer_prefill_attention(
           xformer_params_, qptr, kptr, vptr, optr, wptr, alpha_,
           static_cast<const CUDAContext*>(ctx_)->GetStream());
@@ -141,7 +142,7 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
       DispatchCUDA(dtype_, [&]<typename T>() {
         cuda::UpdateKVLauncher(
             (T*)k_cache_buf, (T*)v_cache_buf, (const T*)kptr, (const T*)vptr, 1,
-            gen_ctx_->prefix_len, seq_len_, attn_head_->KVStride(), seq_len_,
+            gen_ctx->prefix_len, seq_len_, attn_head_->KVStride(), seq_len_,
             attn_head_->QKVStride(),
             static_cast<const CUDAContext*>(ctx_)->GetStream());
       });
@@ -157,7 +158,7 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
                   "deprecated, consider using newer GPUs";
     AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
 #if 0
-    if (gen_ctx_->prefix_len != 0) {
+    if (gen_ctx->prefix_len != 0) {
       LOG(ERROR) << "SpanAttnOpCUDA::contextAttnLauncher: does not support "
                     "prefix cache";
       AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
@@ -203,8 +204,9 @@ void SpanAttnOpCUDA::contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
 
 void SpanAttnOpCUDA::copyPrefixSpanToCtxMemLauncher(
     const AsTensor& k_cache_ptr_tensor, const AsTensor& v_cache_ptr_tensor,
-    const void* k_contiguous_cache, const void* v_contiguous_cache) {
-  if (gen_ctx_->prefix_len == 0) return;
+    const void* k_contiguous_cache, const void* v_contiguous_cache,
+    int prefix_len) {
+  if (prefix_len == 0) return;
 
   // clear previous errors
   auto err = cudaGetLastError();
@@ -229,19 +231,20 @@ void SpanAttnOpCUDA::copyPrefixSpanToCtxMemLauncher(
         static_cast<const void**>(k_span_array_tensor_device_->GetDataPtr()),
         reinterpret_cast<T*>(const_cast<void*>(k_contiguous_cache)),
         attn_head_->NumGroups(), attn_head_->SizePerHead(),
-        ctx_->GetCacheSpanSize(), gen_ctx_->prefix_len, qMode, cu_stream);
+        ctx_->GetCacheSpanSize(), prefix_len, qMode, cu_stream);
     cuda::PrefixCacheCopyLauncher<T>(
         static_cast<const void**>(v_span_array_tensor_device_->GetDataPtr()),
         reinterpret_cast<T*>(const_cast<void*>(v_contiguous_cache)),
         attn_head_->NumGroups(), attn_head_->SizePerHead(),
-        ctx_->GetCacheSpanSize(), gen_ctx_->prefix_len, qMode, cu_stream);
+        ctx_->GetCacheSpanSize(), prefix_len, qMode, cu_stream);
   });
 }
 
 void SpanAttnOpCUDA::contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
                                              const AsTensor& v_cache_ptr_tensor,
                                              const void* k_contiguous_cache,
-                                             const void* v_contiguous_cache) {
+                                             const void* v_contiguous_cache,
+                                             int prefix_len) {
   // clear previous errors
   auto err = cudaGetLastError();
   if (err != cudaSuccess) {
@@ -261,8 +264,8 @@ void SpanAttnOpCUDA::contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
   auto qMode = CacheUtils::toQuantMode(ctx_->GetCacheMode());
   cudaStream_t cu_stream = gpu_ctx->GetStream();
 
-  int64_t span_offset = gen_ctx_->prefix_len / ctx_->GetCacheSpanSize();
-  int64_t cont_offset = gen_ctx_->prefix_len * attn_head_->KVStride();
+  int64_t span_offset = prefix_len / ctx_->GetCacheSpanSize();
+  int64_t cont_offset = prefix_len * attn_head_->KVStride();
 
   DispatchCUDA(dtype_, [&]<typename T>() {
     cuda::ContextSpanCopyLauncher<T>(
@@ -355,7 +358,7 @@ void SpanAttnOpCUDA::decoderAttnLauncher(const RuntimeContext* runtime_ctx) {
 
   std::vector<int> new_seq_lens(batch_size_);
   for (int batch = 0; batch < batch_size_; ++batch) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
     new_seq_lens[batch] = gen_ctx->step + seq_len_;
   }
 
@@ -449,6 +452,7 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
     // AS_CHECK_STATUS(setDecoderWorkspaceSize());
   } else {
     std::pair<bool, AsMHAPrefill> prefill_mode_pair = GetPrefillMode();
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
     if (!prefill_mode_pair.first) {
       LOG(ERROR) << "SpanAttnOpCUDA get prefill mode error. " << std::endl;
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
@@ -459,7 +463,7 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
 #ifdef FLASH_ATTN_V2
       cuda::flashv2_clear_param(flash_v2_params_);
 
-      if (gen_ctx_->prefix_len == 0) {
+      if (gen_ctx->prefix_len == 0) {
         // direct calculate flash-v2 using concat-qkv input.
         cuda::flashv2_set_static_param(
             flash_v2_params_, dprop_, to_cuda_type(dtype_), single_batch,
@@ -469,7 +473,7 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
       } else {
         cuda::flashv2_set_static_param(
             flash_v2_params_, dprop_, to_cuda_type(dtype_), single_batch,
-            seq_len_, gen_ctx_->prefix_len + seq_len_, attn_head_->NumHeads(),
+            seq_len_, gen_ctx->prefix_len + seq_len_, attn_head_->NumHeads(),
             attn_head_->NumGroups(), attn_head_->SizePerHead(),
             cuda::FlashQKVFormat::MIX, causal_mask_);
       }
@@ -488,10 +492,10 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
       xformer_params_.nhead = attn_head_->NumHeads();
       xformer_params_.phead = attn_head_->SizePerHead();
       xformer_params_.seqlen_q = seq_len_;
-      xformer_params_.seqlen_k = gen_ctx_->prefix_len + seq_len_;
+      xformer_params_.seqlen_k = gen_ctx->prefix_len + seq_len_;
       xformer_params_.sm_version = dprop_.major << 8 | dprop_.minor;
       xformer_params_.dtype = dtype_;
-      if (gen_ctx_->prefix_len == 0) {
+      if (gen_ctx->prefix_len == 0) {
         xformer_params_.qkv_format = cuda::XformerQKVFormat::INTERLEAVED;
       } else {
         xformer_params_.qkv_format = cuda::XformerQKVFormat::MIX;
@@ -507,7 +511,7 @@ AsStatus SpanAttnOpCUDA::setWorkspace(const RuntimeContext* runtime_ctx) {
                     "is deprecated, consider using newer GPUs";
       AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
 #if 0
-      if (gen_ctx_->prefix_len != 0) {
+      if (gen_ctx->prefix_len != 0) {
         LOG(ERROR)
             << "SpanAttnOpCUDA::setWorkspace: does not support prefix cache";
         return AsStatus::ALLSPARK_RUNTIME_ERROR;

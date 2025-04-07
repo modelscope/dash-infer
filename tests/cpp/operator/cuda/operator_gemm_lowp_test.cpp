@@ -322,7 +322,7 @@ float TestGemmA8W8(const int BS, const int M, const int N, const int K,
     allspark::GemmA8W8GPU op;
     allspark::TensorMap weight_buffer;
     op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-              weight_buffer, &(tu.GetTensorMap()));
+              weight_buffer, &(tu.GetTensorMap()), nullptr);
     op.Reshape();
     op.Forward();
     tu.device_context_->Synchronize();
@@ -442,7 +442,7 @@ float TestGemmSparseA8W8(const int BS, const int M, const int N, const int K,
     allspark::GemmSparseA8W8GPU op;
     allspark::TensorMap weight_buffer;
     op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-              weight_buffer, &(tu.GetTensorMap()));
+              weight_buffer, &(tu.GetTensorMap()), nullptr);
     op.Reshape();
     op.Forward();
     tu.device_context_->Synchronize();
@@ -529,7 +529,7 @@ void TestGemmA16W8(const int BS, const int M, const int N, const int K,
   allspark::GemmA16W8GPU op;
   allspark::TensorMap weight_buffer;
   op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-            weight_buffer, &(tu.GetTensorMap()));
+            weight_buffer, &(tu.GetTensorMap()), nullptr);
   op.Reshape();
   op.Forward();
   tu.device_context_->Synchronize();
@@ -628,7 +628,7 @@ float TestGemmA16W8_New(const int BS, const int M, const int N, const int K,
     allspark::GemmA16W8GPU op;
     allspark::TensorMap weight_buffer;
     op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-              weight_buffer, &(tu.GetTensorMap()));
+              weight_buffer, &(tu.GetTensorMap()), nullptr);
     op.Reshape();
     op.Forward();
     tu.device_context_->Synchronize();
@@ -710,7 +710,7 @@ void TestGemmA16W4(const int BS, const int M, const int N, const int K,
   allspark::GemmA16W4GPU op;
   allspark::TensorMap weight_buffer;
   op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-            weight_buffer, &(tu.GetTensorMap()));
+            weight_buffer, &(tu.GetTensorMap()), nullptr);
   op.Reshape();
   op.Forward();
   tu.device_context_->Synchronize();
@@ -804,7 +804,7 @@ float TestGemmA16W4_New(const int BS, const int M, const int N, const int K,
     allspark::GemmA16W4GPU op;
     allspark::TensorMap weight_buffer;
     op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-              weight_buffer, &(tu.GetTensorMap()));
+              weight_buffer, &(tu.GetTensorMap()), nullptr);
     op.Reshape();
     op.Forward();
     tu.device_context_->Synchronize();

@@ -32,15 +32,17 @@ class SpanAttnOpCUDA : public SpanAttnOp {
 
   /* for Forward (prefill / context) */
   void contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
-                           int beam_size) override;
+                           GenerateContext* gen_ctx) override;
   void contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
                                const AsTensor& v_cache_ptr_tensor,
                                const void* k_contiguous_cache,
-                               const void* v_contiguous_cache) override;
+                               const void* v_contiguous_cache,
+                               int prefix_len) override;
   void copyPrefixSpanToCtxMemLauncher(const AsTensor& k_cache_ptr_tensor,
                                       const AsTensor& v_cache_ptr_tensor,
                                       const void* k_contiguous_cache,
-                                      const void* v_contiguous_cache) override;
+                                      const void* v_contiguous_cache,
+                                      int prefix_len) override;
 
   /* for Forward (decoder) */
   void decoderAppendCacheLauncher() override;

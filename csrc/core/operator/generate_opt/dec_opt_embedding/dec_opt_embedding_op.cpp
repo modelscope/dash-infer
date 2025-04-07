@@ -144,12 +144,12 @@ AsStatus DecOptEmbeddingOp::RunContext(RuntimeContext* runtime_ctx) {
         << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   RunOneBatch(gen_ctx, 0);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus DecOptEmbeddingOp::RunOneBatch(
-    std::shared_ptr<GenerateContext> gen_ctx, int current_batch) {
+AsStatus DecOptEmbeddingOp::RunOneBatch(GenerateContext* gen_ctx,
+                                        int current_batch) {
   void* in_ids = tensor_map_->at(in_names_[0])->GetDataPtr();
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
   void* token_type_ids = nullptr;
@@ -178,7 +178,7 @@ AsStatus DecOptEmbeddingOp::RunOneBatch(
 }
 AsStatus DecOptEmbeddingOp::RunDecoder(RuntimeContext* runtime_ctx) {
   for (int batch = 0; batch < batch_size_; batch++) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
     RunOneBatch(gen_ctx, batch);
   }
   return AsStatus::ALLSPARK_SUCCESS;

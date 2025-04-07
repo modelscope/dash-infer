@@ -109,7 +109,7 @@ class PrefixCacheManager {
                      const CacheFrameManager::Ptr& frame_manager,
                      const PrefixCacheCoordinator::Ptr& coordinator,
                      const TensorMap* tensor_map, const DeviceContext* ctx,
-                     const int ttl);
+                     const int rank_id, const int ttl);
   ~PrefixCacheManager() { PrintTimecost(); }
 
   void UpdateCapacity();
@@ -132,7 +132,7 @@ class PrefixCacheManager {
                std::unique_ptr<VirtualCache>& virtual_v_cache,
                std::vector<PrefixNodePtr>& node_vec);
 
-  void UnRef(const std::vector<PrefixNodePtr>& node_vec);
+  void UnRef(std::vector<PrefixNodePtr>& node_vec);
 
   void UpdateCnt(int hit_cnt, int miss_cnt);
   void Reset();
@@ -233,6 +233,7 @@ class PrefixCacheManager {
    * privte variables
    ***************************************/
  private:
+  std::mutex mtx_;
   PrefixCacheCoordinator::Ptr coordinator_;
   CacheUnionPtr gpu_union_;
   CacheUnionPtr cpu_union_;
@@ -250,6 +251,7 @@ class PrefixCacheManager {
   // int min_capacity_;
   int64_t hit_cnt_ = 0;
   int64_t miss_cnt_ = 0;
+  const int rank_id_;
 
   std::unique_ptr<ThreadPool> threadpool_;
   int threadpool_size_ = 32;

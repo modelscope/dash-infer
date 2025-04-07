@@ -24,7 +24,7 @@ template <typename T>
 void UnaryGLUKernelLauncher(T* out, const T* in, size_t outer_size,
                             size_t inner_size, int type, cudaStream_t stream);
 template <typename T>
-void BinaryKernelLauncher(T* out, const T* in1, const T* in2, int count,
+void BinaryKernelLauncher(T* out, const T* in1, const T* in2, int64_t count,
                           int type, cudaStream_t stream);
 template <bool DEC_OPT, typename T>
 void EmbeddingKernelLauncher(T* out_tensor, const int64_t* word_ids,

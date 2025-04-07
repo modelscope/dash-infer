@@ -19,7 +19,8 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
                                       const DeviceContext& ctx,
                                       const TensorMap& weights_map,
                                       TensorMap& weights_buffer,
-                                      TensorMap* tensor_map) {
+                                      TensorMap* tensor_map,
+                                      RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "GemmLoraCapsuleOpGPU::InitV2" << std::endl;
 
   //  Capsule's special Init
@@ -74,7 +75,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
     attr_map.erase("activation");
   }
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_, nullptr,
-               rank_info_, tensor_map, profiler_);
+               rank_info_, tensor_map, profiler_, runtime_ctx);
   lora_op_list_.emplace_back(std::move(op));
 
 #if 0  // 老算子
@@ -93,7 +94,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   output->set_name(op_name_pattern + ".lora_A.out");
   attr_map.erase("alpha");  // loraA 没有伸缩
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
-               lora_manager_, rank_info_, tensor_map, profiler_);
+               lora_manager_, rank_info_, tensor_map, profiler_, runtime_ctx);
   lora_op_list_.emplace_back(std::move(op));
 
   // Lora_B
@@ -106,7 +107,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   output->set_name(op_name_pattern + ".lora_B.out");
   attr_map.erase("alpha");  // 优化aslora后，使用默认1.0
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
-               lora_manager_, rank_info_, tensor_map, profiler_);
+               lora_manager_, rank_info_, tensor_map, profiler_, runtime_ctx);
   lora_op_list_.emplace_back(std::move(op));
 #endif
 
@@ -130,7 +131,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
                                                 ".lora_B.weight");
   output->set_name(op_name_pattern + ".sgmv.out");
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
-               lora_manager_, rank_info_, tensor_map, profiler_);
+               lora_manager_, rank_info_, tensor_map, profiler_, runtime_ctx);
   lora_op_list_.emplace_back(std::move(op));
 #endif
 
@@ -153,7 +154,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
   attr_map["binary_type"] =
       std::string(reinterpret_cast<char*>(&binary_type), sizeof(int));
   op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_, nullptr,
-               rank_info_, tensor_map, profiler_);
+               rank_info_, tensor_map, profiler_, runtime_ctx);
   lora_op_list_.emplace_back(std::move(op));
 
   // activation
@@ -169,7 +170,7 @@ AsStatus GemmLoraCapsuleOpGPU::InitV2(const OperatorProto& op_proto,
     attr_map.clear();
     attr_map["unary_type"] = act_str;
     op->CallInit(mutable_op_proto, ctx, weight_manager_, weight_handler_,
-                 nullptr, rank_info_, tensor_map, profiler_);
+                 nullptr, rank_info_, tensor_map, profiler_, runtime_ctx);
     lora_op_list_.emplace_back(std::move(op));
   }
 

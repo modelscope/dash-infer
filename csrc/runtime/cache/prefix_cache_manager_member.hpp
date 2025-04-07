@@ -245,11 +245,13 @@ class PrefixCacheManager::LRUEvictor {
     k = std::min(static_cast<int>(candidates_set_.size()), k);
 
     std::vector<std::string> victim_hash_list;
-    victim_hash_list.reserve(k);
-    auto itEnd = std::next(candidates_set_.begin(), k);
-    std::transform(
-        candidates_set_.begin(), itEnd, std::back_inserter(victim_hash_list),
-        [](const PrefixNodePtr& node) -> std::string { return node->hash; });
+    if (k > 0) {
+      victim_hash_list.reserve(k);
+      auto itEnd = std::next(candidates_set_.begin(), k);
+      std::transform(
+          candidates_set_.begin(), itEnd, std::back_inserter(victim_hash_list),
+          [](const PrefixNodePtr& node) -> std::string { return node->hash; });
+    }
     return std::move(victim_hash_list);
   }
 

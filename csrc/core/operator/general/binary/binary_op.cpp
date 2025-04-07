@@ -63,7 +63,7 @@ AsStatus BinaryOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus BinaryOp::Reshape() {
+AsStatus BinaryOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape out_shape = tensor_map_->at(in_names_[0])->GetShape();
   AS_CHECK_STATUS(
       tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
@@ -96,7 +96,7 @@ AsStatus BinaryOp::Reshape() {
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus BinaryOp::Forward() {
+AsStatus BinaryOp::Forward(RuntimeContext* runtime_ctx) {
   AsTensor* x_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* y_tensor = tensor_map_->at(in_names_[1]).get();
   AsTensor* z_tensor = tensor_map_->at(out_names_[0]).get();

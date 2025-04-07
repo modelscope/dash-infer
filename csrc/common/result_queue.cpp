@@ -150,7 +150,7 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetWithTimeout(
     int timeout_ms) {
 #ifdef DEBUG_RESULT_QUEUE
   DLOG(INFO) << "Get Start " << request_uuid_
-             << ", store_queue.size: " << store_queue_.size()
+             << ", store_queue.size_approx: " << store_queue_.size_approx()
              << ", status: " << static_cast<int>(status_.load());
 #endif
   auto start = std::chrono::high_resolution_clock::now();
@@ -175,8 +175,8 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetWithTimeout(
     // ToString(status_.load()) << " spin cnt: " << spin_count;
     if (have_ele) {
 #ifdef DEBUG_RESULT_QUEUE
-      DLOG(INFO) << " ResultQueue: [Get] get new token: "
-                 << one_new_token.ids_from_generate[0];
+      LOG(INFO) << " ResultQueue: [Get] get new token: "
+                << one_new_token.ids_from_generate[0];
 #endif
 
       // take this token and all other tokens.
@@ -213,7 +213,8 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetWithTimeout(
           auto exit_timeout = std::chrono::milliseconds(timeout_ms);
           if (wait_duration >= exit_timeout) {
             LOG(INFO) << "Result queue: " << request_uuid_
-                      << " timeout, timeout(ms): " << timeout_ms;
+                      << " timeout, timeout(ms): " << timeout_ms
+                      << " status: " << ToString(status_.load());
             get_user--;
             return nullptr;
           }
@@ -278,6 +279,12 @@ ResultQueueImpl::GenerateElementPtr ResultQueueImpl::GetNoWait() {
     auto have_ele = store_queue_.try_dequeue(one_new_token);
     if (have_ele) {
       ret->AppendNewSingleElementToEnd(one_new_token);
+#ifdef DEBUG_RESULT_QUEUE
+      LOG(INFO) << "ResultQueue: GetNoWait: new ele: "
+                << one_new_token.ids_from_generate.size()
+                << " id: " << one_new_token.ids_from_generate[0]
+                << " size: " << one_new_token.ids_from_generate.size();
+#endif
     } else {
       break;
     }
@@ -306,7 +313,7 @@ void ResultQueueImpl::AppendGenerateElement(
 
 #ifdef DEBUG_RESULT_QUEUE
   LOG(INFO) << "AppendGenerateElement, new_tokens.size: " << new_tokens.size()
-            << ", store_queue.size: " << store_queue_.size()
+            << ", store_queue_.size_approx: " << store_queue_.size_approx()
             << ", status: " << ToString(status_.load());
 #endif
 

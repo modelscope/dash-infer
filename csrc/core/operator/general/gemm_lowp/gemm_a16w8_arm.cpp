@@ -23,11 +23,11 @@ AsStatus GemmA16W8ARM::Init(const OperatorProto& op_proto,
 AsStatus GemmA16W8ARM::InitV2(const OperatorProto& op_proto,
                               const DeviceContext& ctx,
                               const TensorMap& weights_map,
-                              TensorMap& weights_buffer,
-                              TensorMap* tensor_map) {
+                              TensorMap& weights_buffer, TensorMap* tensor_map,
+                              RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "GemmA16W8ARM::InitV2()" << std::endl;
-  AS_CHECK_STATUS(GemmA16W8Base::InitV2(op_proto, ctx, weights_map,
-                                        weights_buffer, tensor_map));
+  AS_CHECK_STATUS(GemmA16W8Base::InitV2(
+      op_proto, ctx, weights_map, weights_buffer, tensor_map, runtime_ctx));
 
   if (alpha_ != 1.0 || beta_ != 1.0) {
     LOG(ERROR) << "GemmA16W8ARM only support alpha=1 and beta==1."

@@ -110,7 +110,7 @@ void TestGemmA16W8(const int BS, const int M, const int N, const int K,
   allspark::GemmA16W8ARM op;
   allspark::TensorMap weight_buffer;
   op.InitV2(tu.GetOpProto(), *(tu.GetDeviceContext()), tu.GetWeightMap(),
-            weight_buffer, &(tu.GetTensorMap()));
+            weight_buffer, &(tu.GetTensorMap()), nullptr);
   op.Reshape();
   op.Forward();
   tu.device_context_->Synchronize();

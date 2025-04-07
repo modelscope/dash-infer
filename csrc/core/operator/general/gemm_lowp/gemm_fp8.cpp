@@ -22,7 +22,8 @@ AsStatus GemmFP8Base::Init(const OperatorProto& op_proto,
 AsStatus GemmFP8Base::InitV2(const OperatorProto& op_proto,
                              const DeviceContext& ctx,
                              const TensorMap& weights_map,
-                             TensorMap& weights_buffer, TensorMap* tensor_map) {
+                             TensorMap& weights_buffer, TensorMap* tensor_map,
+                             RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "GemmFP8Base::Init()" << std::endl;
   AS_CHECK_STATUS(AsOperator::Init(op_proto, ctx, weights_map, tensor_map));
 

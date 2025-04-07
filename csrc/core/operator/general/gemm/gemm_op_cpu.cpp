@@ -27,9 +27,10 @@ AsStatus GemmOpCPU::Init(const OperatorProto& op_proto,
 AsStatus GemmOpCPU::InitV2(const OperatorProto& op_proto,
                            const DeviceContext& ctx,
                            const TensorMap& weights_map,
-                           TensorMap& weights_buffer, TensorMap* tensor_map) {
+                           TensorMap& weights_buffer, TensorMap* tensor_map,
+                           RuntimeContext* runtime_ctx) {
   AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto, ctx, weights_map, weights_buffer,
-                                     tensor_map));
+                                     tensor_map, runtime_ctx));
 
   auto eng = DNNLEngine::GetInstance().GetEngine();
   dnnl_op_ctx_ = std::make_unique<DNNLOpContext>();
@@ -71,7 +72,7 @@ AsStatus GemmOpCPU::InitV2(const OperatorProto& op_proto,
   dnnl_op_ctx_->attr_->set_post_ops(po);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus GemmOpCPU::Reshape() {
+AsStatus GemmOpCPU::Reshape(RuntimeContext* runtime_ctx) {
   int yn = n_;
   AS_CHECK_STATUS(GemmOpBase::Reshape(yn));
 
@@ -165,7 +166,7 @@ AsStatus GemmOpCPU::Reshape() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus GemmOpCPU::Forward() {
+AsStatus GemmOpCPU::Forward(RuntimeContext* runtime_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   void* in = in_tensor->GetDataPtr();
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();

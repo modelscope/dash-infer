@@ -83,16 +83,17 @@ AsStatus EmbeddingT5Op::Init(const OperatorProto& op_proto,
   in_ids_ = std::make_unique<AsTensor>("in_ids", backend, DataType::INT64,
                                        DataMode::DENSE,
                                        Shape{ctx_->GetModelMaxBatch()});
-
   switch (backend) {
 #ifdef ENABLE_CUDA
-    case DeviceType::CUDA:
+    case DeviceType::CUDA: {
       kernel_launcher = gpu_embedding;
       break;
+    }
 #endif
-    case DeviceType::CPU:
+    case DeviceType::CPU: {
       kernel_launcher = cpu_embedding;
       break;
+    }
     default:
       LOG(ERROR) << "Embedding Operator does not support "
                  << DeviceType_Name(backend) << " device type" << std::endl;
@@ -124,14 +125,13 @@ AsStatus EmbeddingT5Op::Forward(RuntimeContext* runtime_ctx) {
 #ifdef ENABLE_CUDA
     case DeviceType::CUDA: {
       if (runtime_ctx->is_context) {
-        std::shared_ptr<GenerateContext> gen_ctx =
-            runtime_ctx->GetContextGenCtx();
+        GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
         in_ids =
             gen_ctx->request->interim.at("new_input_ids_gpu")->GetDataPtr();
       } else {
         std::vector<int64_t> new_tokens(batch_size_);
         for (int i = 0; i < batch_size_; i++) {
-          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+          GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
           std::shared_ptr<AsTensor> generated_ids_tensor =
               gen_ctx->request->interim.at("generated_ids");
           new_tokens[i] =
@@ -151,13 +151,12 @@ AsStatus EmbeddingT5Op::Forward(RuntimeContext* runtime_ctx) {
 #endif
     case DeviceType::CPU: {
       if (runtime_ctx->is_context) {
-        std::shared_ptr<GenerateContext> gen_ctx =
-            runtime_ctx->GetContextGenCtx();
+        GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
         in_ids = gen_ctx->request->interim.at("new_input_ids")->GetDataPtr();
       } else {
         int64_t* ptr = static_cast<int64_t*>(in_ids_->GetDataPtr());
         for (int i = 0; i < batch_size_; i++) {
-          std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+          GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
           std::shared_ptr<AsTensor> generated_ids_tensor =
               gen_ctx->request->interim.at("generated_ids");
           ptr[i] = *(static_cast<int64_t*>(generated_ids_tensor->GetDataPtr()) +
@@ -177,6 +176,7 @@ AsStatus EmbeddingT5Op::Forward(RuntimeContext* runtime_ctx) {
   kernel_launcher(weights_[0]->GetDataType(), out, in_ids,
                   weights_[0]->GetDataPtr(), batch_size_, seq_len_,
                   hidden_size_, vocab_size_, ctx_);
+  // PrintInformation();
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

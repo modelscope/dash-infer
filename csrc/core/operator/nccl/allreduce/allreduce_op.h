@@ -22,14 +22,8 @@ class AllReduceOp : public AsOperator {
       : AsOperator(op_type), count_(0) {}
   AsStatus Init(const OperatorProto& op_proto, const DeviceContext& ctx,
                 const TensorMap& weights_map, TensorMap* tensor_map);
-  AsStatus Reshape() override;
-  AsStatus Forward() override;
-  AsStatus Reshape(RuntimeContext* runtime_ctx) override {
-    return this->Reshape();
-  }
-  AsStatus Forward(RuntimeContext* runtime_ctx) override {
-    return this->Forward();
-  }
+  AsStatus Reshape(RuntimeContext* runtime_ctx);
+  AsStatus Forward(RuntimeContext* runtime_ctx);
 
  private:
   size_t nranks_;

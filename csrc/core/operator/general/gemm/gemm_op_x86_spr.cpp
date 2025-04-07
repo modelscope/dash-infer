@@ -44,7 +44,8 @@ AsStatus GemmOpSpr::Init(const OperatorProto& op_proto,
 AsStatus GemmOpSpr::InitV2(const OperatorProto& op_proto,
                            const DeviceContext& ctx,
                            const TensorMap& weights_map,
-                           TensorMap& weights_buffer, TensorMap* tensor_map) {
+                           TensorMap& weights_buffer, TensorMap* tensor_map,
+                           RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "GemmOpSpr::InitV2()" << std::endl;
 
   if (!is_spr_ && ctx.GetMatmulPrecision() == PrecisionLevel::MEDIUM_FP16) {
@@ -62,16 +63,16 @@ AsStatus GemmOpSpr::InitV2(const OperatorProto& op_proto,
 
   if (weight_data_type_ == DataType::FLOAT32) {
     AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map,
-                                      weights_buffer, tensor_map));
+                                      weights_buffer, tensor_map, runtime_ctx));
   } else if (weight_data_type_ == DataType::BFLOAT16) {
 #if USE_ONEDNN_BF16_GEMM
     // use onednn bf16 gemm
     AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map,
-                                      weights_buffer, tensor_map));
+                                      weights_buffer, tensor_map, runtime_ctx));
 #else
 #ifdef ENABLE_BF16
-    AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto, ctx, weights_map,
-                                       weights_buffer, tensor_map));
+    AS_CHECK_STATUS(GemmOpBase::InitV2(
+        op_proto, ctx, weights_map, weights_buffer, tensor_map, runtime_ctx));
 
     // use intrinsic bf16 gemm
     AsTensor* mutable_weight = const_cast<AsTensor*>(weights_[0]);
@@ -101,8 +102,8 @@ AsStatus GemmOpSpr::InitV2(const OperatorProto& op_proto,
 #endif
   } else if (weight_data_type_ == DataType::FLOAT16) {
 #ifdef ENABLE_FP16
-    AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto, ctx, weights_map,
-                                       weights_buffer, tensor_map));
+    AS_CHECK_STATUS(GemmOpBase::InitV2(
+        op_proto, ctx, weights_map, weights_buffer, tensor_map, runtime_ctx));
 
     // intel gemm to perform gemm op
     AsTensor* mutable_weight = const_cast<AsTensor*>(weights_[0]);
@@ -136,13 +137,13 @@ AsStatus GemmOpSpr::InitV2(const OperatorProto& op_proto,
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus GemmOpSpr::Reshape() {
+AsStatus GemmOpSpr::Reshape(RuntimeContext* runtime_ctx) {
   if (weight_data_type_ == DataType::FLOAT32) {
-    AS_CHECK_STATUS(GemmOpCPU::Reshape());
+    AS_CHECK_STATUS(GemmOpCPU::Reshape(runtime_ctx));
   } else if (weight_data_type_ == DataType::BFLOAT16) {
 #if USE_ONEDNN_BF16_GEMM
     // use onednn bf16 gemm
-    AS_CHECK_STATUS(GemmOpCPU::Reshape());
+    AS_CHECK_STATUS(GemmOpCPU::Reshape(runtime_ctx));
 #else
     // use intrinsic bf16 gemm
     AS_CHECK_STATUS(GemmOpBase::Reshape(n_));
@@ -156,10 +157,7 @@ AsStatus GemmOpSpr::Reshape() {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus GemmOpSpr::Forward() {
-  // DLOG(INFO) << "GemmOpSpr::Forward, m: " << m_
-  //            << ", GetMatmulPrecision: " << ctx_->GetMatmulPrecision();
-
+AsStatus GemmOpSpr::Forward(RuntimeContext* runtime_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   void* in = in_tensor->GetDataPtr();
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
@@ -171,11 +169,11 @@ AsStatus GemmOpSpr::Forward() {
   }
   if (weight_data_type_ == DataType::FLOAT32) {
     // use onednn fp32 gemm
-    AS_CHECK_STATUS(GemmOpCPU::Forward());
+    AS_CHECK_STATUS(GemmOpCPU::Forward(runtime_ctx));
   } else if (weight_data_type_ == DataType::BFLOAT16) {
 #if USE_ONEDNN_BF16_GEMM
     // use onednn bf16 gemm
-    AS_CHECK_STATUS(GemmOpCPU::Forward());
+    AS_CHECK_STATUS(GemmOpCPU::Forward(runtime_ctx));
 #else
 #ifdef ENABLE_BF16
     // use intrinsic bf16 gemm

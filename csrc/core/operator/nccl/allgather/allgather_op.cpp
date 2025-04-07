@@ -134,7 +134,7 @@ AsStatus AllGatherOp::Init(const OperatorProto& op_proto,
   tensor_map_->at(out_names_[0])->SetDataType(dtype);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus AllGatherOp::Reshape() {
+AsStatus AllGatherOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
   m_ = in_shape.Count(0, in_shape.Size() - 1);
   n_ = in_shape[in_shape.Size() - 1];
@@ -152,26 +152,14 @@ AsStatus AllGatherOp::Reshape() {
   AS_CHECK_STATUS(tensor_map_->at("workspace")->SetShape(Shape{size}));
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus AllGatherOp::Forward() {
+AsStatus AllGatherOp::Forward(RuntimeContext* runtime_ctx) {
   void* in = tensor_map_->at(in_names_[0])->GetDataPtr();
   void* out = tensor_map_->at(out_names_[0])->GetDataPtr();
   void* tmp_data = tensor_map_->at("workspace")->GetDataPtr();
   DataType dtype = tensor_map_->at(in_names_[0])->GetDataType();
 
-  auto coodinator = WorkerCoodinator(nranks_, rank_id_,
-                                     WorkerCoodinator::GetDefaultTimeout());
-
-  int ret = coodinator.StateSyncWithTimeout();
-
-  if (ret == 0) {
-    kernel_launcher(dtype, out, in, tmp_data, count_, m_, n_, nranks_, ctx_);
-    coodinator.ResetCounter();
-    return AsStatus::ALLSPARK_SUCCESS;
-  } else {
-    LOG(ERROR) << "AllGather: Sync state timeout, something wrong..." << ret;
-    coodinator.ResetCounter();
-    return AsStatus::ALLSPARK_RUNTIME_ERROR;
-  }
+  kernel_launcher(dtype, out, in, tmp_data, count_, m_, n_, nranks_, ctx_);
+  return AsStatus::ALLSPARK_SUCCESS;
 }
 
 REGISTER_OP(AllGather, CUDA, AllGatherOp)

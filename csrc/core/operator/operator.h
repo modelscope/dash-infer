@@ -45,14 +45,13 @@ class AsOperator {
                     std::shared_ptr<ModelWeightHandler> model_weight_handler,
                     std::shared_ptr<LoraManager> lora_manager,
                     RankInfo& rank_info, TensorMap* tensor_map,
-                    ModelProfiler* profiler);
+                    ModelProfiler* profiler, RuntimeContext* runtime_ctx);
 
   // model to call OP forward/reshape/alloc
   AsStatus CallForward(RuntimeContext* runtime_ctx);
   AsStatus CallReshape(RuntimeContext* runtime_ctx);
   AsStatus CallAlloc(RuntimeContext* runtime_ctx);
 
-  AsStatus SetGenerateContext(std::shared_ptr<GenerateContext>& gen_ctx);
   void Synchronize();
   void PrintInformation();
   void SaveInformation();
@@ -74,7 +73,8 @@ class AsOperator {
   virtual AsStatus InitV2(const OperatorProto& op_proto,
                           const DeviceContext& ctx,
                           const TensorMap& weights_map,
-                          TensorMap& weights_buffer, TensorMap* tensor_map);
+                          TensorMap& weights_buffer, TensorMap* tensor_map,
+                          RuntimeContext* runtime_ctx);
 
   // for LoRA only:
   inline bool GetTaintedStatus(const std::string& lora_name) const {
@@ -115,7 +115,6 @@ class AsOperator {
                            // output tensor.
   std::vector<TensorListMap>* embedding_map_;
   const DeviceContext* ctx_;
-  std::shared_ptr<GenerateContext> gen_ctx_;
   std::unique_ptr<DNNLOpContext> dnnl_op_ctx_;
   ModelProfiler* profiler_ = nullptr;
   std::shared_ptr<ModelWeightHandler> weight_handler_;

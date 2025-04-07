@@ -124,6 +124,53 @@ inline std::string DeviceTypeToString(DeviceType device_type) {
   }
 }
 
+inline std::string AsStatusToString(AsStatus status) {
+  switch (status) {
+    case AsStatus::ALLSPARK_SUCCESS:
+      return "ALLSPARK_SUCCESS";
+    case AsStatus::ALLSPARK_UNKNOWN_ERROR:
+      return "ALLSPARK_UNKNOWN_ERROR";
+    case AsStatus::ALLSPARK_PARAM_ERROR:
+      return "ALLSPARK_PARAM_ERROR";
+    case AsStatus::ALLSPARK_IO_ERROR:
+      return "ALLSPARK_IO_ERROR";
+    case AsStatus::ALLSPARK_MEMORY_ERROR:
+      return "ALLSPARK_MEMORY_ERROR";
+    case AsStatus::ALLSPARK_RUNTIME_ERROR:
+      return "ALLSPARK_RUNTIME_ERROR";
+    case AsStatus::ALLSPARK_EXCEED_LIMIT_ERROR:
+      return "ALLSPARK_EXCEED_LIMIT_ERROR";
+    case AsStatus::ALLSPARK_INVALID_CALL_ERROR:
+      return "ALLSPARK_INVALID_CALL_ERROR";
+    case AsStatus::ALLSPARK_EMPTY_REQUEST:
+      return "ALLSPARK_EMPTY_REQUEST";
+    case AsStatus::ALLSPARK_ILLEGAL_REQUEST_ID:
+      return "ALLSPARK_ILLEGAL_REQUEST_ID";
+    case AsStatus::ALLSPARK_CACHE_MEMORY_OUT:
+      return "ALLSPARK_CACHE_MEMORY_OUT";
+    case AsStatus::ALLSPARK_REQUEST_DENIED:
+      return "ALLSPARK_REQUEST_DENIED";
+    case AsStatus::ALLSPARK_CHUNK_PREFILL:
+      return "ALLSPARK_CHUNK_PREFILL";
+    case AsStatus::ALLSPARK_DEPRECATED:
+      return "ALLSPARK_DEPRECATED";
+    case AsStatus::ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR:
+      return "ALLSPARK_LORA_NUM_EXCEED_LIMIT_ERROR";
+    case AsStatus::ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR:
+      return "ALLSPARK_LORA_RANK_EXCEED_LIMIT_ERROR";
+    case AsStatus::ALLSPARK_LORA_NOT_FOUND:
+      return "ALLSPARK_LORA_NOT_FOUND";
+    case AsStatus::ALLSPARK_LORA_ALREADY_LOADED:
+      return "ALLSPARK_LORA_ALREADY_LOADED";
+    case AsStatus::ALLSPARK_LORA_IN_USE:
+      return "ALLSPARK_LORA_IN_USE";
+    case AsStatus::ALLSPARK_STREAMING:
+      return "ALLSPARK_STREAMING";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 inline bool DataModeIsSparse(DataMode mode) {
   if (mode == DataMode::CSC || mode == DataMode::ELL) return true;
   return false;

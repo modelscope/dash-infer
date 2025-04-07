@@ -17,7 +17,10 @@
 #include <weight/weight_manager.h>
 
 #include <fstream>
+#include <sstream>
 namespace allspark {
+
+// #define CONFIG_OP_DEBUG
 
 #ifdef ENABLE_CUDA
 void ValidateNumeric(const AsTensor* tensor_ptr) {
@@ -52,10 +55,7 @@ std::map<BinaryType, dnnl::algorithm> DNNLOpContext::binary_algo_map_ = {
                                    // instead
 };
 AsOperator::AsOperator(const std::string& op_type)
-    : op_type_(op_type),
-      tensor_map_(nullptr),
-      ctx_(nullptr),
-      gen_ctx_(nullptr) {}
+    : op_type_(op_type), tensor_map_(nullptr), ctx_(nullptr) {}
 
 void AsOperator::Synchronize() { ctx_->Synchronize(); }
 
@@ -84,38 +84,42 @@ void AsOperator::PrintInformation() {
       break;
   }
 
-  std::cout << string_format("{ op_name: %s, op_type: %s}", op_name_.c_str(),
-                             op_type_.c_str())
-            << std::endl;
-  std::cout << "op_inputs:" << std::endl;
+  std::stringstream ss;
+
+  ss << string_format("{ op_name: %s, op_type: %s}", op_name_.c_str(),
+                      op_type_.c_str())
+     << std::endl;
+  ss << "op_inputs:" << std::endl;
   for (auto& v : in_names_) {
-    std::cout << tensor_map_->at(v)->ToString() << std::endl;
+    ss << tensor_map_->at(v)->ToString() << std::endl;
 #ifdef ENABLE_CUDA
     if (backend == DeviceType::CUDA) {
       ValidateNumeric(tensor_map_->at(v).get());
     }
 #endif
   }
-  std::cout << "op_weights:" << std::endl;
+  ss << "op_weights:" << std::endl;
   for (auto& v : weights_) {
-    std::cout << v->ToString() << std::endl;
+    ss << v->ToString() << std::endl;
 #ifdef ENABLE_CUDA
     if (backend == DeviceType::CUDA) {
       ValidateNumeric(v);
     }
 #endif
   }
-  std::cout << "op_outputs:" << std::endl;
+  ss << "op_outputs:" << std::endl;
   for (auto& v : out_names_) {
     if (v == "generated_ids") continue;
-    std::cout << tensor_map_->at(v)->ToString() << std::endl;
+    ss << tensor_map_->at(v)->ToString() << std::endl;
 #ifdef ENABLE_CUDA
     if (backend == DeviceType::CUDA) {
       ValidateNumeric(tensor_map_->at(v).get());
     }
 #endif
   }
-  std::cout << std::endl;
+  ss << std::endl;
+
+  LOG(INFO) << ss.str();
 }
 
 // NOTE: File will be overrided in next step.
@@ -341,7 +345,8 @@ AsStatus AsOperator::CallInit(
     std::shared_ptr<WeightManager> weight_manager,
     std::shared_ptr<ModelWeightHandler> model_weight_handler,
     std::shared_ptr<LoraManager> lora_manager, RankInfo& rankInfo,
-    TensorMap* tensor_map, ModelProfiler* profiler) {
+    TensorMap* tensor_map, ModelProfiler* profiler,
+    RuntimeContext* runtime_ctx) {
   profiler_ = profiler;
   weight_handler_ = model_weight_handler;
   weight_manager_ = weight_manager;
@@ -351,20 +356,16 @@ AsStatus AsOperator::CallInit(
   rank_info_ = rankInfo;
   TensorMap stub_weight;  // weight already handle by weight manager, create a
                           // fake one make interface compile pass.
-  return InitV2(op_proto, ctx, stub_weight, stub_weight, tensor_map);
+  return InitV2(op_proto, ctx, stub_weight, stub_weight, tensor_map,
+                runtime_ctx);
 }
 
 AsStatus AsOperator::InitV2(const OperatorProto& op_proto,
                             const DeviceContext& ctx,
                             const TensorMap& weights_map,
-                            TensorMap& weights_buffer, TensorMap* tensor_map) {
+                            TensorMap& weights_buffer, TensorMap* tensor_map,
+                            RuntimeContext* runtime_ctx) {
   return Init(op_proto, ctx, weights_map, tensor_map);
-}
-
-AsStatus AsOperator::SetGenerateContext(
-    std::shared_ptr<GenerateContext>& gen_ctx) {
-  gen_ctx_ = gen_ctx;
-  return AsStatus::ALLSPARK_SUCCESS;
 }
 
 void AsOperator::SetEmbeddingMap(std::vector<TensorListMap>* embedding_map) {
@@ -527,48 +528,78 @@ AsStatus AsOperator::Forward(RuntimeContext* runtime_ctx) {
 
 AsStatus AsOperator::CallForward(RuntimeContext* runtime_ctx) {
 #ifdef CONFIG_OP_DEBUG
-  LOG(INFO) << "AsOperator::CallForward(ctx) " << GetOpType() << " Start.";
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Start.";
 #endif
   AsStatus ret;
+  std::unique_ptr<ProfilerAdder> adder;
   if (profiler_) {
-    ProfilerAdder adder(*profiler_, "forward", GetOpType(), ctx_);
-    ret = Forward(runtime_ctx);
-  } else {
-    ret = Forward(runtime_ctx);
+    adder = std::make_unique<ProfilerAdder>(*profiler_, "forward", GetOpType(),
+                                            ctx_);
   }
+
+  ret = Forward(runtime_ctx);
 
 #ifdef CONFIG_OP_DEBUG
   ctx_->Synchronize();
-  LOG(INFO) << "AsOperator::CallForward(ctx) " << GetOpType() << " Finish.";
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Finish.";
 #endif
   return ret;
 }
 
 AsStatus AsOperator::CallReshape(RuntimeContext* runtime_ctx) {
 #ifdef CONFIG_OP_DEBUG
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Start.";
 #endif
+  std::unique_ptr<ProfilerAdder> adder;
   if (profiler_) {
-    ProfilerAdder adder(*profiler_, "reshape", GetOpType(), ctx_);
-    return Reshape(runtime_ctx);
-  } else {
-    return Reshape(runtime_ctx);
+    adder = std::make_unique<ProfilerAdder>(*profiler_, "reshape", GetOpType(),
+                                            ctx_);
   }
+
+#ifdef CONFIG_OP_DEBUG
+  ctx_->Synchronize();
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Finish.";
+#endif
+  return Reshape(runtime_ctx);
 }
 
 AsStatus AsOperator::CallAlloc(RuntimeContext* runtime_ctx) {
+#ifdef CONFIG_OP_DEBUG
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Start.";
+#endif
 #ifdef CONFIG_CONCURRENT_SPAN
   std::string name = "Alloc:" + this->op_name_;
   TracerLog trace(ctx_->GetDeviceType(), name.c_str(), 3);
-
-  return Alloc(runtime_ctx);
 #else
+  std::unique_ptr<ProfilerAdder> adder;
   if (profiler_) {
-    ProfilerAdder adder(*profiler_, "alloc", GetOpType(), ctx_);
-    return Alloc(runtime_ctx);
-  } else {
-    return Alloc(runtime_ctx);
+    adder =
+        std::make_unique<ProfilerAdder>(*profiler_, "alloc", GetOpType(), ctx_);
   }
 #endif
+#ifdef CONFIG_OP_DEBUG
+  ctx_->Synchronize();
+  LOG(INFO) << "AsOperator::" << __FUNCTION__ << "(ctx): "
+            << "OpType: " << GetOpType() << ", "
+            << "OpName: " << GetOpName() << ", "
+            << "Finish.";
+#endif
+  return Alloc(runtime_ctx);
 }
 
 }  // namespace allspark

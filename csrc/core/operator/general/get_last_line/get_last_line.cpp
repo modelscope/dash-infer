@@ -25,26 +25,64 @@ AsStatus GetLastLineOp::Init(const OperatorProto& op_proto,
   tensor_map_->at(out_names_[0])->SetDataType(dtype);
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus GetLastLineOp::Reshape() {
+AsStatus GetLastLineOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
   batch_ = in_shape[0];
-  seq_ = in_shape[1];
-  hid_ = in_shape[2];
-  AS_CHECK_STATUS(
-      tensor_map_->at(out_names_[0])
-          ->SetShape(Shape({ctx_->GetModelMaxBatch(), 1, hid_})));  // WARMUP
-  AS_CHECK_STATUS(
-      tensor_map_->at(out_names_[0])->SetShape(Shape({batch_, 1, hid_})));
+  seq_len_ = in_shape[1];
+  hidden_size_ = in_shape[2];
+  AS_CHECK_STATUS(tensor_map_->at(out_names_[0])
+                      ->SetShape(Shape({ctx_->GetModelMaxBatch(), 1,
+                                        hidden_size_})));  // WARMUP
+  AS_CHECK_STATUS(tensor_map_->at(out_names_[0])
+                      ->SetShape(Shape({batch_, 1, hidden_size_})));
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus GetLastLineOp::Forward() {
+void GetLastLineOp::UpdateHiddenStates(RuntimeContext* runtime_ctx,
+                                       AsTensor* out_tensor) {
+  if (rank_info_.rank_id == 0) {
+    std::string tensor_name = "hidden_states";
+    if (runtime_ctx->is_context) {
+      GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
+      if (gen_ctx->gen_cfg.enable_tensors_from_model_inference) {
+        std::shared_ptr<AsTensor> output_tensor = std::make_shared<AsTensor>(
+            tensor_name, DeviceType::CPU, out_tensor->GetDataType(),
+            DataMode::DENSE, Shape({seq_len_, hidden_size_}));
+        int data_size = SizeofType(output_tensor->GetDataType());
+        CopyData(output_tensor->GetDataPtr(), output_tensor->GetDeviceType(),
+                 out_tensor->GetDataPtr(), out_tensor->GetDeviceType(),
+                 seq_len_ * hidden_size_ * data_size, ctx_);
+        gen_ctx->request->tensors_from_model_inference_list[tensor_name]
+            .push_back(output_tensor);
+      }
+    } else {
+      int batch_size = runtime_ctx->GetGenCtxListSize();
+      for (int i = 0; i < batch_size; i++) {
+        GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+        if (gen_ctx->gen_cfg.enable_tensors_from_model_inference) {
+          std::shared_ptr<AsTensor> output_tensor = std::make_shared<AsTensor>(
+              tensor_name, DeviceType::CPU, out_tensor->GetDataType(),
+              DataMode::DENSE, Shape({seq_len_, hidden_size_}));
+          int data_size = SizeofType(output_tensor->GetDataType());
+          CopyData(output_tensor->GetDataPtr(), output_tensor->GetDeviceType(),
+                   out_tensor->GetDataPtr() + i * hidden_size_ * data_size,
+                   out_tensor->GetDeviceType(), hidden_size_ * data_size, ctx_);
+          gen_ctx->request->tensors_from_model_inference_list[tensor_name]
+              .push_back(output_tensor);
+        }
+      }
+    }
+  }
+}
+
+AsStatus GetLastLineOp::Forward(RuntimeContext* runtime_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   out_tensor->CopyDataFrom(
       (char*)in_tensor->GetDataPtr() +
-          (seq_ - 1) * hid_ * SizeofType(in_tensor->GetDataType()),
-      batch_ * 1 * hid_ * SizeofType(in_tensor->GetDataType()),
+          (seq_len_ - 1) * hidden_size_ * SizeofType(in_tensor->GetDataType()),
+      batch_ * 1 * hidden_size_ * SizeofType(in_tensor->GetDataType()),
       ctx_->GetDeviceType(), ctx_);
+  UpdateHiddenStates(runtime_ctx, in_tensor);
   return AsStatus::ALLSPARK_SUCCESS;
 }
 

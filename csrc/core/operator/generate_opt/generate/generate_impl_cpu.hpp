@@ -81,7 +81,7 @@ AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
   // for batch
   std::vector<int> bad_words_ids_size(0);
   if (runtime_ctx->is_context) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
     int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens);
     void* in_logits = (ori_in_logits);
     auto functor = [&]<typename T>() {
@@ -97,7 +97,7 @@ AsStatus gen_process_logits_cpu(DataType dtype, int64_t* ori_in_tokens,
     DispatchCPU(dtype, functor);
   } else {
     for (int i = 0; i < batch_size; i++) {
-      std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
       int64_t* in_tokens = static_cast<int64_t*>(ori_in_tokens) +
                            gen_ctx->current_batch * ctx->GetModelMaxLength();
       void* in_logits = ((char*)ori_in_logits + i * length * SizeofType(dtype));
@@ -127,7 +127,7 @@ AsStatus gen_sample_cpu(DataType dtype, int64_t* total_out_tokens,
                         void* ws_ptr, size_t ws_bytes, void* device_prop) {
   constexpr int batch_size = 1;
   for (int i = 0; i < total_batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -188,7 +188,7 @@ AsStatus fill_generated_ids_cpu(RuntimeContext* runtime_ctx,
 
   std::vector<int64_t*> ptrs_host(batch_size);
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -221,7 +221,7 @@ AsStatus fill_max_dec_ids_cpu(RuntimeContext* runtime_ctx,
   // memset(max_dec_ids->GetDataPtr(), 0, max_dec_ids->GetSizeInByte());
 
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {

@@ -84,6 +84,10 @@ AsStatus ALiBiPEOp::Init(const OperatorProto& op_proto,
 }
 
 AsStatus ALiBiPEOp::Reshape() {
+  LOG(ERROR) << "NOT SUPPORT ALiBiPEOp in allspark2.x";
+  return AsStatus::ALLSPARK_RUNTIME_ERROR;
+
+#if 0
   Shape in_shape = tensor_map_->at(in_names_[0])->GetShape();
   batch_size_ = in_shape[0];
   if (gen_ctx_->step == 0) {
@@ -96,9 +100,14 @@ AsStatus ALiBiPEOp::Reshape() {
   }
 
   return AsStatus::ALLSPARK_SUCCESS;
+#endif
 }
 
 AsStatus ALiBiPEOp::Forward() {
+  LOG(ERROR) << "NOT SUPPORT ALiBiPEOp in allspark2.x";
+  return AsStatus::ALLSPARK_RUNTIME_ERROR;
+
+#if 0
   // int* batch_offset = (int*)tensor_map_->at(in_names_[1])->GetDataPtr();
   int* batch_offset = nullptr;
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
@@ -111,6 +120,7 @@ AsStatus ALiBiPEOp::Forward() {
                   batch_offset, batch_size_, seq_length_, num_heads_,
                   ori_num_heads_, (gen_ctx_->step + 1), ctx_);
   return AsStatus::ALLSPARK_SUCCESS;
+#endif
 }
 
 REGISTER_OP(ALiBiPE, CPU, ALiBiPEOp)

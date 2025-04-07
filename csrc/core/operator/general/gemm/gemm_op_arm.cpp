@@ -23,9 +23,10 @@ AsStatus GemmOpARM::Init(const OperatorProto& op_proto,
 AsStatus GemmOpARM::InitV2(const OperatorProto& op_proto,
                            const DeviceContext& ctx,
                            const TensorMap& weights_map,
-                           TensorMap& weights_buffer, TensorMap* tensor_map) {
+                           TensorMap& weights_buffer, TensorMap* tensor_map,
+                           RuntimeContext* runtime_ctx) {
   AS_CHECK_STATUS(GemmOpCPU::InitV2(op_proto, ctx, weights_map, weights_buffer,
-                                    tensor_map));
+                                    tensor_map, runtime_ctx));
 
   if (alpha_ != 1.0) {
     LOG(ERROR) << "GemmOpARM only support alpha=1."
@@ -59,7 +60,7 @@ AsStatus GemmOpARM::InitV2(const OperatorProto& op_proto,
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus GemmOpARM::Reshape() {
+AsStatus GemmOpARM::Reshape(RuntimeContext* runtime_ctx) {
   if (ctx_->GetMatmulPrecision() == PrecisionLevel::MEDIUM_BF16) {
     int yn = n_;
     AS_CHECK_STATUS(GemmOpBase::Reshape(yn));
@@ -69,12 +70,12 @@ AsStatus GemmOpARM::Reshape() {
     int64_t ws_size = a_bf16_size;
     tensor_map_->at("workspace")->SetShape(Shape({ws_size}));
   } else {
-    AS_CHECK_STATUS(GemmOpCPU::Reshape());
+    AS_CHECK_STATUS(GemmOpCPU::Reshape(runtime_ctx));
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
-AsStatus GemmOpARM::Forward() {
+AsStatus GemmOpARM::Forward(RuntimeContext* runtime_ctx) {
   if (ctx_->GetMatmulPrecision() == PrecisionLevel::MEDIUM_BF16) {
     AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
     void* in = in_tensor->GetDataPtr();
@@ -93,7 +94,7 @@ AsStatus GemmOpARM::Forward() {
                          (float*)out, (float*)bias, activation_,
                          static_cast<void*>(ws_ptr));
   } else {
-    AS_CHECK_STATUS(GemmOpCPU::Forward());
+    AS_CHECK_STATUS(GemmOpCPU::Forward(runtime_ctx));
   }
 
   return AsStatus::ALLSPARK_SUCCESS;

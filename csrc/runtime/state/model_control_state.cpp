@@ -14,5 +14,17 @@ void ModelControlState::StopLoop() {
     loop_thread_.reset();
     model_stopped = true;
   }
+
+  if (prefill_thread_) {
+    prefill_thread_->join();
+    prefill_thread_.reset();
+  }
+
+  if (decode_thread_) {
+    decode_thread_->join();
+    decode_thread_.reset();
+  }
+
+  model_stopped = true;
 }
 }  // namespace allspark

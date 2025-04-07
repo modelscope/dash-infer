@@ -23,8 +23,8 @@ PrefixCacheManager::PrefixCacheManager(
     const CacheSpanManager::Ptr& span_manager,
     const CacheFrameManager::Ptr& frame_manager,
     const PrefixCacheCoordinator::Ptr& coordinator, const TensorMap* tensor_map,
-    const DeviceContext* ctx, const int ttl = 300)
-    : coordinator_(coordinator), tensor_map_(tensor_map) {
+    const DeviceContext* ctx, const int rank_id, const int ttl = 300)
+    : coordinator_(coordinator), tensor_map_(tensor_map), rank_id_(rank_id) {
   const int nranks = ctx->GetNranks();
   const int max_length = ctx->GetModelMaxLength();
   const int max_batch = ctx->GetModelMaxBatch();
@@ -47,13 +47,10 @@ PrefixCacheManager::PrefixCacheManager(
 
   quant_mode_ = CacheUtils::toQuantMode(cache_mode);
 
-  const int max_num_spans =
-      (max_length + token_per_span_ - 1) / token_per_span_;
+  const int max_num_node = (max_length + token_per_span_ - 1) / token_per_span_;
   spanptr_tensor_device_ = std::make_shared<AsTensor>(
       "prefix_cache_spanptr_tensor_device", DeviceType::CUDA, DataType::POINTER,
-      DataMode::DENSE, Shape{max_num_spans * span_per_node});
-
-  // min_capacity_ = max_num_spans * max_batch;
+      DataMode::DENSE, Shape{max_num_node * span_per_node});
 
   init_cpu_union(nranks, max_length, max_batch);
   threadpool_ = std::make_unique<ThreadPool>(threadpool_size_);
@@ -65,8 +62,22 @@ PrefixCacheManager::PrefixCacheManager(
 
 void PrefixCacheManager::UpdateCapacity() {
   int span_per_node = 2 * layer_num_;
-  int capacity = prefix_cache_ratio_ *
-                 (gpu_union_->frame_manager->CountFrame() / span_per_node);
+  const int max_length = ctx_->GetModelMaxLength();
+  const int max_batch = ctx_->GetModelMaxBatch();
+  const int max_num_node = (max_length + token_per_span_ - 1) / token_per_span_;
+  const int rest_frame_num = (max_num_node + max_batch) * span_per_node;
+
+  int empirical_val = 2;
+  int total_frame_num = gpu_union_->frame_manager->CountFrame();
+  int capacity_1 = prefix_cache_ratio_ * (total_frame_num / span_per_node);
+  int capacity_2 =
+      (total_frame_num - rest_frame_num * empirical_val) / span_per_node;
+  int capacity = std::min(capacity_1, capacity_2);
+
+  DLOG(INFO) << "capacity set by ratio: " << capacity_1 << ", "
+             << "capacity set by max_length: " << capacity_2 << ", "
+             << "rest_frame_num: " << rest_frame_num << ", "
+             << "total_frame_num: " << total_frame_num;
 
   gpu_union_->capacity = capacity;
 
@@ -99,8 +110,11 @@ void PrefixCacheManager::Insert(
     const std::vector<std::unique_ptr<CacheArray>>& layer_cache_v,
     std::vector<PrefixNodePtr>& node_vec) {
   auto profiler = std::make_shared<Profiler>(__FUNCTION__, &timecost_table_);
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
 
-  coordinator_->waitForOtherWorkers();
+  // coordinator_->waitForOtherWorkers();
 
   int layer_num = layer_cache_k.size();
   int token_num = tokens->GetShape().Count();
@@ -139,11 +153,11 @@ void PrefixCacheManager::Insert(
       node_vec.emplace_back(gpu_union_->hash_table.at(hash_str));
       PREFIX_DLOG(INFO) << __FUNCTION__
                         << ": 1, node exist in gpu hash_table, hash: "
-                        << hash_str;
+                        << hash_str << ", rank_id: " << rank_id_;
     } else {
       PREFIX_DLOG(INFO) << __FUNCTION__
                         << ": 2, node not exist in gpu hash_table, hash: "
-                        << hash_str;
+                        << hash_str << ", rank_id: " << rank_id_;
       node_vec.emplace_back(new_cuda_node);
       if (gpu_union_->hash_table.size() < gpu_union_->capacity) {
         insert_node(hash_str, new_cuda_node, DeviceType::CUDA);
@@ -151,10 +165,10 @@ void PrefixCacheManager::Insert(
         PREFIX_DLOG(INFO) << __FUNCTION__ << ": 2.1, insert to gpu hash_table, "
                           << "hash: " << hash_str << ", "
                           << gpu_union_->hash_table.size() << "/"
-                          << gpu_union_->capacity;
+                          << gpu_union_->capacity << ", rank_id: " << rank_id_;
       } else {
         PREFIX_DLOG(INFO) << __FUNCTION__ << ": 2.2, gpu hash_table is full, "
-                          << "hash: " << hash_str;
+                          << "hash: " << hash_str << ", rank_id: " << rank_id_;
         std::string victim_hash = gpu_union_->evictor.FindVictim();
 
         if (victim_hash != DEFAULT_HASH_STR) {
@@ -172,14 +186,16 @@ void PrefixCacheManager::Insert(
               << gpu_union_->hash_table.size() << "/"
               << gpu_union_->capacity << ", "
               << cpu_union_->hash_table.size() << "/"
-              << cpu_union_->capacity;
+              << cpu_union_->capacity
+              << ", rank_id: " << rank_id_;
           // clang-format on
         } else {
           swap_vec.emplace_back(new_cuda_node);
           PREFIX_DLOG(INFO)
               << __FUNCTION__
               << ": 2.2.2, no victim, swap new node to cpu hash_table later, "
-              << gpu_union_->hash_table.size() << "/" << gpu_union_->capacity;
+              << gpu_union_->hash_table.size() << "/" << gpu_union_->capacity
+              << ", rank_id: " << rank_id_;
         }
       }
     }
@@ -188,7 +204,7 @@ void PrefixCacheManager::Insert(
     if (is_cached == true) {
       PREFIX_DLOG(INFO) << __FUNCTION__
                         << ": 3, node exist in cpu hash_table, hash: "
-                        << hash_str;
+                        << hash_str << ", rank_id: " << rank_id_;
     }
   }
 
@@ -205,7 +221,7 @@ void PrefixCacheManager::Insert(
 
   PREFIX_DLOG(INFO) << __FUNCTION__ << ": 4, after insert, "
                     << gpu_union_->hash_table.size() << "/"
-                    << gpu_union_->capacity;
+                    << gpu_union_->capacity << ", rank_id: " << rank_id_;
 }
 
 void PrefixCacheManager::RefOnly(const std::shared_ptr<AsTensor>& tokens,
@@ -213,11 +229,15 @@ void PrefixCacheManager::RefOnly(const std::shared_ptr<AsTensor>& tokens,
                                  int& gpu_cached_len,
                                  std::vector<PrefixNodePtr>& node_vec) {
   auto profiler = std::make_shared<Profiler>(__FUNCTION__, &timecost_table_);
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
 
   int start_idx = 0;
   int token_num = tokens->GetShape().Count();
   int uncached_idx = 0;
   gpu_cached_len = 0;
+  node_vec.clear();
 
   for (int i = start_idx + (token_per_span_ - 1); i < token_num - 1;
        i += token_per_span_) {
@@ -238,7 +258,8 @@ void PrefixCacheManager::RefOnly(const std::shared_ptr<AsTensor>& tokens,
                         << gpu_union_->capacity << ", "
                         << "hash: " << hash_str << ", "
                         << "ref_cnt: "
-                        << gpu_union_->hash_table.at(hash_str)->ref_cnt;
+                        << gpu_union_->hash_table.at(hash_str)->ref_cnt
+                        << ", rank_id: " << rank_id_;
     }
 
     bool is_cached_cpu = transverse_hash_table(hash_str, DeviceType::CPU);
@@ -252,7 +273,8 @@ void PrefixCacheManager::RefOnly(const std::shared_ptr<AsTensor>& tokens,
                         << cpu_union_->capacity << ", "
                         << "hash: " << hash_str << ", "
                         << "ref_cnt: "
-                        << cpu_union_->hash_table.at(hash_str)->ref_cnt;
+                        << cpu_union_->hash_table.at(hash_str)->ref_cnt
+                        << ", rank_id: " << rank_id_;
     }
 
     if (is_cached || is_cached_cpu) {
@@ -275,6 +297,9 @@ void PrefixCacheManager::RefFill(
     std::unique_ptr<VirtualCache>& virtual_v_cache,
     std::vector<PrefixNodePtr>& node_vec) {
   auto profiler = std::make_shared<Profiler>(__FUNCTION__, &timecost_table_);
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
 
   int start_idx = 0;
   int token_num = tokens->GetShape().Count();
@@ -296,7 +321,8 @@ void PrefixCacheManager::RefFill(
       PREFIX_DLOG(INFO) << __FUNCTION__ << ": 1, ref gpu node, "
                         << "hash: " << hash_str << ", "
                         << "ref_cnt: "
-                        << gpu_union_->hash_table.at(hash_str)->ref_cnt;
+                        << gpu_union_->hash_table.at(hash_str)->ref_cnt + 1
+                        << ", rank_id: " << rank_id_;
 
       uncached_idx += token_per_span_;
       ref_node(hash_str, ts, DeviceType::CUDA);
@@ -308,13 +334,13 @@ void PrefixCacheManager::RefFill(
       // not found in gpu hash_table
       PREFIX_DLOG(INFO) << __FUNCTION__
                         << ": 2, not found in gpu hash_table, hash: "
-                        << hash_str;
+                        << hash_str << ", rank_id: " << rank_id_;
       is_cached = transverse_hash_table(hash_str, DeviceType::CPU);
       if (is_cached == true) {
         // found in cpu hash_table
         PREFIX_DLOG(INFO) << __FUNCTION__
                           << ": 2.1, found in cpu hash_table, hash: "
-                          << hash_str;
+                          << hash_str << ", rank_id: " << rank_id_;
         uncached_idx += token_per_span_;
         PrefixNodePtr& cpu_node = cpu_union_->hash_table.at(hash_str);
 
@@ -327,7 +353,8 @@ void PrefixCacheManager::RefFill(
       } else {
         // not found
         PREFIX_DLOG(INFO) << __FUNCTION__
-                          << ": 3, cache not found, hash: " << hash_str;
+                          << ": 3, cache not found, hash: " << hash_str
+                          << ", rank_id: " << rank_id_;
         break;
       }
     }
@@ -345,7 +372,7 @@ void PrefixCacheManager::RefFill(
                           << "evict node_num: " << exceed_num << ", "
                           << "node_vec_cpu.size(): " << node_vec_cpu.size()
                           << ", " << gpu_union_->hash_table.size() << "/"
-                          << gpu_union_->capacity;
+                          << gpu_union_->capacity << ", rank_id: " << rank_id_;
       }
 
       std::vector<PrefixNodePtr> new_node_vec_gpu;
@@ -361,7 +388,7 @@ void PrefixCacheManager::RefFill(
                           << gpu_union_->hash_table.size() << "/"
                           << gpu_union_->capacity << ", "
                           << cpu_union_->hash_table.size() << "/"
-                          << cpu_union_->capacity;
+                          << cpu_union_->capacity << ", rank_id: " << rank_id_;
       }
     } else {
       prefix_len -= cpu_cached_len;
@@ -374,7 +401,12 @@ void PrefixCacheManager::RefFill(
   TensorUtils::DeepCopyMatrix2D(*new_tokens, *tokens, prefix_len, 0);
 }
 
-void PrefixCacheManager::UnRef(const std::vector<PrefixNodePtr>& node_vec) {
+void PrefixCacheManager::UnRef(std::vector<PrefixNodePtr>& node_vec) {
+  auto profiler = std::make_shared<Profiler>(__FUNCTION__, &timecost_table_);
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
+
   for (PrefixNodePtr node : node_vec) {
     std::string hash_str = node->hash;
     bool is_cached = transverse_hash_table(hash_str, DeviceType::CUDA);
@@ -390,7 +422,8 @@ void PrefixCacheManager::UnRef(const std::vector<PrefixNodePtr>& node_vec) {
                         << gpu_union_->capacity << ", "
                         << "hash: " << hash_str << ", "
                         << "ref_cnt: "
-                        << gpu_union_->hash_table.at(hash_str)->ref_cnt;
+                        << gpu_union_->hash_table.at(hash_str)->ref_cnt
+                        << ", rank_id: " << rank_id_;
     }
 
     bool is_cached_cpu = transverse_hash_table(hash_str, DeviceType::CPU);
@@ -402,18 +435,28 @@ void PrefixCacheManager::UnRef(const std::vector<PrefixNodePtr>& node_vec) {
                         << cpu_union_->capacity << ", "
                         << "hash: " << hash_str << ", "
                         << "ref_cnt: "
-                        << cpu_union_->hash_table.at(hash_str)->ref_cnt;
+                        << cpu_union_->hash_table.at(hash_str)->ref_cnt
+                        << ", rank_id: " << rank_id_;
     }
   }
+  node_vec.clear();
   return;
 }
 
 void PrefixCacheManager::UpdateCnt(int hit_cnt, int miss_cnt) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
+
   hit_cnt_ += hit_cnt;
   miss_cnt_ += miss_cnt;
 }
 
 void PrefixCacheManager::Reset() {
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
+
   auto lambda = [&](CacheUnionPtr union_ptr) {
     for (auto it = union_ptr->hash_table.begin();
          it != union_ptr->hash_table.end(); ++it) {
@@ -437,15 +480,27 @@ void PrefixCacheManager::Reset() {
 }
 
 void PrefixCacheManager::EvictUnrefered(int target) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
+
   auto profiler = std::make_shared<Profiler>(__FUNCTION__, &timecost_table_);
 
-  int frame_num = target - gpu_union_->frame_manager->CountFreeFrame();
+  int frame_num = target;
   int node_num = (frame_num + layer_num_ * 2 - 1) / (layer_num_ * 2);
 
+  if (node_num < 0) {
+    LOG(ERROR) << __FUNCTION__ << ": node_num = " << node_num << " < 0";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  }
   evict_unrefered_by_num(node_num);
 }
 
 void PrefixCacheManager::EvictAllUnrefered() {
+  std::lock_guard<std::mutex> guard(mtx_);
+  DLOG(INFO) << "[" << __FUNCTION__ << "] "
+             << "prefix_cache_manager mutex lock passed";
+
   std::vector<std::string> hash_list =
       gpu_union_->evictor.GetAllCandidatesHash();
   filter_timeout_hash(hash_list);

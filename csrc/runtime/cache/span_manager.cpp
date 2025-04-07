@@ -155,6 +155,13 @@ size_t DefaultCacheSpanManager::ClaimSpan(std::vector<CacheSpan::Ptr>& out_vec,
   return count;
 }
 
+size_t DefaultCacheSpanManager::ClaimSpanFromPres(
+    std::vector<CacheSpan::Ptr>& out_vec, CacheSpanHandle /* tag */,
+    size_t count) {
+  throw AsException(
+      ("DefaultCacheSpanManager::ClaimSpanFromPres not implemented."));
+}
+
 void DefaultCacheSpanManager::ReleaseSpan(const CacheSpanHandle& tag) {
   auto it = spans_.find(tag);
   if (it != spans_.end()) {
@@ -220,6 +227,7 @@ void ConcurrentCacheSpanManager::Init(int64_t span_size) {
 
 CacheSpan::Ptr ConcurrentCacheSpanManager::GetSpan(CacheSpanHandle tag,
                                                    bool /* do_alloc */) {
+  // [warning] this api may cause bug after implement prefill disaggregation
   CacheFrame::Ptr frame = frame_manager_->AllocFrame();
   if (!frame) {
     return nullptr;
@@ -237,6 +245,24 @@ size_t ConcurrentCacheSpanManager::ClaimSpan(
   if (claimed < count) {
     if (claimed > 0) {
       frame_manager_->FreeFrame(new_frames, claimed);
+    }
+    return 0;
+  }
+  std::transform(std::make_move_iterator(new_frames.begin()),
+                 std::make_move_iterator(new_frames.end()), out_vec.begin(),
+                 [](auto it) { return CacheSpan::Create(std::move(it)); });
+  return count;
+}
+
+size_t ConcurrentCacheSpanManager::ClaimSpanFromPres(
+    std::vector<CacheSpan::Ptr>& out_vec, CacheSpanHandle /* tag */,
+    size_t count) {
+  std::vector<CacheFrame::Ptr> new_frames(count);
+  size_t claimed = frame_manager_->AllocFrameFromPres(new_frames, count);
+  // all or none
+  if (claimed < count) {
+    if (claimed > 0) {
+      frame_manager_->FreeFrameToPres(new_frames, claimed);
     }
     return 0;
   }

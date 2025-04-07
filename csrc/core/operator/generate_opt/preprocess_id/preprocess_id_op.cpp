@@ -27,17 +27,14 @@ AsStatus PreProcessIdOp::Reshape(RuntimeContext* runtime_ctx) {
 }
 
 AsStatus PreProcessIdOp::Forward(RuntimeContext* runtime_ctx) {
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   std::shared_ptr<Request> request = gen_ctx->request;
 
   {
     // create local generated_ids (own by each workder)
-    std::string tensor_name, new_tensor_name;
-    tensor_name = "generated_ids_global";
-    new_tensor_name = "generated_ids";
+    std::string new_tensor_name = "generated_ids";
     auto generated_ids_tensor = std::make_shared<AsTensor>(
-        new_tensor_name, DeviceType::CPU,
-        request->outputs.at(tensor_name)->GetDataType(), DataMode::DENSE,
+        new_tensor_name, DeviceType::CPU, DataType::INT64, DataMode::DENSE,
         Shape{1, ctx_->GetModelMaxLength()});
 
     // copy input_ids to generated_ids, cpu to cpu

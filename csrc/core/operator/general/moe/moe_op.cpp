@@ -204,7 +204,7 @@ AsStatus MoeOp::Init(const OperatorProto& op_proto, const DeviceContext& ctx,
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus MoeOp::Reshape() {
+AsStatus MoeOp::Reshape(RuntimeContext* runtime_ctx) {
   Shape out_shape = tensor_map_->at(in_names_[0])->GetShape();
   AS_CHECK_STATUS(
       tensor_map_->at(out_names_[0])->SetShape(std::move(out_shape)));
@@ -335,12 +335,13 @@ AsStatus MoeOp::Reshape() {
   }
   return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus MoeOp::Forward() {
+AsStatus MoeOp::Forward(RuntimeContext* runtime_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* expert_weight_tensor = tensor_map_->at(in_names_[1]).get();
   AsTensor* gate_up_proj_weight_tensor = weights_[0];
   AsTensor* down_proj_weight_tensor = weights_[1];
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
+
   switch (ctx_->GetDeviceType()) {
 #ifdef ENABLE_CUDA
     case DeviceType::CUDA: {
@@ -472,6 +473,7 @@ AsStatus MoeOp::Forward() {
     default:
       break;
   }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 REGISTER_OP(MOE, CUDA, MoeOp)

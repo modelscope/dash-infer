@@ -17,8 +17,7 @@ class GenerateOp : public AsOperator {
   AsStatus Forward(RuntimeContext* runtime_ctx) override;
   AsStatus RunContext(RuntimeContext* runtime_ctx);
   AsStatus RunDecoder(RuntimeContext* runtime_ctx);
-  AsStatus RunOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
-                       int current_batch);
+  AsStatus RunOneBatch(GenerateContext* gen_ctx, int current_batch);
   AsStatus RunSample(RuntimeContext* runtime_ctx);
 
  private:
@@ -115,8 +114,8 @@ class GenerateOp : public AsOperator {
    * @return AsStatus
    */
 #ifdef ENABLE_JSON_MODE
-  AsStatus FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
-                             char* in_ptr, int current_batch, bool is_context);
+  AsStatus FormatModelOutput(GenerateContext* gen_ctx, char* in_ptr,
+                             int current_batch, bool is_context);
 #endif
   void build_batch_gencfg(RuntimeContext* runtime_ctx,
                           BatchGencfg& batch_gencfg, const DeviceContext* ctx);

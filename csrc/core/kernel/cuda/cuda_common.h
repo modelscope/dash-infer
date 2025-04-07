@@ -40,15 +40,6 @@ __device__ __forceinline__ float operator+(const float& lh, const half& rh) {
 #endif
 #define THREAD_PER_BLOCK 256
 #define MAX_DIMS 6
-#define CHECK_CUBLAS(cmd)                                            \
-  do {                                                               \
-    cublasStatus_t cublas_status = cmd;                              \
-    if (cublas_status != CUBLAS_STATUS_SUCCESS) {                    \
-      std::cerr << "Failed:  " << __FILE__ << ":" << __LINE__ << " " \
-                << cublas_status << std::endl;                       \
-      exit(-1);                                                      \
-    }                                                                \
-  } while (0)
 
 namespace hie {
 template <typename T, int nbElems>

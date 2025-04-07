@@ -43,7 +43,7 @@ First of all, the inference pipeline has the following main steps:
 
 #. **Request Initiation and Output Reception**: This step primarily focuses on asynchronously initiating requests. After a request is created, the engine processes it in a continuous batching manner. The corresponding output from the request is obtained through the request's output queue, which also allows asynchronous monitoring of the request's current status.
 
-.. note:: For NVIDIA GPUs, the device memory will be managed by a BFC Allocator. It will allocate the configured total device memory on **Engine Installation and Model Startup** step. The allocation ratio can be controlled by the ``BFC_MEM_RATIO`` environment variable. For example, ``BFC_MEM_RATIO=0.8`` means allocating 80% of all GPU memory on this device (total memory, not free memory). More memory usually means a larger KV-cache pool, which is better for throughput. The default value is ``0.975`` in this release.
+.. note:: For NVIDIA GPUs, the device memory will be managed by a BFC Allocator. It will allocate the configured total device memory on **Engine Installation and Model Startup** step. The allocation ratio can be controlled by the ``BFC_MEM_RATIO`` environment variable. For example, ``BFC_MEM_RATIO=0.8`` means allocating 80% of all GPU memory on this device (total memory, not free memory). More memory usually means a larger KV-cache pool, which is better for throughput. The default value is ``0.9`` in this release.
 
 
 .. _llm_offline_interface:

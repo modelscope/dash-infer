@@ -19,6 +19,7 @@ AsStatus QwenModel::Init(const TransformerProto& model_proto,
     for (auto& op : graph_ops_["gen_graph"]) {
       topo_ops_.emplace_back(op.get());
     }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 REGISTER_MODEL("Qwen", QwenModel)

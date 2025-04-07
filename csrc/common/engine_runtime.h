@@ -41,17 +41,23 @@ class ModelWeightHandler;
 
 class ModelControlState final {
   std::unique_ptr<std::thread> loop_thread_;
+  std::unique_ptr<std::thread> prefill_thread_;
+  std::unique_ptr<std::thread> decode_thread_;
 
  public:
   std::string model_name;
 
   moodycamel::BlockingConcurrentQueue<EngineControlMessage> msg_queue;
+  moodycamel::BlockingConcurrentQueue<EngineControlMessage> msg_queue_prefill;
+  moodycamel::BlockingConcurrentQueue<EngineControlMessage> msg_queue_decode;
   std::atomic<int> msg_queue_size;
 
   std::unordered_map<std::string, std::shared_ptr<RequestHandle>>
       request_handle_map;
   std::unordered_map<std::string, std::shared_ptr<AsEngine::ResultQueue>>
       result_queue_map;
+  std::mutex map_lock_;  // mutex for request_handle_map and result_queue_map
+
   std::atomic<bool> model_stopping =
       false;                                // after GracefulStopModel called...
   std::atomic<bool> model_stopped = false;  // after GracefulStopModel is done.
@@ -63,6 +69,18 @@ class ModelControlState final {
   void StartLoop(Func&& func, Args&&... args) {
     loop_thread_ = std::make_unique<std::thread>(std::forward<Func>(func),
                                                  std::forward<Args>(args)...);
+  }
+
+  template <typename Func, typename... Args>
+  void StartPrefillLoop(Func&& func, Args&&... args) {
+    prefill_thread_ = std::make_unique<std::thread>(
+        std::forward<Func>(func), std::forward<Args>(args)...);
+  }
+
+  template <typename Func, typename... Args>
+  void StartDecodeLoop(Func&& func, Args&&... args) {
+    decode_thread_ = std::make_unique<std::thread>(std::forward<Func>(func),
+                                                   std::forward<Args>(args)...);
   }
 
   void StopLoop();
@@ -80,7 +98,7 @@ class RequestHandle {
   std::string request_uuid;
   size_t generate_length = 0;
   size_t context_length = 0;
-  size_t continue_count = 0;
+  bool need_set_generating_stat = true;
   const std::chrono::time_point<std::chrono::steady_clock> create_ts;
 
   RequestHandle() : create_ts(std::chrono::steady_clock::now()) {}
@@ -150,7 +168,6 @@ class ResultQueueImpl : public AsEngine::ResultQueue {
   GenerateElementPtr GetWithTimeout(int timeout_ms);
   unsigned long CountSpinCounts(std::chrono::milliseconds duration);
   moodycamel::ConcurrentQueue<AsEngine::GeneratedElements> store_queue_;
-  // std::queue<GenerateElementPtr> store_queue_;
   std::atomic<AsEngine::GenerateRequestStatus> status_;
   std::atomic<size_t> generate_length_;
 
@@ -258,7 +275,8 @@ inline static std::string to_string(const allspark::GenerateConfig& gen_cfg) {
   os << "min_length: " << gen_cfg.min_length << ", ";
   os << "max_length: " << gen_cfg.max_length << ", ";
   os << "lora_name: " << gen_cfg.lora_name << ", ";
-
+  os << "enable_tensors_from_model_inference: "
+     << gen_cfg.enable_tensors_from_model_inference << ", ";
   // For mm_info we assume some way to print it is provided
   if (gen_cfg.mm_info != nullptr) {
     os << "mm_info: " << gen_cfg.mm_info << ", ";

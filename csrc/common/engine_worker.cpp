@@ -100,13 +100,32 @@ AsStatus Worker::BuildModel(
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+AsStatus Worker::BuildModelFromPeer(const TransformerProto& model_proto,
+                                    const DeviceContext* main_ctx,
+                                    std::unique_ptr<Worker>& worker_prefill) {
+  DLOG(INFO) << "Worker::BuildModelFromPeer()" << std::endl;
+  SetWorkerDeviceId(device_id_);
+  if (main_ctx != nullptr) {
+    device_ctx_->CopyFromOther(main_ctx);
+  }
+  model_ = ModelFactory::getInstance().GetModel(model_proto.model_type())();
+  model_->SetRank(rank_, nranks_);
+  model_->SetPDSharedData(worker_prefill->GetModel()->GetPDSharedData());
+  AS_CHECK_STATUS(model_->Init(model_proto, *device_ctx_));
+
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
 AsStatus Worker::StartRequestImpl(
     const std::shared_ptr<RequestHandle> request_handle, std::string request_id,
-    TensorMap* outputs, const GenerateConfig& gen_cfg) {
+    TensorMap* outputs, const GenerateConfig& gen_cfg,
+    std::shared_ptr<moodycamel::ConcurrentQueue<int64_t>> generated_ids_queue,
+    const std::chrono::time_point<std::chrono::steady_clock> start_ts) {
   DLOG(INFO) << "Worker::StartRequestImpl" << std::endl;
   SetWorkerDeviceId(device_id_);
   AsStatus ret =
-      model_->StartRequestImpl(request_handle, request_id, outputs, gen_cfg);
+      model_->StartRequestImpl(request_handle, request_id, outputs, gen_cfg,
+                               generated_ids_queue, start_ts);
   return ret;
 }
 
@@ -143,21 +162,31 @@ AsStatus Worker::ReleaseRequest(std::string request_id) {
   return ret;
 }
 AsStatus Worker::RunTextGenerationContinue() {
-  DLOG(INFO) << "Worker::RunTextGenerationContinue" << std::endl;
+  DLOG(INFO) << "Worker::RunTextGenerationContinue"
+             << ", decode rank_id: " << rank_ << std::endl;
   SetWorkerDeviceId(device_id_);
   AsStatus ret = model_->GenerateContinue();
   return ret;
 }
-AsStatus Worker::RunTextGenerationContext(bool is_new_context) {
-  DLOG(INFO) << "Worker::RunTextGenerationContext" << std::endl;
+AsStatus Worker::RunTextGenerationContext() {
+  DLOG(INFO) << "Worker::RunTextGenerationContext"
+             << ", prefill rank_id: " << rank_ << std::endl;
   SetWorkerDeviceId(device_id_);
-  AsStatus ret = model_->GenerateContinueContext(is_new_context);
+  AsStatus ret = model_->GenerateContinueContext();
   return ret;
 }
 
-AsStatus Worker::AllocDecoderMemory() {
+AsStatus Worker::AllocPrefillMemory(int64_t min_free_count, int& pres_frame) {
   SetWorkerDeviceId(device_id_);
-  AsStatus ret = model_->AllocDecoderMemory();
+  AsStatus ret = model_->AllocPrefillMemory(min_free_count, pres_frame);
+  return ret;
+}
+
+AsStatus Worker::AllocDecoderMemory(int pending_num, int64_t min_free_count,
+                                    int& pres_frame) {
+  SetWorkerDeviceId(device_id_);
+  AsStatus ret =
+      model_->AllocDecoderMemory(pending_num, min_free_count, pres_frame);
   return ret;
 }
 
@@ -186,8 +215,6 @@ int64_t Worker::GetTotalMemoryBytes() {
   return model_->GetTotalMemoryBytes();
 }
 
-int Worker::GetUnFinishedRequest() { return model_->GetUnFinishedRequest(); }
-
 AsStatus Worker::GetInformation(std::string* model_info) {
   DLOG(INFO) << "Worker::GetInformation()" << std::endl;
   SetWorkerDeviceId(device_id_);
@@ -210,7 +237,4 @@ AsStatus Worker::UnloadLoraByName(const std::string lora_name) {
 void Worker::UpdateAsEngineStat(AsEngineStat* as_stat) {
   return model_->UpdateAsEngineStat(as_stat);
 }
-#if ENABLE_SPAN_ATTENTION
-int64_t Worker::GetFreeFrame() { return model_->GetFreeFrame(); }
-#endif
 };  // namespace allspark

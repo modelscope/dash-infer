@@ -77,9 +77,11 @@ using std::string;
 using std::vector;
 
 AsModel::AsModel(const std::string& model_type)
-    : model_type_(model_type), ctx_(nullptr), current_unfinished_request_(0) {
+    : model_type_(model_type),
+      ctx_(nullptr),
+      current_unfinished_request_(0),
+      current_running_request_(0) {
   gen_ctx_model_ = std::make_unique<GenerateContext>();
-  runtime_ctx_ = std::make_unique<RuntimeContext>();
 
   // pre-alloc enough request space.
   all_request_map_.reserve(1000);
@@ -127,11 +129,8 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
                        const DeviceContext& ctx) {
   DLOG(INFO) << "AsModel::Init()" << std::endl;
 
-  std::unique_lock<std::mutex> lock(gen_ctx_lock_);
-
   ctx_ = &ctx;
   DeviceType device_type = ctx.GetDeviceType();
-  // model_profiler_
   auto do_profile = EnvVarConfig::GetString("AS_PROFILE", "OFF");
   if (do_profile == "ON") {
     model_profiler_ = std::make_shared<ModelProfiler>(this);
@@ -139,17 +138,26 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
     model_profiler_ = nullptr;
   }
 
-  auto rankInfo = this->GetRankInfo();
-  AS_CHECK_STATUS(
-      weight_manager_->LoadWeightForModel(ctx, weight_handler_, rankInfo));
+  if (need_init_shared_data_) {
+    pending_decode_queue_ =
+        std::make_shared<moodycamel::BlockingConcurrentQueue<
+            std::unique_ptr<GenerateContext>>>();
+  }
 
+  auto rankInfo = this->GetRankInfo();
+  if (need_init_shared_data_) {
+    AS_CHECK_STATUS(
+        weight_manager_->LoadWeightForModel(ctx, weight_handler_, rankInfo));
+  }
   // load LoRA
   auto& model_cfg = weight_handler_->GetModelConfig();
-  lora_manager_ = LoraManager::Create(
-      model_cfg.lora_max_num, rankInfo);  // 每个卡上的AsModel都拥有一批LoRA
-  if (model_cfg.lora_names.size() > 0) {
-    LOG(WARNING) << "Config item 'lora_names' is not any longer supported "
-                    "and ignored!";
+  if (need_init_shared_data_) {
+    lora_manager_ = LoraManager::Create(
+        model_cfg.lora_max_num, rankInfo);  // 每个卡上的AsModel都拥有一批LoRA
+    if (model_cfg.lora_names.size() > 0) {
+      LOG(WARNING) << "Config item 'lora_names' is not any longer supported "
+                      "and ignored!";
+    }
   }
 
 #if ENABLE_SPAN_ATTENTION
@@ -170,26 +178,26 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
       int num_cache_heads = ctx.GetNumberGroups() > 0 ? ctx.GetNumberGroups()
                                                       : ctx.GetNumberHeads();
 
-#ifdef ENABLE_CUDA
-      if (device_type == DeviceType::CUDA) {
-        cache_allocator_ = std::make_shared<CudaCacheAllocator>(ctx_);
-      }
-#endif
+      cache_allocator_ = std::make_shared<CudaCacheAllocator>(ctx_);
 
 #ifdef CONFIG_CONCURRENT_SPAN
       if (ctx.GetCacheSpanNumGrow() != 0) {
         LOG(WARNING) << "WARNING: using ConcurrentCacheFrameManager, "
                         "cache_span_num_grow is ignored";
       }
-      cache_frame_manager_ = std::make_shared<ConcurrentCacheFrameManager>(
-          device_type, ctx.GetCacheSpanNumInit());
-      cache_span_manager_ =
-          std::make_shared<ConcurrentCacheSpanManager>(cache_frame_manager_);
+      if (need_init_shared_data_) {
+        cache_frame_manager_ = std::make_shared<ConcurrentCacheFrameManager>(
+            device_type, ctx.GetCacheSpanNumInit());
+        cache_span_manager_ =
+            std::make_shared<ConcurrentCacheSpanManager>(cache_frame_manager_);
+      }
 #else
-      cache_frame_manager_ = std::make_shared<DefaultCacheFrameManager>(
-          device_type, ctx.GetCacheSpanNumInit(), ctx.GetCacheSpanNumGrow());
-      cache_span_manager_ =
-          std::make_shared<DefaultCacheSpanManager>(cache_frame_manager_);
+      if (need_init_shared_data_) {
+        cache_frame_manager_ = std::make_shared<DefaultCacheFrameManager>(
+            device_type, ctx.GetCacheSpanNumInit(), ctx.GetCacheSpanNumGrow());
+        cache_span_manager_ =
+            std::make_shared<DefaultCacheSpanManager>(cache_frame_manager_);
+      }
 #endif
 
       if (num_cache_heads % rankInfo.rank_size != 0) {
@@ -234,7 +242,7 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
       "workspace", std::make_unique<AsTensor>("workspace", ctx.GetDeviceType(),
                                               DataType::INT8)));
   gen_ctx_model_ = std::make_unique<GenerateContext>();
-  runtime_ctx_ = std::make_unique<RuntimeContext>();
+  runtime_ctx_ = std::make_unique<RuntimeContext>(is_prefill_);
 
   std::unique_ptr<AsTensor> rotary_step = std::make_unique<AsTensor>(
       "rotary_step", ctx_->GetDeviceType(), DataType::INT32);
@@ -266,9 +274,9 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
       std::unique_ptr<AsOperator> op =
           OpFactory::getInstance().GetOperator(op_type)();
 
-      AS_CHECK_STATUS(op->CallInit(op_proto, ctx, weight_manager_,
-                                   weight_handler_, lora_manager_, rankInfo,
-                                   &tensors_, model_profiler_.get()));
+      AS_CHECK_STATUS(op->CallInit(
+          op_proto, ctx, weight_manager_, weight_handler_, lora_manager_,
+          rankInfo, &tensors_, model_profiler_.get(), runtime_ctx_.get()));
 
       op->SetEmbeddingMap(&embedding_);
       ops.emplace_back(std::move(op));
@@ -329,10 +337,10 @@ AsStatus AsModel::Init(const TransformerProto& model_proto,
 #if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
     model_cfg = weight_handler_->GetModelConfig();
-    if (model_cfg.enable_prefix_cache) {
+    if (model_cfg.enable_prefix_cache && need_init_shared_data_) {
       prefix_cache_manager_ = std::make_shared<PrefixCacheManager>(
           cache_span_manager_, cache_frame_manager_, prefix_cache_coordinator_,
-          &tensors_, ctx_, model_cfg.prefix_cache_ttl);
+          &tensors_, ctx_, rank_, model_cfg.prefix_cache_ttl);
     }
   }
 #endif
@@ -403,8 +411,7 @@ std::endl; \
 */
 
 AsStatus AsModel::buildGenContext(
-    std::shared_ptr<GenerateContext>& gen_ctx,
-    const std::shared_ptr<Request>& request) const {
+    GenerateContext* gen_ctx, const std::shared_ptr<Request>& request) const {
   gen_ctx->gen_cfg = request->gen_cfg;
   gen_ctx->request = request;
   gen_ctx->k_cache_list = std::vector<std::unique_ptr<CacheMemory>>();
@@ -498,8 +505,8 @@ AsStatus AsModel::runDecoderContext() {
   runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_step");
   runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_inv_freq");
 
-  std::shared_ptr<GenerateContext> gen_ctx =
-      (runtime_ctx_->GetGenCtx(runtime_ctx_->current_batch));
+  GenerateContext* gen_ctx =
+      runtime_ctx_->GetGenCtx(runtime_ctx_->current_batch);
   GenerateConfig gen_cfg = gen_ctx->gen_cfg;
 
   DLOG(INFO) << "start run context ,uuid = " << gen_ctx->request->request_id
@@ -520,11 +527,6 @@ AsStatus AsModel::runDecoderContext() {
                << gen_cfg.max_length << std::endl;
     return ErrorProcess(AsStatus::ALLSPARK_PARAM_ERROR);
   }
-  for (auto& graph : graph_ops_) {
-    for (auto& op : graph_ops_[graph.first]) {
-      op->SetGenerateContext(gen_ctx);
-    }
-  }
   gen_ctx->only_decoder = true;
   gen_ctx->num_beams = 1;
   gen_ctx->step = gen_ctx->prefix_len;
@@ -540,7 +542,6 @@ AsStatus AsModel::runDecoderContext() {
 
   for (auto& op : graph_ops_["pre_graph"]) {
     AsStatus status = op->CallForward(runtime_ctx_.get());
-
 #if DEBUG_GEN_LAYER_SYNC
     op->Synchronize();
 #endif
@@ -625,6 +626,7 @@ AsStatus AsModel::runDecoderContext() {
   }
 
   util::Timer t_forward;
+  TracerLog trace(ctx_->GetDeviceType(), "PrefillForward", 1);
   // pre_forward
   // first decoder for input_ids
   for (auto& op : graph_ops_["decoder"]) {
@@ -695,6 +697,7 @@ AsStatus AsModel::runDecoderContext() {
       return ErrorProcess(status);
     }
   }
+
   gen_ctx->in_length_bias = 0;
   gen_ctx->step = in_length + gen_ctx->prefix_len;
 
@@ -760,10 +763,12 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
 
   int batch = runtime_ctx_->GetGenCtxListSize();
 
-  std::shared_ptr<GenerateContext> gen_ctx =
-      std::make_shared<GenerateContext>();
+  std::unique_ptr<GenerateContext> gen_ctx_unique =
+      std::make_unique<GenerateContext>();
+  GenerateContext* gen_ctx = gen_ctx_unique.get();
+
   AS_CHECK_STATUS(buildGenContext(gen_ctx, request));
-  runtime_ctx_->PushBackGenCtx(gen_ctx);
+  runtime_ctx_->PushBackGenCtx(std::move(gen_ctx_unique));
 
 #if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
@@ -788,16 +793,17 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
         gen_ctx->request->interim.at("input_ids_for_hash"),
         new_input_ids_tensor, gen_ctx->request->start_ts, gen_ctx->prefix_len,
         gen_ctx->virtual_k_cache, gen_ctx->virtual_v_cache,
-        gen_ctx->prefix_cache_node_list);
+        gen_ctx->request->prefix_cache_node_list);
     gen_ctx->request->interim.insert({"new_input_ids", new_input_ids_tensor});
 
-    if (ctx_->GetRank() == 0) {
-      LOG(INFO) << "[" << __FUNCTION__ << "] "
-                << "request id: " << gen_ctx->request->request_id << ", "
-                << "cached prefix_len: " << gen_ctx->prefix_len << ", "
-                << "total tokens: "
-                << gen_ctx->request->inputs.at("input_ids")->GetShape()[1];
-    }
+    // if (ctx_->GetRank() == 0) {
+    LOG(INFO) << "[" << __FUNCTION__ << "] "
+              << "request id: " << gen_ctx->request->request_id << ", "
+              << "cached prefix_len: " << gen_ctx->prefix_len << ", "
+              << "total tokens: "
+              << gen_ctx->request->inputs.at("input_ids")->GetShape()[1] << ", "
+              << "rank_id: " << rank_;
+    // }
   } else {
 #endif
 
@@ -813,7 +819,6 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
   }
 #endif
 
-  runtime_ctx_->is_context = true;
   runtime_ctx_->current_batch = batch;
   try {
     DLOG(INFO) << "before enter runcontext for request: " << request->request_id
@@ -838,24 +843,20 @@ AsStatus AsModel::StartRequest(std::shared_ptr<Request> request) {
           gen_ctx->prefix_len, gen_ctx->request->start_ts,
           gen_ctx->virtual_k_cache->GetLayerCache(),
           gen_ctx->virtual_v_cache->GetLayerCache(),
-          gen_ctx->prefix_cache_node_list);
+          gen_ctx->request->prefix_cache_node_list);
     }
   }
 #endif
 
-  // context阶段成功结束
-  runtime_ctx_->is_context = false;
-  runtime_ctx_->current_batch = 0;
-  DLOG(INFO)
-      << "AsModel::StartRequest: context finish, restore ops with Reshape";
-  for (AsOperator* op : topo_ops_) {
-    AsStatus status = op->CallReshape(runtime_ctx_.get());
-    if (status != AsStatus::ALLSPARK_SUCCESS) {
-      LOG(ERROR) << "reshape failed in topo_ops" << std::endl;
-      return ErrorProcess(status);
-    }
+  if (cache_frame_manager_ != nullptr) {
+    LOG(INFO) << "cache_frame_manager_->CountFreeFrame(): "
+              << cache_frame_manager_->CountFreeFrame() << ", "
+              << "cache_frame_manager_->CountPresFrame(): "
+              << cache_frame_manager_->CountPresFrame() << ", "
+              << "rank_id: " << rank_;
   }
 
+  // context阶段成功结束
   request->status = AsEngine::GenerateRequestStatus::ContextFinished;
 
   request->context_ts = std::chrono::steady_clock::now();
@@ -897,7 +898,9 @@ bool StopPenddingReuqest(const std::string& request_id,
   pendding_queue = newQueue;
   return find_request;
 }
+
 AsStatus AsModel::StopRequest(const std::string& request_id) {
+  DLOG(INFO) << __FUNCTION__ << ": stop request_id: " << request_id;
   if (StopPenddingReuqest(request_id, pending_request_queue_)) {
     return AsStatus::ALLSPARK_SUCCESS;
   }
@@ -913,8 +916,7 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
                 << ",maybe already stop." << std::endl;
     return AsStatus::ALLSPARK_SUCCESS;
   }
-  std::shared_ptr<GenerateContext> gen_ctx =
-      runtime_ctx_->GetGenCtx(request_idx);
+  GenerateContext* gen_ctx = runtime_ctx_->GetGenCtx(request_idx);
   std::shared_ptr<Request> request = gen_ctx->request;
 
   // free cache
@@ -926,8 +928,8 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
   }
   DLOG(INFO) << "AsModel::StopRequest: [" << request_id << "] cache released";
 
-#if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+#if ENABLE_SPAN_ATTENTION
     if (prefix_cache_manager_ != nullptr) {
       AS_CHECK_STATUS(ExtraEmbeddingUtils::CreateTensorForHash(
           request, request->interim, request->interim, "generated_ids"));
@@ -937,9 +939,9 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
               ctx_->GetCacheSpanSize(),
           request->start_ts, gen_ctx->virtual_k_cache->GetLayerCache(),
           gen_ctx->virtual_v_cache->GetLayerCache(),
-          gen_ctx->prefix_cache_node_list);
+          request->prefix_cache_node_list);
 
-      prefix_cache_manager_->UnRef(gen_ctx->prefix_cache_node_list);
+      prefix_cache_manager_->UnRef(request->prefix_cache_node_list);
 
       std::stringstream ss;
       ss << "UnRef request_id: " << request->request_id << ", "
@@ -956,16 +958,17 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
         prefix_cache_manager_->EvictAllUnrefered();
       }
     }
-  }
 #endif
+  }
   request->extra_embedding.clear();
   request->interim.clear();
-  int last_batch = runtime_ctx_->GetGenCtxListSize() - 1;
 
   // don't remove this sync, make sure finish with correct state.
   ctx_->Synchronize();
   runtime_ctx_->FinishRequest(request_idx);
+
   current_unfinished_request_--;
+  current_running_request_--;
 
   if (ctx_->GetRank() == 0) {
     LOG(INFO) << "Stop request with request id: " << request_id;
@@ -1003,6 +1006,15 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
               << "Generate TPS: " << gen_tps << ", "
               << "Prefix Cache Len: " << request->prefix_len;
   }
+
+  if (cache_frame_manager_ != nullptr) {
+    LOG(INFO) << "cache_frame_manager_->CountFreeFrame(): "
+              << cache_frame_manager_->CountFreeFrame() << ", "
+              << "cache_frame_manager_->CountPresFrame(): "
+              << cache_frame_manager_->CountPresFrame() << ", "
+              << "rank_id: " << rank_;
+  }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
@@ -1014,6 +1026,63 @@ AsStatus AsModel::ReleaseRequest(const std::string& request_id) {
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
+AsStatus AsModel::FinishPrefillRequest() {
+  if (runtime_ctx_->GetGenCtxListSize() == 0) {
+    return AsStatus::ALLSPARK_SUCCESS;
+  }
+
+  GenerateContext* gen_ctx = runtime_ctx_->GetContextGenCtx();
+  bool finish = gen_ctx->finish;
+  std::string request_id = gen_ctx->request->request_id;
+
+  if (!finish) {
+    pending_decode_queue_->enqueue(runtime_ctx_->PopBackGenCtx());
+    ReleaseRequest(request_id);
+    current_unfinished_request_.store(pending_request_queue_.size() +
+                                      runtime_ctx_->GetGenCtxListSize());
+    current_running_request_.store(runtime_ctx_->GetGenCtxListSize());
+  }
+
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
+int AsModel::FetchDecodeRequest(int pending_num) {
+  int new_request = 0;
+
+  while (new_request < pending_num &&
+         runtime_ctx_->GetGenCtxListSize() < ctx_->GetModelMaxBatch()) {
+    std::unique_ptr<GenerateContext> gen_ctx_tmp;
+    bool rt = pending_decode_queue_->try_dequeue(gen_ctx_tmp);
+    if (rt) {
+      std::unique_lock<std::mutex> lock(request_map_lock_);
+      if (all_request_map_.count(gen_ctx_tmp->request->request_id) > 0) {
+        continue;
+      }
+
+      new_request++;
+      gen_ctx_tmp->request->status =
+          AsEngine::GenerateRequestStatus::Generating;
+      all_request_map_[gen_ctx_tmp->request->request_id] = gen_ctx_tmp->request;
+      runtime_ctx_->PushBackGenCtx(std::move(gen_ctx_tmp));
+    }
+  }
+
+  current_unfinished_request_.store(pending_decode_queue_->size_approx() +
+                                    runtime_ctx_->GetGenCtxListSize());
+  current_running_request_.store(runtime_ctx_->GetGenCtxListSize());
+
+  if (new_request > 0) {
+    for (AsOperator* op : topo_ops_) {
+      AsStatus status = op->CallReshape(runtime_ctx_.get());
+      if (status != AsStatus::ALLSPARK_SUCCESS) {
+        throw AsException("reshape failed in topo_ops");
+      }
+    }
+  }
+
+  return new_request;
+}
+
 Request* AsModel::GetRequestById(const std::string& request_id) {
   std::unique_lock<std::mutex> lock(request_map_lock_);
   if (all_request_map_.find(request_id) == all_request_map_.end()) {
@@ -1022,177 +1091,130 @@ Request* AsModel::GetRequestById(const std::string& request_id) {
   return all_request_map_.at(request_id).get();
 }
 
-void AsModel::PrefillChunkRequest(std::shared_ptr<Request> request) {
-  if (request->request_id.find("warmup") != std::string::npos) {
-    pending_request_queue_.pop();
-    StartRequest(request);
-    request->prefill_chunk_len = request->input_len;
-    return;
-  }
-
-  int new_len = request->prefill_chunk_len + ctx_->GetModelMaxPrefillLength();
-  new_len += 1;  // prefix cache only cache input_len - 1, so new_len += 1
-
-  if (new_len >= request->input_len) {
-    request->inputs.at("input_ids")->SetShape(Shape{1, request->origin_len});
-    pending_request_queue_.pop();
-    StartRequest(request);
-    request->prefill_chunk_len = request->input_len;
-  } else {
-    std::shared_ptr<Request> request_ptr = std::make_shared<Request>(
-        request->request_id, request->inputs, request->outputs,
-        request->gen_cfg, request->interim);
-    request_ptr->request_id.append("_chunk_prefill");
-    request_ptr->input_len = new_len;
-    request_ptr->inputs.at("input_ids")->SetShape(Shape{1, new_len});
-    request_ptr->gen_cfg.max_length = new_len + 1;
-    StartRequest(request_ptr);
-    request->prefill_chunk_len = new_len - 1;
-  }
-}
-AsStatus AsModel::GenerateContinueContext(
-    bool is_new_context)  // if is_new_context=true, set
-                          // already_context_length_=0
-{
-  // maybe use if,each turn only run one context phase
-  util::Timer t0;
-  std::unique_lock<std::mutex> lock(gen_ctx_lock_);
-
+AsStatus AsModel::AllocPrefillMemory(int64_t min_free_count, int& pres_frame) {
+  pres_frame = 0;
   if (!runtime_ctx_) return AsStatus::ALLSPARK_EMPTY_REQUEST;
+  if (pending_request_queue_.empty()) return AsStatus::ALLSPARK_SUCCESS;
 
-  DLOG(INFO) << " gen ctx list " << runtime_ctx_->GetGenCtxListSize()
-             << " pending init " << pending_request_queue_.size();
-  if (is_new_context) {
-    already_context_length_ = 0;
-  }
-  if (!pending_request_queue_.empty() &&
-      runtime_ctx_->GetGenCtxListSize() < ctx_->GetModelMaxBatch()) {
+  if (runtime_ctx_->GetGenCtxListSize() == 0) {
     std::shared_ptr<Request> request = pending_request_queue_.front();
-    if (already_context_length_ != 0 &&
-        already_context_length_ + request->input_len >
-            ctx_->GetModelMaxPrefillLength()) {
-      return AsStatus::ALLSPARK_EMPTY_REQUEST;
-    }
 #if ENABLE_SPAN_ATTENTION
     if (ctx_->GetDeviceType() == DeviceType::CUDA) {
-      if (!cache_frame_manager_) {
-        // not use span
-        pending_request_queue_.pop();
-        StartRequest(request);
-        DLOG(INFO) << "RunContext SUCCESS ,request id = "
-                   << request->request_id;
-
-        current_unfinished_request_.store(pending_request_queue_.size() +
-                                          runtime_ctx_->GetGenCtxListSize());
-        return AsStatus::ALLSPARK_SUCCESS;
-      } else {
-        // use_span
-        int model_layer = ctx_->GetDecoderLayer();
-        int min_gen_length = 10;
-        int span_size = ctx_->GetCacheSpanSize();
+      if (cache_frame_manager_) {
         size_t context_frame = 0;
+        int model_layer = ctx_->GetDecoderLayer();
+        int span_size = ctx_->GetCacheSpanSize();
         if (prefix_cache_manager_ != nullptr) {
-          AS_CHECK_STATUS(ExtraEmbeddingUtils::CreateTensorForHash(
-              request, request->interim, request->inputs, "input_ids"));
-
-          std::vector<PrefixCacheManager::PrefixNodePtr> prefix_cache_node_list;
           int prefix_len = 0;
           int gpu_cached_len = 0;
-          prefix_cache_manager_->RefOnly(
-              request->interim.at("input_ids_for_hash"), request->start_ts,
-              prefix_len, gpu_cached_len, prefix_cache_node_list);
+          std::string input_tensor_name = "input_ids";
+          std::string hash_tensor_name = input_tensor_name + "_for_hash";
 
-          int real_input = request->input_len - prefix_len;
-          if (request->prefill_chunk_len == 0) {
-            // first running context, calc prefix cnt
+          // true: need check prefix cache, false: already checked
+          bool need_check = (request->interim.find(hash_tensor_name) ==
+                             request->interim.end());
+          if (need_check) {
+            AS_CHECK_STATUS(ExtraEmbeddingUtils::CreateTensorForHash(
+                request, request->interim, request->inputs, input_tensor_name));
+
+            prefix_cache_manager_->RefOnly(
+                request->interim.at(hash_tensor_name), request->start_ts,
+                prefix_len, gpu_cached_len, request->prefix_cache_node_list);
+
+            int real_input = request->input_len - prefix_len;
             prefix_cache_manager_->UpdateCnt(prefix_len, real_input);
-            request->prefill_chunk_len = prefix_len;
             request->prefix_len = prefix_len;
             request->prefix_len_gpu = gpu_cached_len;
+
             if (prefix_len != 0) {
               LOG(INFO) << "request: " << request->request_id << ", "
                         << "find prefix cache, len: " << prefix_len << ", "
-                        << "total tokens: " << request->input_len;
+                        << "total tokens: " << request->input_len << ", "
+                        << "rank_id: " << rank_;
             }
+          } else {
+            prefix_len = request->prefix_len;
+            gpu_cached_len = request->prefix_len_gpu;
           }
+
           context_frame =
-              (std::min((request->input_len - gpu_cached_len) + min_gen_length,
-                        ctx_->GetModelMaxLength()) /
-                   span_size +
-               1) *
+              (std::min((request->input_len - gpu_cached_len + (span_size - 1)),
+                        (ctx_->GetModelMaxLength() + span_size - 1)) /
+               span_size) *
               2 * model_layer;
-          if (context_frame > cache_frame_manager_->CountFreeFrame()) {
-            LOG(INFO) << "Not enough frame for new request, "
-                      << "need frame vs free frame: " << context_frame << "/ "
-                      << cache_frame_manager_->CountFreeFrame()
-                      << ", swap unrefered prefix cache to cpu memory";
-            prefix_cache_manager_->EvictUnrefered(context_frame);
-          }
-          prefix_cache_manager_->UnRef(prefix_cache_node_list);
         } else {
-          context_frame = (std::min(request->input_len + min_gen_length,
-                                    ctx_->GetModelMaxLength()) /
-                               span_size +
-                           1) *
+          context_frame = (std::min(request->input_len + (span_size - 1),
+                                    ctx_->GetModelMaxLength() + span_size - 1) /
+                           span_size) *
                           2 * model_layer;
         }
-        // int context_frame = request->input_len * model_layer *
-        // model_nhead / ctx_->GetNrank();
+        int pres_count = cache_frame_manager_->PresFrame(context_frame);
+        pres_frame = pres_count;
 
-        if (context_frame <= cache_frame_manager_->CountFreeFrame()) {
-          PrefillChunkRequest(request);
-          DLOG(INFO) << "RunContext SUCCESS ,request id = "
-                     << request->request_id;
-          current_unfinished_request_.store(pending_request_queue_.size() +
-                                            runtime_ctx_->GetGenCtxListSize());
-          if (request->prefill_chunk_len != request->input_len) {
-            return AsStatus::ALLSPARK_CHUNK_PREFILL;
-          } else {
-            already_context_length_ += request->input_len;
-            return AsStatus::ALLSPARK_SUCCESS;
-          }
-        } else {
-          LOG(ERROR) << "Try RunContext " << request->request_id
-                     << ", but not enough frame, so RunContext failed";
-          pending_request_queue_.pop();
-          request->finish = true;
-          request->status =
-              AsEngine::GenerateRequestStatus::GenerateInterrupted;
-          LOG(INFO) << request->request_id << "GenerateInterrupted";
-          current_unfinished_request_.store(pending_request_queue_.size() +
-                                            runtime_ctx_->GetGenCtxListSize());
-          return AsStatus::ALLSPARK_EMPTY_REQUEST;
+        DLOG(INFO) << "context_frame: " << context_frame << ", "
+                   << "free_frame: " << min_free_count << ", "
+                   << "pres_count: " << pres_count << ", "
+                   << "cache_frame_manager_->CountFreeFrame(): "
+                   << cache_frame_manager_->CountFreeFrame() << ", "
+                   << "cache_frame_manager_->CountPresFrame(): "
+                   << cache_frame_manager_->CountPresFrame() << ", "
+                   << "request_id: " << request->request_id << ", "
+                   << "rank_id: " << rank_;
+        if (cache_frame_manager_ && prefix_cache_manager_) {
+          // unref node, because node will be reffill in startreqeust
+          prefix_cache_manager_->UnRef(request->prefix_cache_node_list);
+        }
+        if (pres_count < context_frame) {
+          LOG(ERROR) << "avail span frame not enough for context: "
+                     << context_frame << " vs " << pres_count << ", "
+                     << "request_id: " << request->request_id << ", "
+                     << "rank: " << rank_;
+          throw AsException("ALLSPARK_MEMORY_ERROR");
         }
       }
-    } else
-#endif
-    {
-      pending_request_queue_.pop();
-      StartRequest(request);
-      DLOG(INFO) << "RunContext SUCCESS ,request id = " << request->request_id;
     }
-
-    current_unfinished_request_.store(pending_request_queue_.size() +
-                                      runtime_ctx_->GetGenCtxListSize());
+#endif
   } else {
-    // not free batch or no pending request
     return AsStatus::ALLSPARK_EMPTY_REQUEST;
   }
 
   return AsStatus::ALLSPARK_SUCCESS;
 }
+
+AsStatus AsModel::GenerateContinueContext() {
+  // maybe use if,each turn only run one context phase
+  util::Timer t0;
+
+  if (!runtime_ctx_) return AsStatus::ALLSPARK_EMPTY_REQUEST;
+
+  DLOG(INFO) << " gen ctx list " << runtime_ctx_->GetGenCtxListSize()
+             << " pending init " << pending_request_queue_.size();
+  if (!pending_request_queue_.empty() &&
+      runtime_ctx_->GetGenCtxListSize() == 0) {
+    std::shared_ptr<Request> request = pending_request_queue_.front();
+    pending_request_queue_.pop();
+    StartRequest(request);
+    DLOG(INFO) << "RunContext SUCCESS, request id = " << request->request_id;
+    current_unfinished_request_.store(pending_request_queue_.size() +
+                                      runtime_ctx_->GetGenCtxListSize());
+    current_running_request_.store(runtime_ctx_->GetGenCtxListSize());
+  } else {
+    // not free batch or no pending request
+    return AsStatus::ALLSPARK_EMPTY_REQUEST;
+  }
+
+  FinishPrefillRequest();
+
+  return AsStatus::ALLSPARK_SUCCESS;
+}
+
 AsStatus AsModel::GenerateContinueDecoder() {
   DLOG(INFO) << "AsModel::GenerateContinueDecoder()" << std::endl;
   // maybe use if,each turn only run one context phase
   util::Timer t0;
-  std::unique_lock<std::mutex> lock(gen_ctx_lock_);
-
-  util::Timer t1;
-  // DLOG(INFO) << "pthread_self: " << (unsigned long)pthread_self();
 
   DLOG(INFO) << "Decoder: gen ctx list " << runtime_ctx_->GetGenCtxListSize()
-             << " pending init " << pending_request_queue_.size()
-             << " t1(ms): " << t0.elapsed();
+             << " pending init " << pending_request_queue_.size();
 #if PROFILE_GENERATION_TIME_GPU
   if (runtime_ctx_->GetGenCtxListSize() >= PROFILE_GENERATION_TIME_BS) {
     auto cuda_ctx = dynamic_cast<const CUDAContext*>(ctx_);
@@ -1209,8 +1231,6 @@ AsStatus AsModel::GenerateContinueDecoder() {
   //     pending_request_queue_.pop();
   // }
 
-  current_unfinished_request_.store(pending_request_queue_.size() +
-                                    runtime_ctx_->GetGenCtxListSize());
   const int async_token_num = 1;  // TODO gen_cfg.async_token_num
   for (int now_step = 0; now_step < async_token_num; now_step++) {
     int batch_size = runtime_ctx_->GetGenCtxListSize();
@@ -1223,6 +1243,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
     gen_ctx_model_->step++;  // 利用这个废弃的字段，给校对工具使用
     runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_step");
     runtime_ctx_->GetLayerCacheManager()->ResetCache("rotary_inv_freq");
+
     {
       TracerLog trace(ctx_->GetDeviceType(), "DecoderAlloc", 0);
       // do NOT run this concurrently, it reduces performance
@@ -1380,8 +1401,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
     auto do_time_profile = EnvVarConfig::GetInt("ALLSPARK_TIME_LOG", 0);
     if (do_time_profile) {
       using util::Timer;
-      auto lock_time = Timer::duration_ms(t0, t1);
-      auto alloc_time = Timer::duration_ms(t1, t3);
+      auto alloc_time = Timer::duration_ms(t2, t3);
       auto forward_time = Timer::duration_ms(t3, t4);
       auto reshape_time = Timer::duration_ms(t4, t5);
       auto gen_forward_time = Timer::duration_ms(t5, t6);
@@ -1389,8 +1409,7 @@ AsStatus AsModel::GenerateContinueDecoder() {
 
       LOG(INFO) << "Decoder Loop Time [TPOT] (ms): " << tpot_ms
                 << " running: " << runtime_ctx_->GetGenCtxListSize()
-                << " lock time(ms):" << lock_time << " alloc: " << alloc_time
-                << " forward_time: " << forward_time
+                << " alloc: " << alloc_time << " forward_time: " << forward_time
                 << " reshape: " << reshape_time
                 << " gen_frd: " << gen_forward_time
                 << " post_gen: " << post_forward_time;
@@ -1416,14 +1435,20 @@ AsStatus AsModel::GenerateContinueDecoder() {
 AsStatus AsModel::StartRequestImpl(
     const std::shared_ptr<RequestHandle> request_handle,
     const std::string request_id, TensorMap* outputs,
-    const GenerateConfig& gen_cfg) {
-  DLOG(INFO) << "AsModel::StartRequestImpl()" << std::endl;
+    const GenerateConfig& gen_cfg,
+    std::shared_ptr<moodycamel::ConcurrentQueue<int64_t>> generated_ids_queue,
+    const std::chrono::time_point<std::chrono::steady_clock> start_ts) {
+  DLOG(INFO) << "AsModel::StartRequestImpl()"
+             << ", rank_id: " << rank_ << ", request_id: " << request_id
+             << std::endl;
   std::shared_ptr<Request> request_ptr = std::make_shared<Request>(
-      request_id, *request_handle->inputs_internal, *outputs, gen_cfg);
+      request_id, *request_handle->inputs_internal, *outputs, gen_cfg,
+      generated_ids_queue, start_ts);
   request_ptr->input_len = request_ptr->inputs.at("input_ids")->GetShape()[1];
   request_ptr->origin_len = request_ptr->input_len;
   request_ptr->extra_embedding = request_handle->mm_embedding_internal;
   request_ptr->enqueue_ts = request_handle->create_ts;
+
 #ifdef ENABLE_JSON_MODE
   if (gen_cfg.response_format.count("type")) {
     try {
@@ -1444,17 +1469,19 @@ AsStatus AsModel::StartRequestImpl(
   all_request_map_[request_id] = request_ptr;
   return AsStatus::ALLSPARK_SUCCESS;
 }
+
 AsStatus AsModel::GenerateContinue() {
   AsStatus ret = GenerateContinueDecoder();
   AS_CHECK_STATUS(ret);
   return ret;
   // return AsStatus::ALLSPARK_SUCCESS;
 }
-AsStatus AsModel::AllocDecoderMemory() {
-  std::unique_lock<std::mutex> lock(gen_ctx_lock_);
-  const int async_token_num = 1;  // TODO gen_cfg.async_token_num
-  runtime_ctx_->is_context = false;
+AsStatus AsModel::AllocDecoderMemory(int pending_num, int64_t min_free_count,
+                                     int& pres_frame) {
+  FetchDecodeRequest(pending_num);
+
   runtime_ctx_->current_batch = 0;
+  pres_frame = 0;
 #if ENABLE_SPAN_ATTENTION
   if (ctx_->GetDeviceType() == DeviceType::CUDA) {
     if (cache_frame_manager_) {
@@ -1462,27 +1489,32 @@ AsStatus AsModel::AllocDecoderMemory() {
       int span_size = ctx_->GetCacheSpanSize();
       int new_span_batch = 0;
       for (int i = 0; i < runtime_ctx_->GetGenCtxListSize(); i++) {
-        std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx_->GetGenCtx(i);
+        GenerateContext* gen_ctx = runtime_ctx_->GetGenCtx(i);
         size_t length_now = gen_ctx->virtual_k_cache->GetSeqLength(0);
         if (length_now % span_size == 0) {
           new_span_batch += 1;
         }
       }
+      if (new_span_batch == 0) return AsStatus::ALLSPARK_SUCCESS;
+
       int decoder_frame = model_layer * 2 * new_span_batch;
-      if (decoder_frame > cache_frame_manager_->CountFreeFrame()) {
-        if (cache_frame_manager_ && prefix_cache_manager_ != nullptr) {
-          LOG(INFO) << "Not enough frame for decoder, "
-                    << "need frame vs free frame: " << decoder_frame << " / "
-                    << cache_frame_manager_->CountFreeFrame()
-                    << ", swap unrefered prefix cache to cpu memory";
-          prefix_cache_manager_->EvictUnrefered(decoder_frame);
-        }
-      }
-      // after release all preifx cache still not enough frame
-      if (decoder_frame > cache_frame_manager_->CountFreeFrame()) {
-        LOG(ERROR) << "free span frame not enough for decoder: "
-                   << decoder_frame << " vs "
-                   << cache_frame_manager_->CountFreeFrame();
+      int pres_count = cache_frame_manager_->PresFrame(decoder_frame);
+      pres_frame = pres_count;
+
+      DLOG(INFO) << "decoder_frame: " << decoder_frame << ", "
+                 << "free_frame: " << min_free_count << ", "
+                 << "pres_count: " << pres_count << ", "
+                 << "cache_frame_manager_->CountFreeFrame(): "
+                 << cache_frame_manager_->CountFreeFrame() << ", "
+                 << "cache_frame_manager_->CountPresFrame(): "
+                 << cache_frame_manager_->CountPresFrame() << ", "
+                 << "rank_id: " << rank_;
+
+      // after release all prefix cache still not enough frame
+      if (pres_count < decoder_frame) {
+        LOG(ERROR) << "avail span frame not enough for decoder: "
+                   << decoder_frame << " vs " << pres_count << ", "
+                   << "rank: " << rank_;
         throw AsException("ALLSPARK_MEMORY_ERROR");
       }
     }
@@ -1519,7 +1551,8 @@ AsStatus AsModel::Warmup(int64_t bytes_available, int64_t bytes_runtime) {
                                 std::ceil(bytes_runtime * runtime_mem_ratio)));
 
 #if ENABLE_SPAN_ATTENTION
-  if (ctx_->GetDeviceType() == DeviceType::CUDA) {
+  if (ctx_->GetDeviceType() == DeviceType::CUDA &&
+      cache_frame_manager_ != nullptr) {
     size_t num_to_grow = bytes_cache / cache_frame_manager_->GetFrameSize();
     LOG(INFO) << "warm-up: trying to grow " << num_to_grow
               << " frames, current count of frames: "
@@ -1635,35 +1668,51 @@ int64_t AsModel::GetTotalMemoryBytes() {
 
 #if ENABLE_SPAN_ATTENTION
 int64_t AsModel::GetFreeFrame() {
-  return cache_frame_manager_->CountFreeFrame();
+  if (cache_frame_manager_) {
+    return cache_frame_manager_->CountFreeFrame();
+  } else {
+    return 0;
+  }
+}
+void AsModel::FreePresFrame(size_t count) {
+  if (cache_frame_manager_) {
+    cache_frame_manager_->FreePresFrame(count);
+  }
 }
 #endif
 
 void AsModel::UpdateAsEngineStat(AsEngineStat* as_stat) {
+  if (is_prefill_) {
+    as_stat->running_request = (int)runtime_ctx_->GetGenCtxListSize();
+    as_stat->pendding_request = (int)pending_request_queue_.size();
+  } else {
 #if ENABLE_SPAN_ATTENTION
-  if (cache_span_manager_ && cache_frame_manager_) {
-    as_stat->span_size = cache_span_manager_->GetSpanSize();
-    as_stat->total_span = cache_frame_manager_->CountFrame();
-    as_stat->free_span = cache_frame_manager_->CountFreeFrame();
-    as_stat->total_token = as_stat->total_span / (2 * ctx_->GetDecoderLayer()) *
-                           ctx_->GetCacheSpanSize();
-    as_stat->free_token = as_stat->free_span / (2 * ctx_->GetDecoderLayer()) *
-                          ctx_->GetCacheSpanSize();
-    as_stat->used_span = as_stat->total_span - as_stat->free_span;
-    as_stat->token_usage_percentage =
-        static_cast<float>(((as_stat->total_token - as_stat->free_token))) /
-        (float)as_stat->total_token;
-    if (prefix_cache_manager_ != nullptr) {
-      prefix_cache_manager_->UpdateEngineStat(as_stat);
-    }
-  } else
+    if (cache_span_manager_ && cache_frame_manager_) {
+      as_stat->span_size = cache_span_manager_->GetSpanSize();
+      as_stat->total_span = cache_frame_manager_->CountFrame();
+      as_stat->free_span = cache_frame_manager_->CountFreeFrame();
+      as_stat->total_token = as_stat->total_span /
+                             (2 * ctx_->GetDecoderLayer()) *
+                             ctx_->GetCacheSpanSize();
+      as_stat->free_token = as_stat->free_span / (2 * ctx_->GetDecoderLayer()) *
+                            ctx_->GetCacheSpanSize();
+      as_stat->used_span = as_stat->total_span - as_stat->free_span;
+      as_stat->token_usage_percentage =
+          static_cast<float>(((as_stat->total_token - as_stat->free_token))) /
+          (float)as_stat->total_token;
+      if (prefix_cache_manager_ != nullptr) {
+        prefix_cache_manager_->UpdateEngineStat(as_stat);
+      }
+    } else
 #endif
-  {
-    as_stat->total_token = 0;
-    as_stat->free_token = 0;
+    {
+      as_stat->total_token = 0;
+      as_stat->free_token = 0;
+    }
+
+    as_stat->running_request += (int)runtime_ctx_->GetGenCtxListSize() +
+                                (int)(pending_decode_queue_->size_approx());
   }
-  as_stat->pendding_request = (int)pending_request_queue_.size();
-  as_stat->running_request = (int)runtime_ctx_->GetGenCtxListSize();
 }
 
 AsStatus AsModel::LoadLoraByName(const std::string& lora_name_or_path) {
@@ -1742,6 +1791,14 @@ std::string AsModel::GetOpProfilingInfo() {
     return {""};
   }
   std::stringstream ss;
+  ss << "*******************" << std::endl;
+  if (is_prefill_) {
+    ss << "* prefill worker" << std::endl;
+  } else {
+    ss << "* decode worker" << std::endl;
+  }
+  ss << "*******************" << std::endl << std::endl;
+
   constexpr const char* tags[] = {"forward", "reshape", "alloc"};
   for (auto& tag : tags) {
     ss << "*** " << tag << " ***" << std::endl;

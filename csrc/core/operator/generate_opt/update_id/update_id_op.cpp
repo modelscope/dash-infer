@@ -40,7 +40,7 @@ bool UpdateIdOp::check_stop_words(
   return finish;
 }
 
-bool UpdateIdOp::check_finish(std::shared_ptr<GenerateContext>& gen_ctx) {
+bool UpdateIdOp::check_finish(GenerateContext* gen_ctx) {
   if (gen_ctx->finish) {
     return gen_ctx->finish;
   }
@@ -76,24 +76,18 @@ bool UpdateIdOp::check_finish(std::shared_ptr<GenerateContext>& gen_ctx) {
   return gen_ctx->finish;
 }
 
-AsStatus UpdateIdOp::copy_generated_ids(
-    std::shared_ptr<GenerateContext>& gen_ctx, bool is_context) {
+AsStatus UpdateIdOp::copy_generated_ids(GenerateContext* gen_ctx,
+                                        bool is_context) {
   if (rank_info_.rank_id == 0) {
     std::shared_ptr<AsTensor> local_tensor =
         gen_ctx->request->interim.at("generated_ids");
-    std::shared_ptr<AsTensor> global_tensor =
-        gen_ctx->request->outputs.at("generated_ids_global");
-    global_tensor->SetShape(Shape(local_tensor->GetShape()));
-
+    int step = gen_ctx->step;
     if (is_context) {
-      int generated_len = gen_ctx->step + gen_ctx->in_length_bias + 1;
-      memcpy(global_tensor->GetDataPtr(), local_tensor->GetDataPtr(),
-             generated_len * sizeof(int64_t));
-    } else {
-      memcpy(static_cast<int64_t*>(global_tensor->GetDataPtr()) + gen_ctx->step,
-             static_cast<int64_t*>(local_tensor->GetDataPtr()) + gen_ctx->step,
-             1 * sizeof(int64_t));
+      step = gen_ctx->step + gen_ctx->in_length_bias;
     }
+    int64_t new_token =
+        *(static_cast<int64_t*>(local_tensor->GetDataPtr()) + step);
+    gen_ctx->request->generated_ids_queue->enqueue(new_token);
   }
 
   return AsStatus::ALLSPARK_SUCCESS;
@@ -133,7 +127,7 @@ AsStatus UpdateIdOp::Reshape(RuntimeContext* runtime_ctx) {
 */
 // clang-format on
 AsStatus UpdateIdOp::RunContext(RuntimeContext* runtime_ctx) {
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   check_finish(gen_ctx);
   copy_generated_ids(gen_ctx, true);
   return AsStatus::ALLSPARK_SUCCESS;
@@ -142,7 +136,7 @@ AsStatus UpdateIdOp::RunContext(RuntimeContext* runtime_ctx) {
 AsStatus UpdateIdOp::RunDecoder(RuntimeContext* runtime_ctx) {
   int batch_size = runtime_ctx->GetGenCtxListSize();
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
     check_finish(gen_ctx);
     copy_generated_ids(gen_ctx, false);
   }

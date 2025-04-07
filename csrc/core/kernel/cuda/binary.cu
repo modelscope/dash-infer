@@ -54,7 +54,7 @@ struct SwiGLUFunctor {
 };
 
 template <typename T>
-void BinaryKernelLauncher(T* out, const T* in1, const T* in2, int count,
+void BinaryKernelLauncher(T* out, const T* in1, const T* in2, int64_t count,
                           int type, cudaStream_t stream) {
   switch (type) {
     case BinaryType::ADD:
@@ -80,20 +80,20 @@ void BinaryKernelLauncher(T* out, const T* in1, const T* in2, int count,
 }
 
 template void BinaryKernelLauncher<float>(float* out, const float* in1,
-                                          const float* in2, int count, int type,
-                                          cudaStream_t stream);
+                                          const float* in2, int64_t count,
+                                          int type, cudaStream_t stream);
 template void BinaryKernelLauncher<int>(int* out, const int* in1,
-                                        const int* in2, int count, int type,
+                                        const int* in2, int64_t count, int type,
                                         cudaStream_t stream);
 #ifdef ENABLE_FP16
 template void BinaryKernelLauncher<half>(half* out, const half* in1,
-                                         const half* in2, int count, int type,
-                                         cudaStream_t stream);
+                                         const half* in2, int64_t count,
+                                         int type, cudaStream_t stream);
 #endif
 template void BinaryKernelLauncher<hie::bfloat16>(hie::bfloat16* out,
                                                   const hie::bfloat16* in1,
                                                   const hie::bfloat16* in2,
-                                                  int count, int type,
+                                                  int64_t count, int type,
                                                   cudaStream_t stream);
 }  // namespace cuda
 }  // namespace allspark
