@@ -70,6 +70,11 @@ size_t DefaultCacheFrameManager::CountFrame() const {
   return CountFreeFrame() + CountOccupiedFrame();
 }
 
+size_t DefaultCacheFrameManager::CountPresFrame() const {
+  throw AsException(
+      ("DefaultCacheFrameManager::CountPresFrame not implemented."));
+}
+
 void DefaultCacheFrameManager::Init(int64_t frame_size) {
   if (initialized_) {
     return;
@@ -148,6 +153,27 @@ size_t DefaultCacheFrameManager::AllocFrame(
   return count;
 }
 
+size_t DefaultCacheFrameManager::PresFrame(size_t count) {
+  throw AsException(("DefaultCacheFrameManager::PresFrame not implemented."));
+}
+
+size_t DefaultCacheFrameManager::AllocFrameFromPres(
+    std::vector<CacheFrame::Ptr>& out_vec, size_t count) {
+  throw AsException(
+      ("DefaultCacheFrameManager::AllocFrameFromPres not implemented."));
+}
+
+void DefaultCacheFrameManager::FreeFrameToPres(
+    std::vector<CacheFrame::Ptr>& frame_vec, size_t count) {
+  throw AsException(
+      ("DefaultCacheFrameManager::FreeFrameToPres not implemented."));
+}
+
+size_t DefaultCacheFrameManager::FreePresFrame(size_t count) {
+  throw AsException(
+      ("DefaultCacheFrameManager::FreePresFrame not implemented."));
+}
+
 void DefaultCacheFrameManager::FreeFrame(CacheFrame::Ptr frame) {
   if (frame == nullptr) {
     return;
@@ -204,6 +230,10 @@ size_t ConcurrentCacheFrameManager::CountOccupiedFrame() const {
 
 size_t ConcurrentCacheFrameManager::CountFrame() const {
   return total_frame_count_;
+}
+
+size_t ConcurrentCacheFrameManager::CountPresFrame() const {
+  return pres_frame_count_.load(std::memory_order_acquire);
 }
 
 void ConcurrentCacheFrameManager::Init(int64_t frame_size) {
@@ -280,6 +310,85 @@ size_t ConcurrentCacheFrameManager::AllocFrame(
   }
   free_frame_count_.fetch_sub(finished, std::memory_order_relaxed);
   return count;
+}
+
+size_t ConcurrentCacheFrameManager::PresFrame(size_t count) {
+  std::vector<CacheFrame::Ptr> pres_frame(count);
+  size_t finished = free_frames_.try_dequeue_bulk(pres_frame.begin(), count);
+  if (finished != count) {
+    if (!free_frames_.enqueue_bulk(std::make_move_iterator(pres_frame.begin()),
+                                   finished)) {
+      LOG(ERROR) << "ConcurrentCacheFrameManager: failed to bulk enqueue "
+                    "free frames";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+    }
+    return 0;
+  }
+
+  if (!pres_frames_.enqueue_bulk(std::make_move_iterator(pres_frame.begin()),
+                                 finished)) {
+    LOG(ERROR) << "ConcurrentCacheFrameManager: failed to bulk enqueue "
+                  "pres frames";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  }
+  free_frame_count_.fetch_sub(finished, std::memory_order_relaxed);
+  pres_frame_count_.fetch_add(finished, std::memory_order_relaxed);
+  return finished;
+}
+
+size_t ConcurrentCacheFrameManager::AllocFrameFromPres(
+    std::vector<CacheFrame::Ptr>& out_vec, size_t count) {
+  size_t finished = pres_frames_.try_dequeue_bulk(out_vec.begin(), count);
+  // all or none
+  if (finished != count) {
+    if (!pres_frames_.enqueue_bulk(std::make_move_iterator(out_vec.begin()),
+                                   finished)) {
+      LOG(ERROR) << "ConcurrentCacheFrameManager: failed to bulk enqueue "
+                    "pres frames";
+      AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+    }
+    return 0;
+  }
+  pres_frame_count_.fetch_sub(finished, std::memory_order_relaxed);
+  return finished;
+}
+
+void ConcurrentCacheFrameManager::FreeFrameToPres(
+    std::vector<CacheFrame::Ptr>& frame_vec, size_t count) {
+  if (count == 0) {
+    return;
+  }
+
+  if (!pres_frames_.enqueue_bulk(std::make_move_iterator(frame_vec.begin()),
+                                 count)) {
+    LOG(ERROR) << "ConcurrentCacheFrameManager: failed to bulk enqueue "
+                  "pres frames";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  }
+  pres_frame_count_.fetch_add(count, std::memory_order_relaxed);
+  return;
+}
+
+size_t ConcurrentCacheFrameManager::FreePresFrame(size_t count) {
+  if (count == 0) return 0;
+
+  std::vector<CacheFrame::Ptr> pres_frame(count);
+  size_t finished = pres_frames_.try_dequeue_bulk(pres_frame.begin(), count);
+
+  if (finished != count) {
+    LOG(ERROR) << "ConcurrentCacheFrameManager: free preserved frames failed.";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  }
+
+  if (!free_frames_.enqueue_bulk(std::make_move_iterator(pres_frame.begin()),
+                                 finished)) {
+    LOG(ERROR) << "ConcurrentCacheFrameManager: failed to bulk enqueue "
+                  "free frames";
+    AS_THROW(AsStatus::ALLSPARK_RUNTIME_ERROR);
+  }
+  pres_frame_count_.fetch_sub(finished, std::memory_order_relaxed);
+  free_frame_count_.fetch_add(finished, std::memory_order_relaxed);
+  return finished;
 }
 
 void ConcurrentCacheFrameManager::FreeFrame(CacheFrame::Ptr frame) {

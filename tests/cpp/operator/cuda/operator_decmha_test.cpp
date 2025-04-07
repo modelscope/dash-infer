@@ -3,6 +3,7 @@
  * @file    operator_decmha_test.cpp
  */
 
+#if 0
 #include <core/operator/generate_opt/dec_opt_mha/dec_opt_mha_op.h>
 #include <core/operator/generate_opt/dec_opt_mha_i8cache/dec_opt_mha_i8cache_op.h>
 #include <cuda/cuda_context.h>
@@ -621,3 +622,4 @@ void TestDecMhaU4Cache(int batch, int phead, int nhead, int xseql, int cache,
 // 20,     2,      32,     4,          2. * (1 / 16.));       }
 // TEST_F(DecMHATest, perf0_fp16_u4) {     TestDecMhaU4Cache<half>(  1, 128, 20,
 // 1536,   2048,   4,          2. * (1 / 16.));       }
+#endif

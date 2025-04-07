@@ -38,7 +38,7 @@ class GemmFP8A8W8GPU : public GemmFP8Base {
                 const TensorMap& weights_map, TensorMap* tensor_map) override;
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
   AsStatus Reshape(RuntimeContext* runtime_ctx) override { return Reshape(); }
   AsStatus Forward(RuntimeContext* runtime_ctx) override { return Forward(); }
   AsStatus Reshape() override;
@@ -53,6 +53,17 @@ class GemmFP8A8W8GPU : public GemmFP8Base {
   template <typename WType>
   void weight_scaled_fp8_quant(TensorMap& weights_buffer);
 
+  void set_padding_flag(RuntimeContext* runtime_ctx) {
+    bool do_padding = false;
+    if (runtime_ctx == nullptr) {
+      do_padding = true;
+    } else if (runtime_ctx->is_context == false) {
+      do_padding = true;
+    }
+
+    do_padding_ = do_padding;
+  }
+
  private:
   int sm_count_;
   int sm_version_;
@@ -61,6 +72,10 @@ class GemmFP8A8W8GPU : public GemmFP8Base {
   int64_t n_padded_before_;
   std::string weight_name_pattern_;
   // float* weight_scale_ptr = nullptr;
+
+  // only do padding in decoder worker, prefill worker will reuse the padding
+  // result
+  bool do_padding_ = false;
 
   cudaDataType_t scaleType_ = CUDA_R_32F;
   cublasComputeType_t computeType_ = CUBLAS_COMPUTE_32F;

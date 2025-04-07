@@ -74,6 +74,8 @@ static void PyParseConfig(std::map<std::string, py::object>& py_gen_cfg,
     as_gen_cfg.vocab = (py_gen_cfg["vocab"].cast<std::map<std::string, int>>());
   }
   CHECK_CONFIG(py_gen_cfg, vocab_type, as_gen_cfg, VocabType);
+  CHECK_CONFIG(py_gen_cfg, enable_tensors_from_model_inference, as_gen_cfg,
+               bool);
 }
 static void PyParseAttribute(std::map<std::string, py::object>& py_attr,
                              TensorAttribute& as_attr) {
@@ -180,7 +182,27 @@ void bindResultQueue(py::module& m) {
           "Fetches new token(s) from the queue, will return None if no new "
           "tokens, non block api.");
 }
-
+std::vector<std::map<std::string, py::capsule>>
+get_tensors_from_model_inference(const GeneratedElements ele) {
+  const std::vector<std::unordered_map<std::string, std::shared_ptr<ITensor>>>
+      in = ele.tensors_from_model_inference;
+  std::vector<std::map<std::string, py::capsule>> output;
+  output.reserve(in.size());
+  for (const auto& map : in) {
+    std::map<std::string, py::capsule> new_map;
+    for (const auto& pair : map) {
+      const std::string& key = pair.first;
+      // std::shared_ptr<ITensor> tensor = (pair.second)->ToDLPack();
+      DLManagedTensor* tensor = (pair.second)->ToDLPack();
+      // 这里把实际上把所有权交给python了
+      // 用 py::capsule 封装 DLManagedTensor*
+      new_map.emplace(key,
+                      py::capsule(tensor, _c_str_dltensor, _c_dlpack_deleter));
+    }
+    output.emplace_back((new_map));
+  }
+  return output;
+}
 void bindGeneratedElements(py::module& m) {
   py::class_<GeneratedElements, std::shared_ptr<GeneratedElements>>(
       m, "GeneratedElements", py::module_local(),
@@ -198,9 +220,11 @@ void bindGeneratedElements(py::module& m) {
       .def_readwrite("token_logprobs_list",
                      &GeneratedElements::token_logprobs_list,
                      "Stores the probability value for each selected token.")
-      .def_readwrite("tensors_from_model_inference",
-                     &GeneratedElements::tensors_from_model_inference,
-                     "Tensor outputs from model inference.")
+      .def_property_readonly(
+          "tensors_from_model_inference",
+          //  &GeneratedElements::tensors_from_model_inference,
+          &get_tensors_from_model_inference,
+          "Tensor outputs from model inference.")
       .def_readwrite("prefix_cache_len", &GeneratedElements::prefix_cache_len,
                      "Cached prefix token length.")
       .def_readwrite("prefix_len_gpu", &GeneratedElements::prefix_len_gpu,

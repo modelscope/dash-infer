@@ -6,7 +6,6 @@
 #pragma once
 
 #if ENABLE_SPAN_ATTENTION
-#include <cache/prefix_cache_manager.h>
 #include <cache/virtual_cache.h>
 #endif
 #include <common/common.h>
@@ -60,7 +59,6 @@ struct GenerateContext {
 #if ENABLE_SPAN_ATTENTION
   std::unique_ptr<VirtualCache> virtual_k_cache;
   std::unique_ptr<VirtualCache> virtual_v_cache;
-  std::vector<PrefixCacheManager::PrefixNodePtr> prefix_cache_node_list;
 #endif
 
 #ifdef ENABLE_JSON_MODE
@@ -71,7 +69,7 @@ struct GenerateContext {
   std::unique_ptr<AsTensor> sample_state = nullptr;
 };
 
-using GenContextList = std::vector<std::shared_ptr<GenerateContext>>;
+using GenContextList = std::vector<std::unique_ptr<GenerateContext>>;
 class LayerCacheManager {
  public:
   AsTensor* GetCache(std::string cache_name) {
@@ -96,26 +94,31 @@ class LayerCacheManager {
 };
 class RuntimeContext {
  public:
-  bool is_context = false;
+  RuntimeContext(bool is_prefill) : is_context(is_prefill) {}
+  const bool is_context;
   int current_batch = 0;
   int generate_method = 0;
   std::vector<int> logprobs_indice_host;
   std::vector<float> logprobs_value_host;
   std::vector<float> token_logprobs_host;
 
-  std::shared_ptr<GenerateContext> GetContextGenCtx() const {
-    return gen_ctx_list[current_batch];
+  GenerateContext* GetContextGenCtx() const {
+    return gen_ctx_list[current_batch].get();
   }
-  std::shared_ptr<GenerateContext> GetGenCtx(int index) const {
-    return gen_ctx_list[index];
+  GenerateContext* GetGenCtx(int index) const {
+    return gen_ctx_list[index].get();
   }
   int GetGenCtxListSize() const { return gen_ctx_list.size(); }
-  void PushBackGenCtx(std::shared_ptr<GenerateContext> gen_ctx) {
-    gen_ctx_list.push_back(gen_ctx);
+  void PushBackGenCtx(std::unique_ptr<GenerateContext> gen_ctx) {
+    gen_ctx_list.push_back(std::move(gen_ctx));
     gen_ctx_list[gen_ctx_list.size() - 1]->current_batch =
         gen_ctx_list.size() - 1;
   }
-  void PopBackGenCtx() { gen_ctx_list.pop_back(); }
+  std::unique_ptr<GenerateContext> PopBackGenCtx() {
+    std::unique_ptr<GenerateContext> gen_ctx = std::move(gen_ctx_list.back());
+    gen_ctx_list.pop_back();
+    return gen_ctx;
+  }
   void FinishRequest(int index) {
     int batch_size = gen_ctx_list.size();
     gen_ctx_list[index]->request->finish = true;
@@ -133,7 +136,7 @@ class RuntimeContext {
   }
 
  private:
-  GenContextList gen_ctx_list = std::vector<std::shared_ptr<GenerateContext>>();
+  GenContextList gen_ctx_list = std::vector<std::unique_ptr<GenerateContext>>();
   std::shared_ptr<LayerCacheManager> layer_cache_manager;
 };
 

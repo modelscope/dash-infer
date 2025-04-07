@@ -16,6 +16,7 @@
 #include <common/thread_pool.h>
 #include <core/operator/operator.h>
 #include <core/tensor/tensor.h>
+#include <utility/blockingconcurrentqueue.h>
 #include <utility/model_profiler.h>
 
 #ifdef ENABLE_CUDA
@@ -39,24 +40,41 @@ class LoraManager;
 using GraphOpMap =
     std::unordered_map<std::string, std::vector<std::unique_ptr<AsOperator>>>;
 
+typedef struct PrefillDecodeSharedData_s {
+#if ENABLE_SPAN_ATTENTION
+  CacheFrameManager::Ptr cache_frame_manager;
+  CacheSpanManager::Ptr cache_span_manager;
+  PrefixCacheManager::Ptr prefix_cache_manager;
+  PrefixCacheCoordinator::Ptr prefix_cache_coordinator;
+#endif
+
+  std::shared_ptr<ModelWeightHandler> weight_handler;
+  std::shared_ptr<WeightManager> weight_manager;
+  std::shared_ptr<LoraManager> lora_manager;
+
+  std::shared_ptr<
+      moodycamel::BlockingConcurrentQueue<std::unique_ptr<GenerateContext>>>
+      pending_decode_queue;
+} PrefillDecodeSharedData;
+
 class AsModel {
  public:
   explicit AsModel(const std::string& model_type = "");
   virtual ~AsModel();
   virtual AsStatus Init(const TransformerProto& model_proto,
                         const DeviceContext& ctx);
-  // new api
   virtual AsStatus StartRequestImpl(
       const std::shared_ptr<RequestHandle> requestHandle,
-      std::string request_id, TensorMap* outputs,
-      const GenerateConfig& gen_cfg);
+      std::string request_id, TensorMap* outputs, const GenerateConfig& gen_cfg,
+      std::shared_ptr<moodycamel::ConcurrentQueue<int64_t>> generated_ids_queue,
+      const std::chrono::time_point<std::chrono::steady_clock> start_ts);
+
   virtual AsStatus GenerateContinue();
   virtual AsStatus GenerateContinueDecoder();
-  virtual AsStatus GenerateContinueContext(
-      bool is_new_context);  // if is_new_context=true, set
-                             // already_context_length_=0
-  virtual void PrefillChunkRequest(std::shared_ptr<Request> request);
-  virtual AsStatus AllocDecoderMemory();
+  virtual AsStatus GenerateContinueContext();
+  virtual AsStatus AllocPrefillMemory(int64_t min_free_count, int& pres_frame);
+  virtual AsStatus AllocDecoderMemory(int pending_num, int64_t min_free_count,
+                                      int& pres_frame);
   virtual AsStatus Warmup(int64_t bytes_available, int64_t bytes_runtime);
   virtual int64_t GetAvailableMemoryBytes();
   virtual int64_t GetOccupiedMemoryBytes();
@@ -65,6 +83,8 @@ class AsModel {
   virtual AsStatus StartRequest(std::shared_ptr<Request> request);
   virtual AsStatus StopRequest(const std::string& request_id);
   virtual AsStatus ReleaseRequest(const std::string& request_id);
+  virtual AsStatus FinishPrefillRequest();
+  virtual int FetchDecodeRequest(int pending_num);
   virtual Request* GetRequestById(const std::string& request_id);
   AsStatus SaveWeights(std::string* out_allsparkz);
   AsStatus UnloadModelFromDeviceMemory();
@@ -75,6 +95,7 @@ class AsModel {
   int already_context_length_ = 0;
 #if ENABLE_SPAN_ATTENTION
   int64_t GetFreeFrame();
+  void FreePresFrame(size_t count);
 #endif
   void UpdateAsEngineStat(AsEngineStat* as_stat);
 
@@ -135,13 +156,53 @@ class AsModel {
 #endif
 
   // get current running request count
+  size_t GetPendingDecodeNum() { return pending_decode_queue_->size_approx(); }
   size_t GetUnFinishedRequest() { return current_unfinished_request_.load(); }
+  size_t GetRunningRequest() { return current_running_request_.load(); }
+
   std::shared_ptr<LoraManager>& GetLoraManager() { return lora_manager_; }
   void ChangeGemmOpType(OpRegistType& op_type);
 
+  PrefillDecodeSharedData GetPDSharedData() {
+    PrefillDecodeSharedData pd_data;
+
+#if ENABLE_SPAN_ATTENTION
+    pd_data.cache_frame_manager = cache_frame_manager_;
+    pd_data.cache_span_manager = cache_span_manager_;
+    pd_data.prefix_cache_manager = prefix_cache_manager_;
+    pd_data.prefix_cache_coordinator = prefix_cache_coordinator_;
+#endif
+
+    pd_data.weight_handler = weight_handler_;
+    pd_data.weight_manager = weight_manager_;
+    pd_data.lora_manager = lora_manager_;
+
+    pd_data.pending_decode_queue = pending_decode_queue_;
+
+    return pd_data;
+  }
+
+  void SetPDSharedData(PrefillDecodeSharedData pd_data) {
+#if ENABLE_SPAN_ATTENTION
+    cache_frame_manager_ = pd_data.cache_frame_manager;
+    cache_span_manager_ = pd_data.cache_span_manager;
+    prefix_cache_manager_ = pd_data.prefix_cache_manager;
+    prefix_cache_coordinator_ = pd_data.prefix_cache_coordinator;
+#endif
+
+    weight_handler_ = pd_data.weight_handler;
+    weight_manager_ = pd_data.weight_manager;
+    lora_manager_ = pd_data.lora_manager;
+
+    pending_decode_queue_ = pd_data.pending_decode_queue;
+
+    need_init_shared_data_ = false;
+    is_prefill_ = false;
+  }
+
  protected:
   AsStatus runDecoderContext();
-  AsStatus buildGenContext(std::shared_ptr<GenerateContext>& gen_ctx,
+  AsStatus buildGenContext(GenerateContext* gen_ctx,
                            const std::shared_ptr<Request>& request) const;
 
   std::string model_type_;
@@ -159,16 +220,17 @@ class AsModel {
   std::unique_ptr<RuntimeContext> runtime_ctx_;
 
   std::atomic<int> current_unfinished_request_;
-  std::mutex gen_ctx_lock_;
+  std::atomic<int> current_running_request_;
   std::queue<std::shared_ptr<Request>> pending_request_queue_;
+  std::shared_ptr<
+      moodycamel::BlockingConcurrentQueue<std::unique_ptr<GenerateContext>>>
+      pending_decode_queue_;
 
   std::mutex request_map_lock_;
   std::unordered_map<std::string, std::shared_ptr<Request>> all_request_map_;
   int rank_ = 0;
   int nranks_ = 1;
-
-  // for async, avoid of re-entrance
-  std::mutex decoder_lock_;
+  bool is_prefill_ = true;
 
 #if ENABLE_SPAN_ATTENTION
   // cache memory managers
@@ -190,6 +252,7 @@ class AsModel {
   std::unique_ptr<ThreadPool> layer_threadpool_;
 #endif  // CONFIG_CONCURRENT_SPAN
 #endif  // ENABLE_SPAN_ATTENTION
+  bool need_init_shared_data_ = true;
 };
 
 using ModelConstructor = std::function<std::unique_ptr<AsModel>()>;

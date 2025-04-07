@@ -26,12 +26,12 @@ extern AsStatus dense_gemm(DataType dtype, void* out, const void* in,
 AsStatus GemmLoraOpGPU::InitV2(const OperatorProto& op_proto,
                                const DeviceContext& ctx,
                                const TensorMap& weights_map,
-                               TensorMap& weights_buffer,
-                               TensorMap* tensor_map) {
+                               TensorMap& weights_buffer, TensorMap* tensor_map,
+                               RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "GemmLoraOpGPU::InitV2" << std::endl;
   op_proto_.CopyFrom(op_proto);
   AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto, ctx, weights_map, weights_buffer,
-                                     tensor_map));
+                                     tensor_map, runtime_ctx));
 
   // 计算QKV相关维度信息
   int nslice = ctx.GetNranks();
@@ -55,9 +55,9 @@ AsStatus GemmLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
   for (auto i = 0; i < batchsize; i++) {
     // DLOG(INFO) <<  "runtime_ctx->is_context=" << std::boolalpha <<
     // runtime_ctx->is_context;
-    std::shared_ptr<GenerateContext> gen_ctx =
-        runtime_ctx->is_context ? runtime_ctx->GetContextGenCtx()
-                                : runtime_ctx->GetGenCtx(i);
+    GenerateContext* gen_ctx = runtime_ctx->is_context
+                                   ? runtime_ctx->GetContextGenCtx()
+                                   : runtime_ctx->GetGenCtx(i);
     auto lora_name = gen_ctx->gen_cfg.lora_name;
     DLOG(INFO) << i << ":r " << lora_name << std::endl;
     if (lora_name.empty())  // 加载了lora权重 但请求中可以不使用
@@ -101,7 +101,7 @@ AsStatus GemmLoraOpGPU::Reshape(RuntimeContext* runtime_ctx) {
   // shapes for batch about GemmLora
   TensorMap stub_weight;
   AS_CHECK_STATUS(GemmOpBase::InitV2(op_proto_, *ctx_, stub_weight, stub_weight,
-                                     tensor_map_));
+                                     tensor_map_, runtime_ctx));
   AS_CHECK_STATUS(GemmOpGPU::Reshape(runtime_ctx));
   kernel_launcher = dense_gemm;  // only support dense_gemm for Lora
 
@@ -144,9 +144,9 @@ AsStatus GemmLoraOpGPU::Forward(RuntimeContext* runtime_ctx) {
     void* out_ptr =
         (char*)batch_out_tensor->GetDataPtr() + i * batch_out_stride;
     // GemmLora 不使用weights_, 使用lora_weight
-    std::shared_ptr<GenerateContext> gen_ctx =
-        runtime_ctx->is_context ? runtime_ctx->GetContextGenCtx()
-                                : runtime_ctx->GetGenCtx(i);
+    GenerateContext* gen_ctx = runtime_ctx->is_context
+                                   ? runtime_ctx->GetContextGenCtx()
+                                   : runtime_ctx->GetGenCtx(i);
     auto lora_name = gen_ctx->gen_cfg.lora_name;
     DLOG(INFO) << i << ":f " << lora_name << std::endl;
     if (lora_name.empty()) {

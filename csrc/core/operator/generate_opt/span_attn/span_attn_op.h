@@ -57,14 +57,16 @@ class SpanAttnOp : public AsOperator {
 
   /* for Forward (prefill / context) */
   virtual void contextAttnLauncher(void* k_cache_buf, void* v_cache_buf,
-                                   int beam_size) = 0;
+                                   GenerateContext* gen_ctx) = 0;
   virtual void contextCopySpanLauncher(const AsTensor& k_cache_ptr_tensor,
                                        const AsTensor& v_cache_ptr_tensor,
                                        const void* k_contiguous_cache,
-                                       const void* v_contiguous_cache) = 0;
+                                       const void* v_contiguous_cache,
+                                       int prefix_len) = 0;
   virtual void copyPrefixSpanToCtxMemLauncher(
       const AsTensor& k_cache_ptr_tensor, const AsTensor& v_cache_ptr_tensor,
-      const void* k_contiguous_cache, const void* v_contiguous_cache) = 0;
+      const void* k_contiguous_cache, const void* v_contiguous_cache,
+      int prefix_len) = 0;
 
   /* for Forward (decoder) */
   virtual void decoderAppendCacheLauncher() = 0;

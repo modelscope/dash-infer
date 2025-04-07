@@ -225,7 +225,7 @@ AsStatus fill_generated_ids_gpu(RuntimeContext* runtime_ctx,
   std::vector<int64_t*> ptrs(batch_size);
   std::vector<int64_t*> ptrs_host(batch_size);
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -282,7 +282,7 @@ AsStatus fill_max_dec_ids_gpu(RuntimeContext* runtime_ctx,
   //                               max_dec_ids->GetSizeInByte(), stream));
 
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {

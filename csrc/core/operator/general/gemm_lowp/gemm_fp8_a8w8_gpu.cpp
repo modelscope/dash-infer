@@ -188,9 +188,12 @@ AsStatus GemmFP8A8W8GPU::InitV2(const OperatorProto& op_proto,
                                 const DeviceContext& ctx,
                                 const TensorMap& weights_map,
                                 TensorMap& weights_buffer,
-                                TensorMap* tensor_map) {
+                                TensorMap* tensor_map,
+                                RuntimeContext* runtime_ctx) {
   AS_CHECK_STATUS(GemmFP8Base::InitV2(op_proto, ctx, weights_map,
-                                      weights_buffer, tensor_map));
+                                      weights_buffer, tensor_map, runtime_ctx));
+  set_padding_flag(runtime_ctx);
+
   // if necessary, add the implementation of N and K padding later
   if (k_ % FP8_K_PAD_ALIGN != 0 || n_ % FP8_N_PAD_ALIGN) {
     LOG(ERROR) << "GemmFP8A8W8GPU : now only supports N is multiples of"
@@ -426,58 +429,64 @@ AsStatus GemmFP8A8W8GPU::Forward() {
 
 template <typename WType>
 void GemmFP8A8W8GPU::trans_TN(TensorMap& weights_buffer) {
-  AsTensor old_weight_cpu =
-      AsTensor(weights_[0]->GetName() + "old_cpu", DeviceType::CPU,
-               weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
-               weights_[0]->GetShape());
-  old_weight_cpu.CopyDataFrom(weights_[0]->GetDataPtr(), k_ * n_,
-                              weights_[0]->GetDeviceType(), ctx_);
+  if (do_padding_) {
+    AsTensor old_weight_cpu =
+        AsTensor(weights_[0]->GetName() + "old_cpu", DeviceType::CPU,
+                 weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
+                 weights_[0]->GetShape());
+    old_weight_cpu.CopyDataFrom(weights_[0]->GetDataPtr(), k_ * n_,
+                                weights_[0]->GetDeviceType(), ctx_);
 
-  AsTensor reordered_weight_cpu = AsTensor(
-      weights_[0]->GetName() + "trans_cpu", DeviceType::CPU,
-      weights_[0]->GetDataType(), weights_[0]->GetDataMode(), Shape({n_, k_}));
+    AsTensor reordered_weight_cpu =
+        AsTensor(weights_[0]->GetName() + "trans_cpu", DeviceType::CPU,
+                 weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
+                 Shape({n_, k_}));
 
-  WType* old_weight_ptr = static_cast<WType*>(old_weight_cpu.GetDataPtr());
-  WType* reordered_weight_ptr =
-      static_cast<WType*>(reordered_weight_cpu.GetDataPtr());
+    WType* old_weight_ptr = static_cast<WType*>(old_weight_cpu.GetDataPtr());
+    WType* reordered_weight_ptr =
+        static_cast<WType*>(reordered_weight_cpu.GetDataPtr());
 
-  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
-  gpu_ctx->Synchronize();
+    const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+    gpu_ctx->Synchronize();
 
-  for (int i = 0; i < k_; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      int src_offset = i * n_ + j;
-      int dst_offset = j * k_ + i;
-      reordered_weight_ptr[dst_offset] = old_weight_ptr[src_offset];
+    for (int i = 0; i < k_; ++i) {
+      for (int j = 0; j < n_; ++j) {
+        int src_offset = i * n_ + j;
+        int dst_offset = j * k_ + i;
+        reordered_weight_ptr[dst_offset] = old_weight_ptr[src_offset];
+      }
     }
+    auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
+    mutable_weight->SetShape(Shape({n_, k_}));
+    TensorUtils::DeepCopyWholeAsync(*mutable_weight, reordered_weight_cpu,
+                                    ctx_);
+    util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
+                            std::make_shared<AsTensor>(reordered_weight_cpu));
   }
-  auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
-  mutable_weight->SetShape(Shape({n_, k_}));
-  TensorUtils::DeepCopyWholeAsync(*mutable_weight, reordered_weight_cpu, ctx_);
-  util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
-                          std::make_shared<AsTensor>(reordered_weight_cpu));
 }
 
 template <typename WType>
 void GemmFP8A8W8GPU::weight_scaled_fp8_quant(TensorMap& weights_buffer) {
-  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
-  cudaStream_t cu_stream = gpu_ctx->GetStream();
+  if (do_padding_) {
+    const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+    cudaStream_t cu_stream = gpu_ctx->GetStream();
 
-  // Quatize weight from float16/bfloat16 to float8
-  WType* weight_in = static_cast<WType*>(weights_[0]->GetDataPtr());
-  float* weight_scale = static_cast<float*>(weights_[1]->GetDataPtr());
-  cutlass::float_e4m3_t* weight_fp8;
+    // Quatize weight from float16/bfloat16 to float8
+    WType* weight_in = static_cast<WType*>(weights_[0]->GetDataPtr());
+    float* weight_scale = static_cast<float*>(weights_[1]->GetDataPtr());
+    cutlass::float_e4m3_t* weight_fp8;
 
-  AS_CHECK_CUDA(cudaMallocAsync(&weight_fp8, k_ * n_, cu_stream));
-  cuda::per_tensor_symm_quantization<WType, cutlass::float_e4m3_t>(
-      weight_in, weight_scale, weight_fp8, k_, n_, cu_stream);
-  auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
-  mutable_weight->SetDataType(DataType::FLOAT8E4M3);
-  mutable_weight->SetShape(Shape({k_, n_}));
-  mutable_weight->CopyDataFrom(weight_fp8, k_ * n_,
-                               weights_[0]->GetDeviceType(), gpu_ctx);
-  AS_CHECK_CUDA(cudaFreeAsync(weight_fp8, cu_stream));
-  gpu_ctx->Synchronize();
+    AS_CHECK_CUDA(cudaMallocAsync(&weight_fp8, k_ * n_, cu_stream));
+    cuda::per_tensor_symm_quantization<WType, cutlass::float_e4m3_t>(
+        weight_in, weight_scale, weight_fp8, k_, n_, cu_stream);
+    auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
+    mutable_weight->SetDataType(DataType::FLOAT8E4M3);
+    mutable_weight->SetShape(Shape({k_, n_}));
+    mutable_weight->CopyDataFrom(weight_fp8, k_ * n_,
+                                 weights_[0]->GetDeviceType(), gpu_ctx);
+    AS_CHECK_CUDA(cudaFreeAsync(weight_fp8, cu_stream));
+    gpu_ctx->Synchronize();
+  }
 }
 
 REGISTER_OP(GemmFP8A8W8, CUDA, GemmFP8A8W8GPU)

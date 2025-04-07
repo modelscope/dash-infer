@@ -85,6 +85,10 @@ class Qwen_v15(Model):
             "final.layernorm.gamma":
             self.name_adapter.fullname(weight_std_names[1]),
         }
+        print("torch_cfg.embed_proj=",torch_cfg.get('embed_proj', False))
+        if torch_cfg.get('embed_proj', False):
+            self.weight_name_map["embed_proj.weight"] = "thinker_to_talker_proj.weight"
+            self.weight_name_map["embed_proj.bias"] = "thinker_to_talker_proj.bias"
         decoder_name_map = {
             "attention.layernorm.gamma":
             weight_std_names[7],
@@ -194,6 +198,15 @@ class Qwen_v15(Model):
                 "rich_embedding",
                 [self.model.inputs[0], embedding.outputs[0]])()
             graph.ops.append(rich_embedding)
+        if torch_cfg.get('embed_proj', False):
+            embed_proj = self.make_gemm_op(
+                "embed_proj",
+                graph.ops[-1].outputs[0],
+                {
+                    "with_bias": True,
+                },
+            )()
+            graph.ops.append(embed_proj)
         for i in range(cfg.dec_layer):
             prefix = "decoder.layer.{}.".format(i)
             # attention

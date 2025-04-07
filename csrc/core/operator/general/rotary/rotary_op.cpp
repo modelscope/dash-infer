@@ -256,13 +256,15 @@ AsStatus RotaryOp::Reshape(RuntimeContext* runtime_ctx) {
   batch_size_ = y_shape[0];
   seq_len_ = y_shape[1];
   qkv_stride_ = y_shape[2];
+
   if (qkv_stride_ != hidden_size_ + 2 * kv_stride_) {
-    LOG(ERROR) << "Invalid qkv_stride_ in RotaryOp"
+    LOG(ERROR) << "Invalid qkv_stride_ in RotaryOp: "
                << "qkv_strde = " << qkv_stride_
                << ", hidden_size = " << hidden_size_
                << ", kv_stride = " << kv_stride_ << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
+
   tensor_map_->at(out_names_[0])->SetShape(std::move(y_shape));
   mrope_position_->SetShape(Shape{mrope_size_, seq_len_});
   return AsStatus::ALLSPARK_SUCCESS;
@@ -304,7 +306,7 @@ AsStatus RotaryOp::RunContext(RuntimeContext* runtime_ctx) {
                << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
 
   seq_len_ += gen_ctx->prefix_len;
   TensorListMap extra_embedding = gen_ctx->request->extra_embedding;
@@ -318,7 +320,7 @@ AsStatus RotaryOp::RunContext(RuntimeContext* runtime_ctx) {
     layer_cache_manager->SetCache("rotary_inv_freq");
     int freq_size = size_per_head_ / 2;
     int batch_size = 1;
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
     std::vector<float> inv_freq_tmp =
         calculate_invfreq(base_, gen_ctx->input_len, invfreq_type_);
     rotary_inv_freq->SetShape(Shape{batch_size * freq_size});
@@ -376,7 +378,7 @@ AsStatus RotaryOp::RunDecoder(RuntimeContext* runtime_ctx) {
     std::vector<float> inv_freq_tmp(batch_size * freq_size);
     std::vector<int> run_step_tmp(batch_size);
     for (int batch = 0; batch < batch_size; batch++) {
-      std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
+      GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
       std::vector<float> inv_freq_one =
           calculate_invfreq(base_, gen_ctx->step, invfreq_type_);
       for (int j = 0; j < freq_size; j++) {

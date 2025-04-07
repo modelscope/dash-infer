@@ -101,6 +101,14 @@ class CacheFrameManager {
   /// @brief Return the number of all frames.
   virtual size_t CountFrame() const = 0;
 
+  virtual size_t PresFrame(size_t count) = 0;
+  virtual size_t AllocFrameFromPres(std::vector<CacheFrame::Ptr>& out_vec,
+                                    size_t count) = 0;
+  virtual void FreeFrameToPres(std::vector<CacheFrame::Ptr>& frame_vec,
+                               size_t count) = 0;
+  virtual size_t FreePresFrame(size_t count) = 0;
+  virtual size_t CountPresFrame() const = 0;
+
   DeviceType GetDeviceType() const { return device_type_; }
   virtual int64_t GetFrameSize() const = 0;
   virtual int GetInitFrameNum() const = 0;
@@ -134,6 +142,15 @@ class DefaultCacheFrameManager : public CacheFrameManager {
   size_t CountFreeFrame() const override;
   size_t CountOccupiedFrame() const override;
   size_t CountFrame() const override;
+
+  size_t PresFrame(size_t count) override;
+  size_t AllocFrameFromPres(std::vector<CacheFrame::Ptr>& out_vec,
+                            size_t count) override;
+  void FreeFrameToPres(std::vector<CacheFrame::Ptr>& frame_vec,
+                       size_t count) override;
+  size_t FreePresFrame(size_t count) override;
+  size_t CountPresFrame() const override;
+
   int64_t GetFrameSize() const override { return frame_size_; };
   int GetInitFrameNum() const override { return init_frames_; };
   int GetGrowFrameNum() const override { return grow_frames_; };
@@ -154,6 +171,7 @@ class ConcurrentCacheFrameManager : public CacheFrameManager {
       : CacheFrameManager(device_type),
         free_frames_(init_frames),
         free_frame_count_(0),
+        pres_frame_count_(0),
         total_frame_count_(0),
         frame_size_(0),
         init_frames_(init_frames) {}
@@ -172,13 +190,24 @@ class ConcurrentCacheFrameManager : public CacheFrameManager {
   size_t CountFreeFrame() const override;
   size_t CountOccupiedFrame() const override;
   size_t CountFrame() const override;
+
+  size_t PresFrame(size_t count) override;
+  size_t AllocFrameFromPres(std::vector<CacheFrame::Ptr>& out_vec,
+                            size_t count) override;
+  void FreeFrameToPres(std::vector<CacheFrame::Ptr>& frame_vec,
+                       size_t count) override;
+  size_t FreePresFrame(size_t count) override;
+  size_t CountPresFrame() const override;
+
   int64_t GetFrameSize() const override { return frame_size_; };
   int GetInitFrameNum() const override { return init_frames_; };
   int GetGrowFrameNum() const override { return 0; };
 
  private:
   moodycamel::ConcurrentQueue<CacheFrame::Ptr> free_frames_;
+  moodycamel::ConcurrentQueue<CacheFrame::Ptr> pres_frames_;
   std::atomic_int64_t free_frame_count_;
+  std::atomic_int64_t pres_frame_count_;
   int64_t total_frame_count_;
   int64_t frame_size_;
   const int init_frames_;

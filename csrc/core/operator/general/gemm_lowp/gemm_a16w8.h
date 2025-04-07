@@ -31,7 +31,7 @@ class GemmA16W8Base : public AsOperator {
                 const TensorMap& weights_map, TensorMap* tensor_map) override;
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
   AsStatus Reshape(int yn);
 
  protected:

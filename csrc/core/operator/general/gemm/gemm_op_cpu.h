@@ -17,15 +17,9 @@ class GemmOpCPU : public GemmOpBase {
                 const TensorMap& weights_map, TensorMap* tensor_map) override;
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
-  AsStatus Reshape() override;
-  AsStatus Forward() override;
-  AsStatus Reshape(RuntimeContext* runtime_ctx) override {
-    return this->Reshape();
-  }
-  AsStatus Forward(RuntimeContext* runtime_ctx) override {
-    return this->Forward();
-  }
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
+  AsStatus Reshape(RuntimeContext* runtime_ctx) override;
+  AsStatus Forward(RuntimeContext* runtime_ctx) override;
 
  protected:
   DataType weight_data_type_ = DataType::FLOAT32;

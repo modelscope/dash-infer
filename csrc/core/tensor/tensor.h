@@ -422,4 +422,16 @@ class TensorUtils {
                            const DeviceContext* ctx = nullptr);
 };
 
+class PyTensor : public ITensor {
+ public:
+  PyTensor() = delete;
+  PyTensor(std::shared_ptr<AsTensor> tensor) : tensor_(tensor) {}
+  DLManagedTensor* ToDLPack() const override {
+    // HIE_ENFORCE_RETVAL(tensor_ != nullptr, nullptr, "Tensor is nullptr");
+    return (tensor_)->ToDLPack(nullptr);
+  }
+
+ private:
+  std::shared_ptr<AsTensor> tensor_;
+};
 }  // namespace allspark

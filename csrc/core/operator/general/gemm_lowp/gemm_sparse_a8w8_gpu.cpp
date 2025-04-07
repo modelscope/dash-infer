@@ -33,9 +33,10 @@ AsStatus GemmSparseA8W8GPU::InitV2(const OperatorProto& op_proto,
                                    const DeviceContext& ctx,
                                    const TensorMap& weights_map,
                                    TensorMap& weights_buffer,
-                                   TensorMap* tensor_map) {
-  AS_CHECK_STATUS(GemmA16W8Base::InitV2(op_proto, ctx, weights_map,
-                                        weights_buffer, tensor_map));
+                                   TensorMap* tensor_map,
+                                   RuntimeContext* runtime_ctx) {
+  AS_CHECK_STATUS(GemmA16W8Base::InitV2(
+      op_proto, ctx, weights_map, weights_buffer, tensor_map, runtime_ctx));
 
   // Get Device SM Count
   cudaDeviceProp device_prop;

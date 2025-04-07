@@ -33,10 +33,33 @@
  * (only influences SampleOp).
  */
 namespace allspark {
+void UpdateProbs(GenerateContext* gen_ctx, RuntimeContext* runtime_ctx,
+                 int current_batch, int batch_stride) {
+  if (gen_ctx->gen_cfg.logprobs) {
+    std::vector<std::pair<int, float>> log_probs;
+    for (int index = 0; index < gen_ctx->gen_cfg.top_logprobs; index++) {
+      log_probs.push_back(std::make_pair(
+          runtime_ctx
+              ->logprobs_indice_host[current_batch * batch_stride + index],
+          runtime_ctx
+              ->logprobs_value_host[current_batch * batch_stride + index]));
+      DLOG(INFO)
+          << "indice = "
+          << runtime_ctx
+                 ->logprobs_indice_host[current_batch * batch_stride + index]
+          << ",value ="
+          << runtime_ctx
+                 ->logprobs_value_host[current_batch * batch_stride + index]
+          << std::endl;
+    }
+    gen_ctx->request->log_probs_list.push_back(log_probs);
+    gen_ctx->request->token_logprobs_list.push_back(
+        runtime_ctx->token_logprobs_host[current_batch]);
+  }
+}
 #ifdef ENABLE_JSON_MODE
-AsStatus GenerateOp::FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
-                                       char* in_ptr, int current_batch,
-                                       bool is_context) {
+AsStatus GenerateOp::FormatModelOutput(GenerateContext* gen_ctx, char* in_ptr,
+                                       int current_batch, bool is_context) {
   std::shared_ptr<util::FormatEnforcer> formatter = gen_ctx->format_enforcer;
   if (is_context == false) {
     int64_t* generated_ids = static_cast<int64_t*>(
@@ -59,17 +82,17 @@ AsStatus GenerateOp::FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
       (void*)(in_ptr + current_batch * vocab_size_ * SizeofType(dtype_));
   switch (dtype_) {
     case DataType::FLOAT32:
-      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<float>(
+      AS_CHECK_STATUS(formatter->process_logits<float>(
           allowed_tokens, static_cast<float*>(batch_in_ptr), ctx_,
           SizeofType(dtype_), vocab_size_));
       break;
     case DataType::FLOAT16:
-      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<half>(
+      AS_CHECK_STATUS(formatter->process_logits<half>(
           allowed_tokens, static_cast<half*>(batch_in_ptr), ctx_,
           SizeofType(dtype_), vocab_size_));
       break;
     case DataType::BFLOAT16:
-      AS_CHECK_STATUS(util::FormatEnforcer::process_logits<hie::bfloat16>(
+      AS_CHECK_STATUS(formatter->process_logits<hie::bfloat16>(
           allowed_tokens, static_cast<hie::bfloat16*>(batch_in_ptr), ctx_,
           SizeofType(dtype_), vocab_size_));
       break;
@@ -78,6 +101,7 @@ AsStatus GenerateOp::FormatModelOutput(std::shared_ptr<GenerateContext> gen_ctx,
           << "GenerateOp::FormatModelOutput got unsupported data type!\n";
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
+
   return AsStatus::ALLSPARK_SUCCESS;
 }
 #endif  // ENABLE_JSON_MODE
@@ -230,7 +254,7 @@ void GenerateOp::build_batch_gencfg(RuntimeContext* runtime_ctx,
   std::vector<int> host_input_len_list(batch_size);
   std::vector<int> host_suppress_repetition_in_generation_list(batch_size);
   for (int i = 0; i < batch_size; i++) {
-    std::shared_ptr<GenerateContext> gen_ctx;
+    GenerateContext* gen_ctx;
     if (runtime_ctx->is_context) {
       gen_ctx = runtime_ctx->GetContextGenCtx();
     } else {
@@ -302,7 +326,7 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
       std::vector<float> topp_vec(batch_size_);
       std::vector<float> temperatures(batch_size_);
       for (int i = 0; i < batch_size_; i++) {
-        std::shared_ptr<GenerateContext> gen_ctx;
+        GenerateContext* gen_ctx;
         if (runtime_ctx->is_context) {
           gen_ctx = runtime_ctx->GetContextGenCtx();
         } else {
@@ -462,7 +486,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
   }
 #endif
   if (runtime_ctx->is_context) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
     sample_init_launcher(gen_ctx->sample_state->GetDataPtr(),
                          gen_ctx->gen_cfg.seed, 1, ctx_);
   }
@@ -477,7 +501,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
     if (ctx_->GetUseTorchSample() == false) {
       std::vector<void*> sample_states_vec(batch_size);
       for (int i = 0; i < batch_size; i++) {
-        std::shared_ptr<GenerateContext> gen_ctx = nullptr;
+        GenerateContext* gen_ctx = nullptr;
         if (runtime_ctx->is_context) {
           gen_ctx = runtime_ctx->GetContextGenCtx();
         } else {
@@ -492,7 +516,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
                                     cudaMemcpyHostToDevice, stream));
     } else {
       for (int i = 0; i < batch_size; i++) {
-        std::shared_ptr<GenerateContext> gen_ctx = nullptr;
+        GenerateContext* gen_ctx = nullptr;
         if (runtime_ctx->is_context) {
           gen_ctx = runtime_ctx->GetContextGenCtx();
         } else {
@@ -542,8 +566,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
 #endif
   if (do_format == true) {
     if (runtime_ctx->is_context) {
-      std::shared_ptr<GenerateContext> gen_ctx =
-          runtime_ctx->GetContextGenCtx();
+      GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
       if (gen_ctx->gen_cfg.response_format.count("type") &&
           gen_ctx->gen_cfg.response_format["type"] == "json_object") {
         AS_CHECK_STATUS(
@@ -551,7 +574,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
       }
     } else {
       for (int i = 0; i < batch_size_; i++) {
-        std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(i);
+        GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
         if (gen_ctx->gen_cfg.response_format.count("type") &&
             gen_ctx->gen_cfg.response_format["type"] == "json_object") {
           AS_CHECK_STATUS(
@@ -589,7 +612,6 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
         LOG(ERROR) << "forward failed in sampling " << std::endl;
         return status;
       }
-      ctx_->Synchronize();
     }
 
     fill_generated_ids_gpu(runtime_ctx, dec_ids_, gen_ids_ptr_, dec_ids_host_,
@@ -601,7 +623,6 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
     if (nrank_ > 1) {
 #ifdef ENABLE_MULTINUMA
       AsStatus status = MpiBcast(dec_ids_);
-
       if (status != AsStatus::ALLSPARK_SUCCESS) {
         LOG(ERROR) << "forward failed in sampling " << std::endl;
         return status;
@@ -613,6 +634,19 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
     }
 
     fill_generated_ids_cpu(runtime_ctx, dec_ids_, rank_id_);
+  }
+  int batch_stride = ctx_->GetMaxTopLogprobs();
+  int batch_size = runtime_ctx->GetGenCtxListSize();
+  if (rank_id_ == 0) {
+    if (runtime_ctx->is_context) {
+      UpdateProbs(runtime_ctx->GetContextGenCtx(), runtime_ctx, 0,
+                  batch_stride);
+    } else {
+      for (int i = 0; i < batch_size; i++) {
+        GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(i);
+        UpdateProbs(gen_ctx, runtime_ctx, i, batch_stride);
+      }
+    }
   }
 
   return AsStatus::ALLSPARK_SUCCESS;

@@ -59,12 +59,12 @@ class FormatEnforcer {
 
   static std::map<std::string, int> vocab_;
   static VocabType vocab_type_;
-  static std::vector<float> scores_mask_;
+  std::vector<int8_t> scores_mask_;
 
 #ifdef ENABLE_CUDA
   // 存储从GPU拷贝来的logits，类型未必是float，但用float占位可以避免整个类写成模板类
   // 在GenerateOp::Reshape进行空间申请
-  static float* scores_buf_;
+  float* scores_buf_ = nullptr;
 
   ~FormatEnforcer() {
     if (scores_buf_ != nullptr) {
@@ -76,10 +76,10 @@ class FormatEnforcer {
 
   // logits processor
   template <typename T>
-  static AsStatus process_logits(FrozenTokenVector& allowed_tokens, T* in_ptr,
-                                 const DeviceContext* ctx, size_t dtype_size,
-                                 int model_vocab_size) {
-    scores_mask_.assign(model_vocab_size, std::numeric_limits<float>::lowest());
+  AsStatus process_logits(FrozenTokenVector& allowed_tokens, T* in_ptr,
+                          const DeviceContext* ctx, size_t dtype_size,
+                          int model_vocab_size) {
+    scores_mask_.assign(model_vocab_size, 0);
     T* scores = in_ptr;
 #ifdef ENABLE_CUDA
     if (ctx->GetDeviceType() == DeviceType::CUDA) {
@@ -91,10 +91,12 @@ class FormatEnforcer {
 #endif
     for (auto& token : allowed_tokens) {
       AS_ENFORCE(token < scores_mask_.size());
-      scores_mask_[token] = 0;
+      scores_mask_[token] = 1;
     }
     for (int i = 0; i < scores_mask_.size(); i++) {
-      scores[i] += scores_mask_[i];
+      if (scores_mask_[i] == 0) {
+        scores[i] = std::numeric_limits<float>::lowest();
+      }
     }
 #ifdef ENABLE_CUDA
     if (ctx->GetDeviceType() == DeviceType::CUDA) {

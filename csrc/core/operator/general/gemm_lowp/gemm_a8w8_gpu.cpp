@@ -29,9 +29,11 @@ AsStatus GemmA8W8GPU::Init(const OperatorProto& op_proto,
 AsStatus GemmA8W8GPU::InitV2(const OperatorProto& op_proto,
                              const DeviceContext& ctx,
                              const TensorMap& weights_map,
-                             TensorMap& weights_buffer, TensorMap* tensor_map) {
-  AS_CHECK_STATUS(GemmA16W8Base::InitV2(op_proto, ctx, weights_map,
-                                        weights_buffer, tensor_map));
+                             TensorMap& weights_buffer, TensorMap* tensor_map,
+                             RuntimeContext* runtime_ctx) {
+  AS_CHECK_STATUS(GemmA16W8Base::InitV2(
+      op_proto, ctx, weights_map, weights_buffer, tensor_map, runtime_ctx));
+  set_padding_flag(runtime_ctx);
 
   // Get Device SM Count
   cudaDeviceProp device_prop;
@@ -45,7 +47,8 @@ AsStatus GemmA8W8GPU::InitV2(const OperatorProto& op_proto,
   non_const_ctx->SetFallbackDecoderWeightOnly(true);
   a16w8_op_ = std::make_unique<allspark::GemmA16W8GPU>();
   a16w8_op_->CallInit(op_proto, ctx, weight_manager_, weight_handler_,
-                      lora_manager_, rank_info_, tensor_map, profiler_);
+                      lora_manager_, rank_info_, tensor_map, profiler_,
+                      runtime_ctx);
   GetWeightPaddedDispatch(tensor_map_->at(in_names_[0])->GetDataType(), qtype_,
                           weights_buffer);
   return AsStatus::ALLSPARK_SUCCESS;
@@ -212,7 +215,6 @@ AsStatus GemmA8W8GPU::Reshape(RuntimeContext* runtime_ctx) {
   } else {
     status = a16w8_op_->Reshape();
   }
-
   return status;
 }
 AsStatus GemmA8W8GPU::Reshape() {
@@ -296,50 +298,53 @@ void GemmA8W8GPU::B_I8_Reorder_Hmma16816_N32_K16_Gpu(
     TensorMap& weights_buffer) {
   // Rearrange B，B scale and B zero_point to facilitate Ampere Tensor Core load
   // data reorder B from (K, N) to (N / 4, K * 4)
-  const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
-  cudaStream_t cu_stream = gpu_ctx->GetStream();
+  if (do_padding_) {
+    const CUDAContext* gpu_ctx = static_cast<const CUDAContext*>(ctx_);
+    cudaStream_t cu_stream = gpu_ctx->GetStream();
 
-  int64_t n_32align = (n_ + 32 - 1) / 32 * 32;
-  void* rhs_qdata_ptr = weights_[0]->GetDataPtr();
-  void* rhs_scales_ptr = weights_[1]->GetDataPtr();
-  void* rhs_zeros_ptr = weights_[2]->GetDataPtr();
+    int64_t n_32align = (n_ + 32 - 1) / 32 * 32;
+    void* rhs_qdata_ptr = weights_[0]->GetDataPtr();
+    void* rhs_scales_ptr = weights_[1]->GetDataPtr();
+    void* rhs_zeros_ptr = weights_[2]->GetDataPtr();
 
-  // FIXME: Temporarily use cudaMallocAsync & cudaFreeAsync to bypass Allocator
-  // bug, fixme later
-  size_t reorder_size =
-      n_32align * k_ * sizeof(QType) + n_32align * 2 * sizeof(FType);
-  void* workspace;
-  cudaMallocAsync(&workspace, reorder_size, cu_stream);
+    // FIXME: Temporarily use cudaMallocAsync & cudaFreeAsync to bypass
+    // Allocator bug, fixme later
+    size_t reorder_size =
+        n_32align * k_ * sizeof(QType) + n_32align * 2 * sizeof(FType);
+    void* workspace;
+    cudaMallocAsync(&workspace, reorder_size, cu_stream);
 
-  int8_t* reordered_weight_ptr = reinterpret_cast<int8_t*>(workspace);
-  FType* reordered_scales_ptr =
-      reinterpret_cast<FType*>(reordered_weight_ptr + n_32align * k_);
-  FType* reordered_zeros_ptr = reordered_scales_ptr + n_32align;
+    int8_t* reordered_weight_ptr = reinterpret_cast<int8_t*>(workspace);
+    FType* reordered_scales_ptr =
+        reinterpret_cast<FType*>(reordered_weight_ptr + n_32align * k_);
+    FType* reordered_zeros_ptr = reordered_scales_ptr + n_32align;
 
-  cuda::rearrange_kn_weight_as_n32k16_order_ldg16<FType>(
-      reinterpret_cast<const int8_t*>(rhs_qdata_ptr),
-      reinterpret_cast<const FType*>(rhs_scales_ptr),
-      reinterpret_cast<const FType*>(rhs_zeros_ptr),
-      reinterpret_cast<int8_t*>(reordered_weight_ptr),
-      reinterpret_cast<FType*>(reordered_scales_ptr),
-      reinterpret_cast<FType*>(reordered_zeros_ptr), k_, n_, n_32align,
-      cu_stream);
-  gpu_ctx->Synchronize();
-  auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
-  mutable_weight->SetShape(Shape({n_32align, k_}));
-  mutable_weight->CopyDataFrom(reordered_weight_ptr,
-                               n_32align * k_ * sizeof(QType),
-                               weights_[0]->GetDeviceType(), gpu_ctx);
-  AsTensor* mutable_scales = const_cast<AsTensor*>(weights_[1]);
-  mutable_scales->SetShape(Shape({n_32align}));
-  mutable_scales->CopyDataFrom(reordered_scales_ptr, n_32align * sizeof(FType),
-                               weights_[1]->GetDeviceType(), gpu_ctx);
-  AsTensor* mutable_zeros = const_cast<AsTensor*>(weights_[2]);
-  mutable_zeros->SetShape(Shape({n_32align}));
-  mutable_zeros->CopyDataFrom(reordered_zeros_ptr, n_32align * sizeof(FType),
-                              weights_[2]->GetDeviceType(), gpu_ctx);
-  cudaFreeAsync(workspace, cu_stream);
-  gpu_ctx->Synchronize();
+    cuda::rearrange_kn_weight_as_n32k16_order_ldg16<FType>(
+        reinterpret_cast<const int8_t*>(rhs_qdata_ptr),
+        reinterpret_cast<const FType*>(rhs_scales_ptr),
+        reinterpret_cast<const FType*>(rhs_zeros_ptr),
+        reinterpret_cast<int8_t*>(reordered_weight_ptr),
+        reinterpret_cast<FType*>(reordered_scales_ptr),
+        reinterpret_cast<FType*>(reordered_zeros_ptr), k_, n_, n_32align,
+        cu_stream);
+    gpu_ctx->Synchronize();
+    auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
+    mutable_weight->SetShape(Shape({n_32align, k_}));
+    mutable_weight->CopyDataFrom(reordered_weight_ptr,
+                                 n_32align * k_ * sizeof(QType),
+                                 weights_[0]->GetDeviceType(), gpu_ctx);
+    AsTensor* mutable_scales = const_cast<AsTensor*>(weights_[1]);
+    mutable_scales->SetShape(Shape({n_32align}));
+    mutable_scales->CopyDataFrom(reordered_scales_ptr,
+                                 n_32align * sizeof(FType),
+                                 weights_[1]->GetDeviceType(), gpu_ctx);
+    AsTensor* mutable_zeros = const_cast<AsTensor*>(weights_[2]);
+    mutable_zeros->SetShape(Shape({n_32align}));
+    mutable_zeros->CopyDataFrom(reordered_zeros_ptr, n_32align * sizeof(FType),
+                                weights_[2]->GetDeviceType(), gpu_ctx);
+    cudaFreeAsync(workspace, cu_stream);
+    gpu_ctx->Synchronize();
+  }
 }
 
 template <typename FType, typename QType>
@@ -350,36 +355,40 @@ void GemmA8W8GPU::get_weight_padded_k_align(TensorMap& weights_buffer) {
   int64_t k_padded =
       (k_ + A8W8_K_PAD_ALIGN - 1) / A8W8_K_PAD_ALIGN * A8W8_K_PAD_ALIGN;
 
-  AsTensor old_weight_cpu = AsTensor(*weights_[0], DeviceType::CPU);
-  AsTensor rhs_zeros_cpu = AsTensor(*weights_[2], DeviceType::CPU);
-  AsTensor padded_weight_cpu =
-      AsTensor(weights_[0]->GetName() + "padded_cpu", DeviceType::CPU,
-               weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
-               Shape({k_padded, n_}));
+  if (do_padding_) {
+    AsTensor old_weight_cpu = AsTensor(*weights_[0], DeviceType::CPU);
+    AsTensor rhs_zeros_cpu = AsTensor(*weights_[2], DeviceType::CPU);
+    AsTensor padded_weight_cpu =
+        AsTensor(weights_[0]->GetName() + "padded_cpu", DeviceType::CPU,
+                 weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
+                 Shape({k_padded, n_}));
 
-  // padding weight
-  QType* padded_weight_ptr =
-      static_cast<QType*>(padded_weight_cpu.GetDataPtr());
-  QType* old_weight_ptr = static_cast<QType*>(old_weight_cpu.GetDataPtr());
-  const FType* rhs_zeros_ptr = static_cast<FType*>(rhs_zeros_cpu.GetDataPtr());
+    // padding weight
+    QType* padded_weight_ptr =
+        static_cast<QType*>(padded_weight_cpu.GetDataPtr());
+    QType* old_weight_ptr = static_cast<QType*>(old_weight_cpu.GetDataPtr());
+    const FType* rhs_zeros_ptr =
+        static_cast<FType*>(rhs_zeros_cpu.GetDataPtr());
 
-  for (int i = 0; i < k_padded; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      if (i < k_) {
-        padded_weight_ptr[i * n_ + j] = old_weight_ptr[i * n_ + j];
-      } else {
-        FType zero_val = rhs_zeros_ptr[(group_cnt - 1) * n_ + j];
-        padded_weight_ptr[i * n_ + j] =
-            static_cast<QType>(roundf(float(zero_val)));
+    for (int i = 0; i < k_padded; ++i) {
+      for (int j = 0; j < n_; ++j) {
+        if (i < k_) {
+          padded_weight_ptr[i * n_ + j] = old_weight_ptr[i * n_ + j];
+        } else {
+          FType zero_val = rhs_zeros_ptr[(group_cnt - 1) * n_ + j];
+          padded_weight_ptr[i * n_ + j] =
+              static_cast<QType>(roundf(float(zero_val)));
+        }
       }
     }
+
+    auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
+    mutable_weight->SetShape(Shape({k_padded, n_}));
+    TensorUtils::DeepCopyWholeAsync(*mutable_weight, padded_weight_cpu, ctx_);
+    util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
+                            std::make_shared<AsTensor>(padded_weight_cpu));
   }
 
-  auto* mutable_weight = const_cast<AsTensor*>(weights_[0]);
-  mutable_weight->SetShape(Shape({k_padded, n_}));
-  TensorUtils::DeepCopyWholeAsync(*mutable_weight, padded_weight_cpu, ctx_);
-  util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
-                          std::make_shared<AsTensor>(padded_weight_cpu));
   // Reset k_, lda_
   k_ = k_padded;
   lda_ = k_;
@@ -393,92 +402,98 @@ void GemmA8W8GPU::get_weight_padded_n_align(TensorMap& weights_buffer) {
   int64_t n_padded =
       (n_ + A8W8_N_PAD_ALIGN - 1) / A8W8_N_PAD_ALIGN * A8W8_N_PAD_ALIGN;
 
-  AsTensor old_weight_cpu = AsTensor(*weights_[0], DeviceType::CPU);
-  AsTensor old_scales_cpu = AsTensor(*weights_[1], DeviceType::CPU);
-  AsTensor old_zeros_cpu = AsTensor(*weights_[2], DeviceType::CPU);
-  AsTensor padded_weight_cpu =
-      AsTensor(weights_[0]->GetName() + "padded_cpu", DeviceType::CPU,
-               weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
-               Shape({k_, n_padded}));
-  AsTensor padded_scales_cpu =
-      AsTensor(weights_[1]->GetName() + "padded_cpu", DeviceType::CPU,
-               weights_[1]->GetDataType(), weights_[1]->GetDataMode(),
-               Shape({group_cnt, n_padded}));
-  AsTensor padded_zeros_cpu =
-      AsTensor(weights_[2]->GetName() + "padded_cpu", DeviceType::CPU,
-               weights_[2]->GetDataType(), weights_[2]->GetDataMode(),
-               Shape({group_cnt, n_padded}));
+  if (do_padding_) {
+    AsTensor old_weight_cpu = AsTensor(*weights_[0], DeviceType::CPU);
+    AsTensor old_scales_cpu = AsTensor(*weights_[1], DeviceType::CPU);
+    AsTensor old_zeros_cpu = AsTensor(*weights_[2], DeviceType::CPU);
+    AsTensor padded_weight_cpu =
+        AsTensor(weights_[0]->GetName() + "padded_cpu", DeviceType::CPU,
+                 weights_[0]->GetDataType(), weights_[0]->GetDataMode(),
+                 Shape({k_, n_padded}));
+    AsTensor padded_scales_cpu =
+        AsTensor(weights_[1]->GetName() + "padded_cpu", DeviceType::CPU,
+                 weights_[1]->GetDataType(), weights_[1]->GetDataMode(),
+                 Shape({group_cnt, n_padded}));
+    AsTensor padded_zeros_cpu =
+        AsTensor(weights_[2]->GetName() + "padded_cpu", DeviceType::CPU,
+                 weights_[2]->GetDataType(), weights_[2]->GetDataMode(),
+                 Shape({group_cnt, n_padded}));
 
-  // padding weight, scales, zeros
-  QType* padded_weight_ptr =
-      static_cast<QType*>(padded_weight_cpu.GetDataPtr());
-  const QType* old_weight_ptr =
-      static_cast<QType*>(old_weight_cpu.GetDataPtr());
-  FType* padded_scales_ptr =
-      static_cast<FType*>(padded_scales_cpu.GetDataPtr());
-  const FType* old_scales_ptr =
-      static_cast<FType*>(old_scales_cpu.GetDataPtr());
-  FType* padded_zeros_ptr = static_cast<FType*>(padded_zeros_cpu.GetDataPtr());
-  const FType* old_zeros_ptr = static_cast<FType*>(old_zeros_cpu.GetDataPtr());
+    // padding weight, scales, zeros
+    QType* padded_weight_ptr =
+        static_cast<QType*>(padded_weight_cpu.GetDataPtr());
+    const QType* old_weight_ptr =
+        static_cast<QType*>(old_weight_cpu.GetDataPtr());
+    FType* padded_scales_ptr =
+        static_cast<FType*>(padded_scales_cpu.GetDataPtr());
+    const FType* old_scales_ptr =
+        static_cast<FType*>(old_scales_cpu.GetDataPtr());
+    FType* padded_zeros_ptr =
+        static_cast<FType*>(padded_zeros_cpu.GetDataPtr());
+    const FType* old_zeros_ptr =
+        static_cast<FType*>(old_zeros_cpu.GetDataPtr());
 
-  for (int i = 0; i < k_; ++i) {
-    for (int j = 0; j < n_padded; ++j) {
-      if (j < n_) {
-        padded_weight_ptr[i * n_padded + j] = old_weight_ptr[i * n_ + j];
-      } else {
-        padded_weight_ptr[i * n_padded + j] = QType(0);
+    for (int i = 0; i < k_; ++i) {
+      for (int j = 0; j < n_padded; ++j) {
+        if (j < n_) {
+          padded_weight_ptr[i * n_padded + j] = old_weight_ptr[i * n_ + j];
+        } else {
+          padded_weight_ptr[i * n_padded + j] = QType(0);
+        }
       }
     }
-  }
 
-  for (int i = 0; i < group_cnt; ++i) {
-    for (int j = 0; j < n_padded; ++j) {
-      if (j < n_) {
-        padded_scales_ptr[i * n_padded + j] = old_scales_ptr[i * n_ + j];
-        padded_zeros_ptr[i * n_padded + j] = old_zeros_ptr[i * n_ + j];
-      } else {
-        padded_scales_ptr[i * n_padded + j] = FType(0.f);
-        padded_zeros_ptr[i * n_padded + j] = FType(0.f);
+    for (int i = 0; i < group_cnt; ++i) {
+      for (int j = 0; j < n_padded; ++j) {
+        if (j < n_) {
+          padded_scales_ptr[i * n_padded + j] = old_scales_ptr[i * n_ + j];
+          padded_zeros_ptr[i * n_padded + j] = old_zeros_ptr[i * n_ + j];
+        } else {
+          padded_scales_ptr[i * n_padded + j] = FType(0.f);
+          padded_zeros_ptr[i * n_padded + j] = FType(0.f);
+        }
       }
     }
-  }
 
-  AsTensor* mutable_weight = const_cast<AsTensor*>(weights_[0]);
-  mutable_weight->SetShape(Shape({k_, n_padded}));
-  TensorUtils::DeepCopyWholeAsync(*mutable_weight, padded_weight_cpu, ctx_);
+    AsTensor* mutable_weight = const_cast<AsTensor*>(weights_[0]);
+    mutable_weight->SetShape(Shape({k_, n_padded}));
+    TensorUtils::DeepCopyWholeAsync(*mutable_weight, padded_weight_cpu, ctx_);
 
-  util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
-                          std::make_shared<AsTensor>(padded_weight_cpu));
+    util::SyncWeightsBuffer(weights_buffer, weights_[0]->GetName(),
+                            std::make_shared<AsTensor>(padded_weight_cpu));
 
-  AsTensor* mutable_scales = const_cast<AsTensor*>(weights_[1]);
-  mutable_scales->SetShape(Shape({group_cnt, n_padded}));
-  TensorUtils::DeepCopyWholeAsync(*mutable_scales, padded_scales_cpu, ctx_);
-  util::SyncWeightsBuffer(weights_buffer, weights_[1]->GetName(),
-                          std::make_shared<AsTensor>(padded_scales_cpu));
+    AsTensor* mutable_scales = const_cast<AsTensor*>(weights_[1]);
+    mutable_scales->SetShape(Shape({group_cnt, n_padded}));
+    TensorUtils::DeepCopyWholeAsync(*mutable_scales, padded_scales_cpu, ctx_);
+    util::SyncWeightsBuffer(weights_buffer, weights_[1]->GetName(),
+                            std::make_shared<AsTensor>(padded_scales_cpu));
 
-  AsTensor* mutable_zeros = const_cast<AsTensor*>(weights_[2]);
-  mutable_zeros->SetShape(Shape({group_cnt, n_padded}));
-  TensorUtils::DeepCopyWholeAsync(*mutable_zeros, padded_zeros_cpu, ctx_);
-  util::SyncWeightsBuffer(weights_buffer, weights_[2]->GetName(),
-                          std::make_shared<AsTensor>(padded_zeros_cpu));
+    AsTensor* mutable_zeros = const_cast<AsTensor*>(weights_[2]);
+    mutable_zeros->SetShape(Shape({group_cnt, n_padded}));
+    TensorUtils::DeepCopyWholeAsync(*mutable_zeros, padded_zeros_cpu, ctx_);
+    util::SyncWeightsBuffer(weights_buffer, weights_[2]->GetName(),
+                            std::make_shared<AsTensor>(padded_zeros_cpu));
 
-  // Pad Bias
-  if (weights_.size() == 4) {
-    AsTensor old_bias_cpu = AsTensor(*weights_[3], DeviceType::CPU);
-    AsTensor padded_bias_cpu =
-        AsTensor(weights_[3]->GetName() + "padded_cpu", DeviceType::CPU,
-                 weights_[3]->GetDataType(), weights_[3]->GetDataMode(),
-                 Shape({n_padded}));
-    FType* padded_bias_ptr = static_cast<FType*>(padded_bias_cpu.GetDataPtr());
-    const FType* old_bias_ptr = static_cast<FType*>(old_bias_cpu.GetDataPtr());
-    for (int i = 0; i < n_padded; ++i) {
-      padded_bias_ptr[i] = i < n_ ? old_bias_ptr[i] : FType(0.f);
+    // Pad Bias
+    if (weights_.size() == 4) {
+      AsTensor old_bias_cpu = AsTensor(*weights_[3], DeviceType::CPU);
+      AsTensor padded_bias_cpu =
+          AsTensor(weights_[3]->GetName() + "padded_cpu", DeviceType::CPU,
+                   weights_[3]->GetDataType(), weights_[3]->GetDataMode(),
+                   Shape({n_padded}));
+      FType* padded_bias_ptr =
+          static_cast<FType*>(padded_bias_cpu.GetDataPtr());
+      const FType* old_bias_ptr =
+          static_cast<FType*>(old_bias_cpu.GetDataPtr());
+      for (int i = 0; i < n_padded; ++i) {
+        padded_bias_ptr[i] = i < n_ ? old_bias_ptr[i] : FType(0.f);
+      }
+      AsTensor* mutable_bias = const_cast<AsTensor*>(weights_[3]);
+      mutable_bias->SetShape(Shape({n_padded}));
+      TensorUtils::DeepCopyWholeAsync(*mutable_bias, padded_bias_cpu, ctx_);
+      util::SyncWeightsBuffer(weights_buffer, weights_[3]->GetName(),
+                              std::make_shared<AsTensor>(padded_bias_cpu));
     }
-    AsTensor* mutable_bias = const_cast<AsTensor*>(weights_[3]);
-    mutable_bias->SetShape(Shape({n_padded}));
-    TensorUtils::DeepCopyWholeAsync(*mutable_bias, padded_bias_cpu, ctx_);
-    util::SyncWeightsBuffer(weights_buffer, weights_[3]->GetName(),
-                            std::make_shared<AsTensor>(padded_bias_cpu));
   }
 
   // Reset n_, n_padded_before_, ldb_, ldc_

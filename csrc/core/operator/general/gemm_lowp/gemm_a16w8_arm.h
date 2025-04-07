@@ -22,7 +22,7 @@ class GemmA16W8ARM : public GemmA16W8Base {
                 const TensorMap& weights_map, TensorMap* tensor_map) override;
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
   AsStatus Reshape() override;
   AsStatus Forward() override;
   AsStatus Reshape(RuntimeContext* runtime_ctx) override {

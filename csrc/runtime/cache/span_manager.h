@@ -87,6 +87,8 @@ class CacheSpanManager {
   /// @return Number of claimed spans.
   virtual size_t ClaimSpan(std::vector<CacheSpan::Ptr>& out_vec,
                            CacheSpanHandle tag, size_t count) = 0;
+  virtual size_t ClaimSpanFromPres(std::vector<CacheSpan::Ptr>& out_vec,
+                                   CacheSpanHandle tag, size_t count) = 0;
   /// @brief Release the span with tag.
   virtual void ReleaseSpan(const CacheSpanHandle& tag) = 0;
   /// @brief Release the span.
@@ -117,6 +119,8 @@ class DefaultCacheSpanManager : public CacheSpanManager {
   CacheSpan::Ptr GetSpan(CacheSpanHandle tag, bool do_alloc) override;
   size_t ClaimSpan(std::vector<CacheSpan::Ptr>& out_vec, CacheSpanHandle tag,
                    size_t count) override;
+  size_t ClaimSpanFromPres(std::vector<CacheSpan::Ptr>& out_vec,
+                           CacheSpanHandle tag, size_t count) override;
   void ReleaseSpan(const CacheSpanHandle& tag) override;
   void ReleaseSpan(CacheSpan::Ptr span) override;
   void ReleaseSpan(std::vector<CacheSpan::Ptr>& span_vec,
@@ -137,6 +141,8 @@ class ConcurrentCacheSpanManager : public CacheSpanManager {
   CacheSpan::Ptr GetSpan(CacheSpanHandle tag, bool do_alloc) override;
   size_t ClaimSpan(std::vector<CacheSpan::Ptr>& out_vec, CacheSpanHandle tag,
                    size_t count) override;
+  size_t ClaimSpanFromPres(std::vector<CacheSpan::Ptr>& out_vec,
+                           CacheSpanHandle tag, size_t count) override;
   void ReleaseSpan(const CacheSpanHandle& tag) override;
   void ReleaseSpan(CacheSpan::Ptr span) override;
   void ReleaseSpan(std::vector<CacheSpan::Ptr>& span_vec,

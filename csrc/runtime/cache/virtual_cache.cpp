@@ -96,6 +96,7 @@ const CacheSpan::Ptr CacheArray::GetCacheSpan(int index) const {
 }
 
 CacheSpan::Ptr CacheArray::newSpan(size_t index) const {
+  // [warning] this api may cause bug after implement prefill disaggregation
   std::stringstream ss;
   ss << tag_ << "_" << index;
   const auto handle_tag = ss.str();
@@ -110,7 +111,8 @@ CacheSpan::Ptr CacheArray::newSpan(size_t index) const {
 size_t CacheArray::newSpan(std::vector<CacheSpan::Ptr>& out_vec,
                            size_t start_index, size_t count) const {
   std::string handle_tag = tag_ + "_" + "span";
-  return span_manager_->ClaimSpan(out_vec, std::move(handle_tag), count);
+  return span_manager_->ClaimSpanFromPres(out_vec, std::move(handle_tag),
+                                          count);
 }
 
 void CacheArray::destroySpan(CacheSpan::Ptr span) const {

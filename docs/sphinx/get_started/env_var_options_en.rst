@@ -31,7 +31,7 @@ Memory Mangament
    * - ``BFC_MEM_RATIO``
      - The max ratio of device memory that will be managemented by BFC Allocator.
      - float
-     - ``0.975``
+     - ``0.9``
      - float value between (0.0,1.0]
 
    * - ``BFC_LEFTOVER_MB``

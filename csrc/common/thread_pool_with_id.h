@@ -34,6 +34,8 @@ class ThreadPoolWithID {
 
  public:
   ThreadPoolWithID(size_t threads) : queues(threads), stop(false) {
+    LOG(INFO) << "ThreadPoolWithID init with thread number: " << threads;
+
     for (size_t i = 0; i < threads; ++i)
 
       workers.emplace_back([this, i] {

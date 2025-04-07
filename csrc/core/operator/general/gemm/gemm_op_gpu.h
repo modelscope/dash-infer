@@ -21,7 +21,7 @@ class GemmOpGPU : public GemmOpBase {
                 const TensorMap& weights_map, TensorMap* tensor_map) override;
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
   AsStatus Reshape() override;
   AsStatus Forward() override;
   AsStatus Reshape(RuntimeContext* runtime_ctx) override {
@@ -39,6 +39,17 @@ class GemmOpGPU : public GemmOpBase {
                               const void* bin_res, UnaryType activation,
                               const DeviceContext* ctx) = nullptr;
 
+  void set_padding_flag(RuntimeContext* runtime_ctx) {
+    bool do_padding = false;
+    if (runtime_ctx == nullptr) {
+      do_padding = true;
+    } else if (runtime_ctx->is_context == false) {
+      do_padding = true;
+    }
+
+    do_padding_ = do_padding;
+  }
+
  private:
   template <typename FType, typename QType>
   AsStatus DeQuantize();
@@ -51,6 +62,10 @@ class GemmOpGPU : public GemmOpBase {
   bool is_kpad_ = false;
   bool is_npad_ = false;
   int64_t n_padded_before_;
+
+  // only do padding in decoder worker, prefill worker will reuse the padding
+  // result
+  bool do_padding_ = false;
 };
 }  // namespace allspark
 #endif

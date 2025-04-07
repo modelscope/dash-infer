@@ -736,10 +736,11 @@ void TensorUtils::CopyMatrix2D(void* dst_ptr_with_offsets,
           dst_ptr_with_offsets, dst_stride, src_ptr_with_offsets, src_stride,
           width, height, kind,
           static_cast<const CUDAContext*>(ctx)->GetStream()));
+    } else {
+      AS_CHECK_CUDA(cudaMemcpy2D(dst_ptr_with_offsets, dst_stride,
+                                 src_ptr_with_offsets, src_stride, width,
+                                 height, kind));
     }
-    AS_CHECK_CUDA(cudaMemcpy2D(dst_ptr_with_offsets, dst_stride,
-                               src_ptr_with_offsets, src_stride, width, height,
-                               kind));
   } else
 #endif
   {

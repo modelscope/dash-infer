@@ -135,7 +135,7 @@ CudaCacheAllocator::CudaCacheAllocator(const DeviceContext* ctx)
       AS_THROW(AsStatus::ALLSPARK_MEMORY_ERROR);
     }
 
-    float ratio = 0.975;
+    float ratio = 0.9;
     const char* mem_ratio = std::getenv("BFC_MEM_RATIO");
     if (mem_ratio) {
       try {

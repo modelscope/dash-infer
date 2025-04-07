@@ -436,7 +436,7 @@ AsStatus BatchMQAOp::Reshape(RuntimeContext* runtime_ctx) {
 }
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
-AsStatus BatchMQAOp::RunFlash(std::shared_ptr<GenerateContext> gen_ctx) {
+AsStatus BatchMQAOp::RunFlash(GenerateContext* gen_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
 
@@ -478,8 +478,7 @@ AsStatus BatchMQAOp::RunFlash(std::shared_ptr<GenerateContext> gen_ctx) {
 }
 #endif
 
-AsStatus BatchMQAOp::RunOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
-                                 int current_batch) {
+AsStatus BatchMQAOp::RunOneBatch(GenerateContext* gen_ctx, int current_batch) {
   // LOG(INFO) << "BatchMQAOp::RunOneBatch, step: " << gen_ctx->step
   //           << ", seq_len: " << seq_len_ << std::endl;
 
@@ -541,7 +540,7 @@ AsStatus BatchMQAOp::RunContext(RuntimeContext* runtime_ctx) {
                << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   DeviceType backend = ctx_->GetDeviceType();
   switch (backend) {
 #ifdef ENABLE_CUDA
@@ -642,7 +641,7 @@ AsStatus BatchMQAOp::RunContext(RuntimeContext* runtime_ctx) {
 }
 AsStatus BatchMQAOp::RunDecoder(RuntimeContext* runtime_ctx) {
   for (int batch = 0; batch < batch_size_; batch++) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
     RunOneBatch(gen_ctx, batch);
   }
   return AsStatus::ALLSPARK_SUCCESS;

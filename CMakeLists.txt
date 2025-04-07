@@ -119,7 +119,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 #    add_definitions(-DENABLE_SPAN_DEBUG)  # will print span attention log.
 #    add_definitions(-DCONFIG_MEM_DEBUG)  # will print memory allocation log.
 #    add_definitions(-DCONFIG_OP_DEBUG)  # will print op forward, init, also sync after op forward.
-#     add_definitions(-DCONFIG_LOCK_DEBUG)  # will print mutex lock unlock
+#    add_definitions(-DCONFIG_LOCK_DEBUG)  # will print mutex lock unlock
 else()
     add_definitions(-DNVTX_DISABLE)
 endif()
@@ -172,6 +172,8 @@ if(LOCK_CHECK)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fsanitize=thread>)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-omit-frame-pointer>)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fPIE>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fPIC>)
+    # add_link_options(-fsanitize=thread)
 endif()
 
 if (ENABLE_CUDA)

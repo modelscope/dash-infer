@@ -33,28 +33,40 @@ class Worker {
       const DeviceContext* main_ctx,
       PrefixCacheCoordinator::Ptr prefix_cache_coordinator = nullptr);
 
+  AsStatus BuildModelFromPeer(const TransformerProto& model_proto,
+                              const DeviceContext* main_ctx,
+                              std::unique_ptr<Worker>& worker_prefill);
+
   AsStatus RebuildModelFromBuffer(
       const std::unique_ptr<TransformerProto>& model_ir);
 
-  AsStatus StartRequestImpl(std::shared_ptr<RequestHandle> request_handle,
-                            std::string uuid, TensorMap* outputs,
-                            const GenerateConfig& gen_cfg);
+  AsStatus StartRequestImpl(
+      std::shared_ptr<RequestHandle> request_handle, std::string uuid,
+      TensorMap* outputs, const GenerateConfig& gen_cfg,
+      std::shared_ptr<moodycamel::ConcurrentQueue<int64_t>> generated_ids_queue,
+      const std::chrono::time_point<std::chrono::steady_clock> start_ts);
 
-  int GetUnFinishedRequest();
+  int GetPendingDecodeNum() { return model_->GetPendingDecodeNum(); }
+  int GetUnFinishedRequest() { return model_->GetUnFinishedRequest(); }
+  int GetRunningRequest() { return model_->GetRunningRequest(); }
+
   Request* GetRequestById(std::string request_id);
   AsStatus StopRequest(std::string request_id);
   AsStatus ReleaseRequest(std::string request_id);
 
   AsStatus RunTextGenerationContinue();
-  AsStatus RunTextGenerationContext(bool is_new_context);
-  AsStatus AllocDecoderMemory();
+  AsStatus RunTextGenerationContext();
+  AsStatus AllocPrefillMemory(int64_t min_free_count, int& pres_frame);
+  AsStatus AllocDecoderMemory(int pending_num, int64_t min_free_count,
+                              int& pres_frame);
   AsStatus Warmup(int64_t bytes_available, int64_t bytes_runtime);
   int64_t GetAvailableMemoryBytes();
   int64_t GetOccupiedMemoryBytes();
   int64_t GetTotalMemoryBytes();
 
 #if ENABLE_SPAN_ATTENTION
-  int64_t GetFreeFrame();
+  int64_t GetFreeFrame() { return model_->GetFreeFrame(); }
+  void FreePresFrame(size_t count) { model_->FreePresFrame(count); }
 #endif
   void UpdateAsEngineStat(AsEngineStat* as_stat);
   DeviceContext* GetDeviceContext() { return device_ctx_.get(); }

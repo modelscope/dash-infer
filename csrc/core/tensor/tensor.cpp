@@ -260,7 +260,6 @@ DLManagedTensor* AsTensor::ToDLPack(DeviceContext* device_ctx,
   // to be implicitly called by pytorch when as_out not used any more in
   // python
   resource->wrapper.deleter = [](DLManagedTensor* resource) {
-    printf(" dlpack release %p", resource);
     delete static_cast<TensorExchangeResource*>(resource->manager_ctx);
   };
   resource->wrapper.dl_tensor.data = resource->astensor_ptr->GetDataPtr();
@@ -290,6 +289,11 @@ DLManagedTensor* AsTensor::ToDLPack(DeviceContext* device_ctx,
     case DataType::FLOAT32: {
       resource->wrapper.dl_tensor.dtype.code = kDLFloat;
       resource->wrapper.dl_tensor.dtype.bits = 32;
+      break;
+    }
+    case DataType::BFLOAT16: {
+      resource->wrapper.dl_tensor.dtype.code = kDLBfloat;
+      resource->wrapper.dl_tensor.dtype.bits = 16;
       break;
     }
     case DataType::FLOAT16: {
@@ -327,6 +331,8 @@ DLManagedTensor* AsTensor::ToDLPack(DeviceContext* device_ctx,
       resource->wrapper.dl_tensor.dtype.bits = 1;
     }
     default:
+      LOG(ERROR) << "AsTensor::ToDLPack: unsupported datatype "
+                 << DataType_Name(dtype_);
       break;
   }
   return &(resource->wrapper);
@@ -401,6 +407,12 @@ void AsTensor::BuildFromDLTensor(const std::string& name,
           break;
       }
       break;
+    case kDLBfloat:
+      switch (dltensor.dtype.bits) {
+        case 16:
+          dtype_ = DataType::BFLOAT16;
+          break;
+      }
     case kDLUInt:
       switch (dltensor.dtype.bits) {
         case 1:

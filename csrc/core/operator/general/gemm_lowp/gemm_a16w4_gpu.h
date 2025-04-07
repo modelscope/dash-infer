@@ -20,7 +20,7 @@ class GemmA16W4GPU : public GemmA16W4Base {
       : GemmA16W4Base(op_type) {}
   AsStatus InitV2(const OperatorProto& op_proto, const DeviceContext& ctx,
                   const TensorMap& weights_map, TensorMap& weights_buffer,
-                  TensorMap* tensor_map) override;
+                  TensorMap* tensor_map, RuntimeContext* runtime_ctx) override;
   AsStatus Reshape() override;
   AsStatus Forward() override;
   AsStatus Reshape(RuntimeContext* runtime_ctx) override {
@@ -40,6 +40,17 @@ class GemmA16W4GPU : public GemmA16W4Base {
   void GetWeightPaddedDispatch(const DataType ftype, const DataType qtype,
                                TensorMap& weights_buffer);
 
+  void set_padding_flag(RuntimeContext* runtime_ctx) {
+    bool do_padding = false;
+    if (runtime_ctx == nullptr) {
+      do_padding = true;
+    } else if (runtime_ctx->is_context == false) {
+      do_padding = true;
+    }
+
+    do_padding_ = do_padding;
+  }
+
  private:
   int sm_count_;
   int sm_version_;
@@ -47,6 +58,10 @@ class GemmA16W4GPU : public GemmA16W4Base {
   bool is_npad_ = false;
   int64_t n_padded_before_;
   SplitKParams splitk_params_;
+
+  // only do padding in decoder worker, prefill worker will reuse the padding
+  // result
+  bool do_padding_ = false;
 };
 
 }  // namespace allspark

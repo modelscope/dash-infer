@@ -338,7 +338,7 @@ AsStatus BatchMHAOp::Reshape(RuntimeContext* runtime_ctx) {
 }
 
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(ENABLE_AVX512)
-AsStatus BatchMHAOp::runFlash(std::shared_ptr<GenerateContext> gen_ctx) {
+AsStatus BatchMHAOp::runFlash(GenerateContext* gen_ctx) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   AsTensor* wss_tensor = tensor_map_->at("workspace").get();
@@ -371,8 +371,7 @@ AsStatus BatchMHAOp::runFlash(std::shared_ptr<GenerateContext> gen_ctx) {
 }
 #endif
 
-AsStatus BatchMHAOp::runOneBatch(std::shared_ptr<GenerateContext> gen_ctx,
-                                 int current_batch) {
+AsStatus BatchMHAOp::runOneBatch(GenerateContext* gen_ctx, int current_batch) {
   AsTensor* in_tensor = tensor_map_->at(in_names_[0]).get();
   AsTensor* out_tensor = tensor_map_->at(out_names_[0]).get();
   AsTensor* wss_tensor = tensor_map_->at("workspace").get();
@@ -470,7 +469,7 @@ AsStatus BatchMHAOp::runContext(RuntimeContext* runtime_ctx) {
                << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
   }
-  std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+  GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
   DLOG(INFO) << "BatchMHAOp::runContext [" << gen_ctx->request->request_id
              << "][layer " << layer_num_
              << "], PrefillMode = " << int(ctx_->GetPrefillMode());
@@ -490,7 +489,7 @@ AsStatus BatchMHAOp::runDecoder(RuntimeContext* runtime_ctx) {
   DLOG(INFO) << "BatchMHAOp::runDecoder: batch size=" << batch_size_;
 
   for (int batch = 0; batch < batch_size_; batch++) {
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetGenCtx(batch);
+    GenerateContext* gen_ctx = runtime_ctx->GetGenCtx(batch);
     DLOG(INFO) << "BatchMHAOp::runDecoder (batch " << batch << ")["
                << gen_ctx->request->request_id << "][step " << gen_ctx->step
                << "][layer " << layer_num_ << "]";
@@ -505,7 +504,7 @@ AsStatus BatchMHAOp::Alloc(RuntimeContext* runtime_ctx) {
   if (runtime_ctx->is_context) {
     int64_t per_size =
         ctx_->GetKVcacheSize() * hidden_size_ * SizeofType(dtype_);
-    std::shared_ptr<GenerateContext> gen_ctx = runtime_ctx->GetContextGenCtx();
+    GenerateContext* gen_ctx = runtime_ctx->GetContextGenCtx();
     gen_ctx->k_cache_list.push_back(
         std::make_unique<CacheMemory>(ctx_->GetDeviceType(), per_size));
     gen_ctx->v_cache_list.push_back(

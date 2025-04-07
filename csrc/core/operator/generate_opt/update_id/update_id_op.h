@@ -32,9 +32,8 @@ class UpdateIdOp : public AsOperator {
       int64_t* out_host, bool* gen_over,
       const std::vector<std::vector<int64_t>>& stop_words_ids);
 
-  bool check_finish(std::shared_ptr<GenerateContext>& gen_ctx);
-  AsStatus copy_generated_ids(std::shared_ptr<GenerateContext>& gen_ctx,
-                              bool is_context);
+  bool check_finish(GenerateContext* gen_ctx);
+  AsStatus copy_generated_ids(GenerateContext* gen_ctx, bool is_context);
 };
 
 }  // namespace allspark

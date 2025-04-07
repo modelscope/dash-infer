@@ -8,6 +8,7 @@
 #include "cuda_kernel.h"
 #include "gemm_utils.h"
 #include "hie/cuda_activation.hpp"
+#include "utility/check_cuda.h"
 #define CUSPARSE_CHECK(err) __cusparseCheck(err, __FILE__, __LINE__)
 inline void __cusparseCheck(cusparseStatus_t err, const char* file,
                             const int line) {
@@ -606,10 +607,10 @@ void GemmWraper<float>(float* matrix_C, const float* matrix_A,
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, 1, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha, matrix_B,
-                            CUDA_R_32F, ldb, matrix_A, CUDA_R_32F, lda, &beta,
-                            matrix_C, CUDA_R_32F, ldc, CUDA_R_32F,
-                            CUBLAS_GEMM_DEFAULT));
+  AS_CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha,
+                               matrix_B, CUDA_R_32F, ldb, matrix_A, CUDA_R_32F,
+                               lda, &beta, matrix_C, CUDA_R_32F, ldc,
+                               CUDA_R_32F, CUBLAS_GEMM_DEFAULT));
 }
 #ifdef ENABLE_FP16
 template <>
@@ -630,10 +631,10 @@ void GemmWraper<half>(half* matrix_C, const half* matrix_A,
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, 1, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha, matrix_B,
-                            CUDA_R_16F, ldb, matrix_A, CUDA_R_16F, lda, &beta,
-                            matrix_C, CUDA_R_16F, ldc, CUDA_R_32F,
-                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  AS_CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha,
+                               matrix_B, CUDA_R_16F, ldb, matrix_A, CUDA_R_16F,
+                               lda, &beta, matrix_C, CUDA_R_16F, ldc,
+                               CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 #endif
 template <>
@@ -657,10 +658,10 @@ void GemmWraper<hie::bfloat16>(hie::bfloat16* matrix_C,
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, 1, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha, matrix_B,
-                            CUDA_R_16BF, ldb, matrix_A, CUDA_R_16BF, lda, &beta,
-                            matrix_C, CUDA_R_16BF, ldc, CUDA_R_32F,
-                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  AS_CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha,
+                               matrix_B, CUDA_R_16BF, ldb, matrix_A,
+                               CUDA_R_16BF, lda, &beta, matrix_C, CUDA_R_16BF,
+                               ldc, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 template <>
 void StridedBatchGemmWraper<float>(float* matrix_C, const float* matrix_A,
@@ -686,7 +687,7 @@ void StridedBatchGemmWraper<float>(float* matrix_C, const float* matrix_A,
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, batch, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmStridedBatchedEx(
+  AS_CHECK_CUBLAS(cublasGemmStridedBatchedEx(
       handle, transB_, transA_, n, m, k, &alpha, matrix_B, CUDA_R_32F, ldb,
       strideB, matrix_A, CUDA_R_32F, lda, strideA, &beta, matrix_C, CUDA_R_32F,
       ldc, strideC, batch, CUDA_R_32F, CUBLAS_GEMM_DEFAULT));
@@ -715,7 +716,7 @@ void StridedBatchGemmWraper<half>(half* matrix_C, const half* matrix_A,
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, batch, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmStridedBatchedEx(
+  AS_CHECK_CUBLAS(cublasGemmStridedBatchedEx(
       handle, transB_, transA_, n, m, k, &alpha, matrix_B, CUDA_R_16F, ldb,
       strideB, matrix_A, CUDA_R_16F, lda, strideA, &beta, matrix_C, CUDA_R_16F,
       ldc, strideC, batch, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -744,7 +745,7 @@ void StridedBatchGemmWraper<hie::bfloat16>(
     broadcast_kernel_launcher(matrix_C, bin_res, m * n, m * n, batch, stream);
     beta = 1.f;
   }
-  CHECK_CUBLAS(cublasGemmStridedBatchedEx(
+  AS_CHECK_CUBLAS(cublasGemmStridedBatchedEx(
       handle, transB_, transA_, n, m, k, &alpha, matrix_B, CUDA_R_16F, ldb,
       strideB, matrix_A, CUDA_R_16F, lda, strideA, &beta, matrix_C, CUDA_R_16F,
       ldc, strideC, batch, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -755,7 +756,7 @@ void BatchGemmI8Wrapper(void** matrix_C, void** matrix_A, void** matrix_B,
                         int batch, cublasHandle_t handle) {
   cublasOperation_t transA_ = transA ? CUBLAS_OP_T : CUBLAS_OP_N;
   cublasOperation_t transB_ = transB ? CUBLAS_OP_T : CUBLAS_OP_N;
-  CHECK_CUBLAS(cublasGemmBatchedEx(
+  AS_CHECK_CUBLAS(cublasGemmBatchedEx(
       handle, transB_, transA_, n, m, k, &alpha, (const void**)matrix_B,
       CUDA_R_8I, ldb, (const void**)matrix_A, CUDA_R_8I, lda, &beta,
       (void**)matrix_C, CUDA_R_32I, ldc, batch, CUDA_R_32I,
@@ -886,10 +887,10 @@ void GemmInt8(int32_t* matrix_C, const int8_t* matrix_A, const int8_t* matrix_B,
               cudaStream_t stream) {
   cublasOperation_t transA_ = transA ? CUBLAS_OP_T : CUBLAS_OP_N;
   cublasOperation_t transB_ = transB ? CUBLAS_OP_T : CUBLAS_OP_N;
-  CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha, matrix_B,
-                            CUDA_R_8I, ldb, matrix_A, CUDA_R_8I, lda, &beta,
-                            matrix_C, CUDA_R_32I, ldc, CUDA_R_32I,
-                            CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  AS_CHECK_CUBLAS(cublasGemmEx(handle, transB_, transA_, n, m, k, &alpha,
+                               matrix_B, CUDA_R_8I, ldb, matrix_A, CUDA_R_8I,
+                               lda, &beta, matrix_C, CUDA_R_32I, ldc,
+                               CUDA_R_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template void hgemm_32x128x16_simt_Aldg1<hie::activation::Identity>(
