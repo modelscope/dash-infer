@@ -554,7 +554,7 @@ class QwenVl:
         Raises:
             ValueError: 各种参数校验失败
         """
-        if vl_request.preprocess_req is None or len(vl_request.preprocess_req) == 0:
+        if vl_request.preprocess_req is None:
             raise ValueError(
                 f"preprocess_req is None, request_id:{vl_request.request_id}"
             )
@@ -960,6 +960,7 @@ class QwenVl:
         # get preprocess from cache
         vl_pre_resp = VLPreprocessResp()
         vl_pre_resp.request_id = vl_request.request_id
+        vl_pre_resp.data = {}
         # vl_pre_resp.data = self.cache_manager.get_preprocess_from_request(request_id=str(vl_request.request_id))[1]
         results = []
         request_images = []
