@@ -9,10 +9,10 @@ index 8d501cb..0000000
 -	url = https://github.com/NVIDIA/cutlass.git
 diff --git a/csrc/CMakeLists.txt b/csrc/CMakeLists.txt
 new file mode 100644
-index 0000000..5cb0691
+index 0000000..a9f28f7
 --- /dev/null
 +++ b/csrc/CMakeLists.txt
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,233 @@
 +cmake_minimum_required(VERSION 3.18)
 +
 +project(FLASHATTN LANGUAGES CXX CUDA)
@@ -144,7 +144,25 @@ index 0000000..5cb0691
 +
 +# Generate a header file containing the HEADDIM_SWITCH macro
 +set(HEADDIM_SWITCH_HEADER "${FLASHATTN_ROOT}/headdim_switch.h")
-+file(WRITE ${HEADDIM_SWITCH_HEADER} "${HEADDIM_SWITCH_MACRO}\n")
++
++if(EXISTS "${HEADDIM_SWITCH_HEADER}")
++    file(READ "${HEADDIM_SWITCH_HEADER}" EXISTING_CONTENT)
++    string(STRIP "${HEADDIM_SWITCH_MACRO}" NEW_CONTENT)
++    string(STRIP "${EXISTING_CONTENT}" EXISTING_CONTENT)
++
++    # Check if the content has changed
++    if(NOT "${EXISTING_CONTENT}" STREQUAL "${NEW_CONTENT}")
++        message(STATUS "HEADDIM_SWITCH Changed， Regenerate ${HEADDIM_SWITCH_HEADER}, May Cause Rebuild FlashAttention")
++        file(WRITE "${HEADDIM_SWITCH_HEADER}" "${HEADDIM_SWITCH_MACRO}")
++    else()
++        message(STATUS "HEADDIM_SWITCH UnChanged，Not Regenerate ${HEADDIM_SWITCH_HEADER}")
++    endif()
++
++else()
++    message(STATUS "HEADDIM_SWITCH Changed， Regenerate ${HEADDIM_SWITCH_HEADER}, May Cause Rebuild FlashAttention")
++    file(WRITE "${HEADDIM_SWITCH_HEADER}" "${HEADDIM_SWITCH_MACRO}")
++endif()
++
 +
 +# Create an empty list to store the files to be kept
 +set(FILES_TO_KEEP)
