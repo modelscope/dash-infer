@@ -9,6 +9,7 @@ cuda_version="${AS_CUDA_VERSION:-12.4}"
 cuda_sm="${AS_CUDA_SM:-80;86;90a}"
 NCCL_VERSION="${AS_NCCL_VERSION:-2.23.4}"
 build_folder="${AS_BUILD_FOLDER:-build}"
+force_conan="${AS_FORCE_CONAN:-OFF}"
 
 ## NCCL Version Map:
 ## the corresponding pre-build nccl will download on oss.
@@ -46,8 +47,8 @@ if [ "$clean" == "ON" ]; then
     rm -rf ${build_folder}
 fi
 
-if [ ! -d "./${build_folder}"  ]; then
-    mkdir ${build_folder} && cd ${build_folder}
+if [ ! -d "./${build_folder}" ] || [ "$force_conan" != "OFF" ] ; then
+    mkdir -p ${build_folder} && cd ${build_folder}
 
     conan profile new dashinfer_compiler_profile --detect --force
     conanfile=../conan/conanfile.txt
