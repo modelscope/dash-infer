@@ -84,7 +84,6 @@ struct SM8x_GEMM_A16W8_Params {
   uint32_t* red_count_ptr;  // for fused splitk reduce
 };
 
-
 template <typename FType, typename QType>
 struct GEMM_A16W8_Params {
   const FType* A_ptr;

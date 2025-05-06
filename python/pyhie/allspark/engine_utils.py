@@ -26,6 +26,7 @@ class EngineUtils:
             "Qwen_v10": Qwen_v10,
             "Qwen_v15": Qwen_v15,
             "Qwen_v20": Qwen_v20,
+            "Qwen_v30": Qwen_v30,
             "QwenCode_v20": QwenCode_v20,
             "Qwen_v20_MOE":Qwen_v20_MOE,
         }
