@@ -6,12 +6,12 @@
 
 #include <core/kernel/cuda/flashv2/flashv2.h>
 #include <core/kernel/cuda/trivial_mha/trivial_mha.h>
+#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
 #include <spanattn/span_attn.h>
 
 #include "core/kernel/kernel.h"
 #include "cuda/cuda_kernel_span_cache.h"
-#include "span_attn_op.h"       // NOLINT
-#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
+#include "span_attn_op.h"  // NOLINT
 
 namespace allspark {
 

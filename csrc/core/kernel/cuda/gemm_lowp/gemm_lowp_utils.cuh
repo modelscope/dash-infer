@@ -900,7 +900,6 @@ __device__ __forceinline__ void mma_h884(const uint32_t& a0, const uint32_t& a1,
 #endif
 }
 
-
 static constexpr int WARP_SIZE = 32;
 
 /**

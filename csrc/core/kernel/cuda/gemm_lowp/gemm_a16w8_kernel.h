@@ -153,7 +153,6 @@ void ampere_hgemm_A16W8_perc_f16_f16_MtilexNtilex32_mma16816_multistage_AN_BTN32
     const SplitKParams fused_gemm_params, const float alpha,
     cudaStream_t stream);
 
-
 /**
  * @brief
  *
@@ -174,8 +173,8 @@ enum KernelType {
   Volta_A16W8_GEMM_PERC_32x128x32,  // PerC : Tensor Core 32x128x32_884 SplitK
   A16W8_GEMM_SUBC,                  // SubC : TensorCore 128x128x32_1688
   A16W8_GEMM_SUBC_16816,            // SubC : TensorCore 32x128x32_16816
-  Ampere_A16W8_GEMM_PERC_MtilexNtilex32,      // PerC : TensorCore
-                                              // MtilexNtilex32_16816
+  Ampere_A16W8_GEMM_PERC_MtilexNtilex32,  // PerC : TensorCore
+                                          // MtilexNtilex32_16816
 };
 
 /*

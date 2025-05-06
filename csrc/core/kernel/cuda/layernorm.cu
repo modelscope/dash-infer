@@ -256,5 +256,114 @@ template void LayerNormNoBetaKernelLauncher<half>(half* out, const half* input,
 template void LayerNormNoBetaKernelLauncher<hie::bfloat16>(
     hie::bfloat16* out, const hie::bfloat16* input, const hie::bfloat16* bias,
     const hie::bfloat16* gamma, int m, int n, float eps, cudaStream_t stream);
+template <bool ADDBIAS, int ite, typename T>
+__global__ static void batch_layernorm_nobeta_kernel(T** out_points,
+                                                     const T** input_points,
+                                                     const T* bias,
+                                                     const T* gamma, int n,
+                                                     float eps) {
+  int tid = threadIdx.x;
+  __shared__ float s_variance;
+
+  float local_out[ite];
+  float mean_2 = 0.f;
+  T* out = out_points[blockIdx.x];
+  const T* input = input_points[blockIdx.x];
+#pragma unroll ite
+  for (int i = 0; i < ite; ++i) {
+    int idx = i * blockDim.x + tid;
+    if (i * blockDim.x + tid >= n) {
+      local_out[i] = 0;
+    } else {
+      if (ADDBIAS) {
+        local_out[i] = (float)(__ldg(&input[idx]) + __ldg(&bias[idx]));
+      } else {
+        local_out[i] = (float)(__ldg(&input[idx]));
+      }
+    }
+
+    mean_2 += local_out[i] * local_out[i];
+  }
+  __syncthreads();
+  blockReduce<float, ReduceOp::kSUM>(&mean_2);
+  if (tid == 0) {
+    mean_2 /= n;
+    s_variance = rsqrtf(mean_2 + (float)eps);
+  }
+  __syncthreads();
+#pragma unroll ite
+  for (int i = 0; i < ite; ++i) {
+    int col_id = i * blockDim.x + tid;
+    if (col_id >= n) {
+      continue;
+    }
+    int idx = col_id;
+    out[idx] =
+        (float)(local_out[i]) * s_variance * (float)(__ldg(&gamma[col_id]));
+  }
+}
+template <typename T>
+void BatchLayerNormNoBetaKernelLauncher(T** out, const T** input, const T* bias,
+                                        const T* gamma, int m, int n, float eps,
+                                        cudaStream_t stream) {
+  if (n / 8 <= 1024) {
+    const int ite = 8;
+    // const int thread_num = (n/ite + 32 -1)/32*32;
+    const int thread_num = 1024;
+    // assert((n / ite) <= 1024 && (n / ite) % 32 == 0);
+    if (bias != nullptr) {
+      batch_layernorm_nobeta_kernel<true, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    } else {
+      batch_layernorm_nobeta_kernel<false, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    }
+  } else if (n / 16 <= 1024) {
+    const int ite = 16;
+    // const int thread_num = (n/ite + 32 -1)/32*32;
+    const int thread_num = 1024;
+    // assert((n / ite) <= 1024 && (n / ite) % 32 == 0);
+    if (bias != nullptr) {
+      batch_layernorm_nobeta_kernel<true, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    } else {
+      batch_layernorm_nobeta_kernel<false, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    }
+  } else if (n / 32 <= 1024) {
+    const int ite = 32;
+    const int thread_num = (n / ite + 32 - 1) / 32 * 32;
+    // assert((n / ite) <= 1024 && (n / ite) % 32 == 0);
+    if (bias != nullptr) {
+      batch_layernorm_nobeta_kernel<true, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    } else {
+      batch_layernorm_nobeta_kernel<false, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    }
+  } else if (n / 64 <= 1024) {
+    const int ite = 64;
+    const int thread_num = (n / ite + 32 - 1) / 32 * 32;
+    // assert((n / ite) <= 1024 && (n / ite) % 32 == 0);
+    if (bias != nullptr) {
+      batch_layernorm_nobeta_kernel<true, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    } else {
+      batch_layernorm_nobeta_kernel<false, ite, T>
+          <<<m, thread_num, 0, stream>>>(out, input, bias, gamma, n, eps);
+    }
+  }
+}
+template void BatchLayerNormNoBetaKernelLauncher<float>(
+    float** out, const float** input, const float* bias, const float* gamma,
+    int m, int n, float eps, cudaStream_t stream);
+#ifdef ENABLE_FP16
+template void BatchLayerNormNoBetaKernelLauncher<half>(
+    half** out, const half** input, const half* bias, const half* gamma, int m,
+    int n, float eps, cudaStream_t stream);
+#endif
+template void BatchLayerNormNoBetaKernelLauncher<hie::bfloat16>(
+    hie::bfloat16** out, const hie::bfloat16** input, const hie::bfloat16* bias,
+    const hie::bfloat16* gamma, int m, int n, float eps, cudaStream_t stream);
 }  // namespace cuda
 }  // namespace allspark

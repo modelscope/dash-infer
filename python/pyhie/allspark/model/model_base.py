@@ -100,6 +100,15 @@ class LayerNormNoBeta(Operator):
         self.op.weights.append(make_tensor(op_name + ".gamma"))
         self.op.outputs.append(make_tensor(op_name + ".out"))
 
+class QKLayerNormNoBeta(Operator):
+
+    def __init__(self, op_name, inputs, op_attr={}):
+        super().__init__("QKLayerNormNoBeta", op_name, inputs, op_attr)
+        self.op.weights.append(make_tensor(op_name + ".q_norm.gamma"))
+        self.op.weights.append(make_tensor(op_name + ".k_norm.gamma"))
+        self.op.outputs.append(make_tensor(op_name + ".out"))
+
+
 
 class Gemm(Operator):
 

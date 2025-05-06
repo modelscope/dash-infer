@@ -14,6 +14,7 @@ from .baichuan_v1 import *
 from .qwen_v10 import *
 from .qwen_v15 import *
 from .qwen_v20 import *
+from .qwen_v30 import *
 from .qwencode_v20 import *
 from .qwen_v20_moe import *
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "Qwen_v10",
     "Qwen_v15",
     "Qwen_v20",
+    "Qwen_v30",
     "QwenCode_v20",
     "Qwen_v20_MOE"
 ]

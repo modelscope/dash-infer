@@ -95,6 +95,33 @@ class QWen2ConfigAdapter(ModelConfigAdapter):
     def get_model_data_type(self):
         return self.model_dtype
 
+class QWen3ConfigAdapter(ModelConfigAdapter):
+    def __init__(self, hf_model_config: Qwen2Config):
+        self.model_config = hf_model_config.__dict__
+        self.model_config["model_type"] = "Qwen_v30"
+        self.model_config["architectures"] = hf_model_config.architectures
+
+        self.model_config["rotary_emb_base"] = hf_model_config.rope_theta
+
+        hidden_size_per_head = int(
+            hf_model_config.hidden_size / hf_model_config.num_attention_heads
+        )
+
+        self.model_config["size_per_head"] = hidden_size_per_head
+
+        self.model_dtype = torch_dtype_to_as_dtype(hf_model_config.torch_dtype)
+        if self.model_dtype == None:
+            print(
+                "config.json not setup data type correctly, use bfloat16 as model data type"
+            )
+            self.model_dtype = "bfloat16"
+
+        print("model config:")
+        print(self.model_config)
+
+    def get_model_data_type(self):
+        return self.model_dtype
+
 
 class Qwen2MoeConfigAdapter(ModelConfigAdapter):
     def __init__(self, hf_model_config: Qwen2MoeConfig):
@@ -191,6 +218,7 @@ class ModelAdapterFactory:
         adapters = {
             "QWenConfig": QWenConfigAdapter,
             "Qwen2Config": QWen2ConfigAdapter,
+            "Qwen3Config": QWen3ConfigAdapter,
             "Qwen2MoeConfig": Qwen2MoeConfigAdapter,
             "Qwen2VLForConditionalGeneration": QWen2ConfigAdapter,
             "LlamaConfig": LlamaConfigAdapter,

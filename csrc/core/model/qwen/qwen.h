@@ -37,6 +37,12 @@ class QwenModel_v20 : public QwenModel {
       : QwenModel(model_type){};
 };
 
+class QwenModel_v30 : public QwenModel {
+ public:
+  explicit QwenModel_v30(const std::string& model_type = "")
+      : QwenModel(model_type){};
+};
+
 class QwenCodeModel_v20 : public QwenModel {
  public:
   explicit QwenCodeModel_v20(const std::string& model_type = "")

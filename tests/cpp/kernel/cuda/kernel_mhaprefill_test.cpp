@@ -5,6 +5,7 @@
 
 #include <core/kernel/cuda/flashv2/flashv2.h>
 #include <core/kernel/cuda/trivial_mha/trivial_mha.h>
+#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
 #include <test_common.h>
 
 #include <algorithm>
@@ -12,7 +13,6 @@
 #include <common.hpp>
 #include <iostream>
 #include <vector>
-#include <core/kernel/cuda/xformer_mha/xformer_mha.h>
 
 #if 0
 void reference_prefill_attention(

@@ -48,6 +48,10 @@ void LayerNormNoBetaKernelLauncher(T* out, const T* input, const T* bias,
                                    const T* gamma, int m, int n, float eps,
                                    cudaStream_t stream);
 template <typename T>
+void BatchLayerNormNoBetaKernelLauncher(T** out, const T** input, const T* bias,
+                                        const T* gamma, int m, int n, float eps,
+                                        cudaStream_t stream);
+template <typename T>
 void GemmWraper(T* matrix_C, const T* matrix_A, const T* matrix_B,
                 const T* bias, int m, int n, int k, bool transA, bool transB,
                 int lda, int ldb, int ldc, float alpha, float beta,
