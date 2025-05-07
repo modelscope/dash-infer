@@ -1,5 +1,6 @@
 name: Release Packages
-
+# docker download mirror should setup in self host machine.
+# the mirror status can be found at : https://status.daocloud.io/status/docker
 on:
   push:
     tags:
@@ -26,7 +27,7 @@ jobs:
             enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
-      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+      image: dashinfer/${{ matrix.image }}
     env:
       # force use node16 instead of node20
       # otherwise it may cause GLIBCXX_2.27 not found
@@ -107,7 +108,7 @@ jobs:
             enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
-      image: registry-1.docker.io/dashinfer/${{ matrix.image }}
+      image: dashinfer/${{ matrix.image }}
     env:
       # force use node16 instead of node20
       # otherwise it may cause GLIBCXX_2.27 not found
