@@ -31,7 +31,7 @@ jobs:
     env:
       # force use node16 instead of node20
       # otherwise it may cause GLIBCXX_2.27 not found
-      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       ENABLE_CUDA: ${{ matrix.enable_cuda }}
     defaults:
       run:
