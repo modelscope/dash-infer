@@ -3,8 +3,6 @@
  * @file    as_engine_decode.cpp
  */
 
-#include <nvtx3/nvToolsExt.h>
-
 #include "as_engine.h"
 
 namespace allspark {
