@@ -64,10 +64,18 @@ class Worker {
   int64_t GetOccupiedMemoryBytes();
   int64_t GetTotalMemoryBytes();
 
+  int64_t GetFreeFrame() {
 #if ENABLE_SPAN_ATTENTION
-  int64_t GetFreeFrame() { return model_->GetFreeFrame(); }
-  void FreePresFrame(size_t count) { model_->FreePresFrame(count); }
+    return model_->GetFreeFrame();
+#else
+    return 0;
 #endif
+  }
+  void FreePresFrame(size_t count) {
+#if ENABLE_SPAN_ATTENTION    
+    model_->FreePresFrame(count);
+#endif
+  }
   void UpdateAsEngineStat(AsEngineStat* as_stat);
   DeviceContext* GetDeviceContext() { return device_ctx_.get(); }
 
