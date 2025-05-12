@@ -1007,6 +1007,7 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
               << "Prefix Cache Len: " << request->prefix_len;
   }
 
+#if ENABLE_SPAN_ATTENTION1
   if (cache_frame_manager_ != nullptr) {
     LOG(INFO) << "cache_frame_manager_->CountFreeFrame(): "
               << cache_frame_manager_->CountFreeFrame() << ", "
@@ -1014,7 +1015,7 @@ AsStatus AsModel::StopRequest(const std::string& request_id) {
               << cache_frame_manager_->CountPresFrame() << ", "
               << "rank_id: " << rank_;
   }
-
+#endif
   return AsStatus::ALLSPARK_SUCCESS;
 }
 
