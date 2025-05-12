@@ -12,16 +12,12 @@ jobs:
   build-tgz:
     strategy:
       matrix:
-        arch: [X64, ARM64]
-        image: ["dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        arch: [X64]
+        image: ["dev-centos7-cu124:v1"]
         enable_cuda: [0, 1]
         exclude:
           - arch: X64
             image: "dev-centos8-arm:v2"
-          - arch: ARM64
-            image: "dev-centos7-cu124:v1"
-          - arch: ARM64
-            enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
@@ -86,16 +82,11 @@ jobs:
   build-wheels:
     strategy:
       matrix:
-        arch: [X64, ARM64]
-        image: ["dev-centos7-cu124:v1", "dev-centos8-arm:v2"]
+        arch: [X64]
+        image: ["dev-centos7-cu124:v1"]
         enable_cuda: [0, 1]
         exclude:
           - arch: X64
-            image: "dev-centos8-arm:v2"
-          - arch: ARM64
-            image: "dev-centos7-cu124:v1"
-          - arch: ARM64
-            enable_cuda: 1
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
