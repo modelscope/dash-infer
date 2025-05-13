@@ -85,8 +85,6 @@ jobs:
         arch: [X64]
         image: ["dev-centos7-cu124:v1"]
         enable_cuda: [0, 1]
-        exclude:
-          - arch: X64
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
