@@ -63,7 +63,7 @@ jobs:
 
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
-        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//' | sed 's/-.*$//')
 
         export AS_RELEASE_VERSION=$VERSION_NUMBER
         export AS_BUILD_PACKAGE=ON
