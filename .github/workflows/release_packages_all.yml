@@ -2,9 +2,9 @@ name: Release Packages
 # docker download mirror should setup in self host machine.
 # the mirror status can be found at : https://status.daocloud.io/status/docker
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+#  push:
+#    tags:
+#     - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 # Needed to create release and upload assets
