@@ -3,7 +3,7 @@ set(project_version_in_env $ENV{AS_RELEASE_VERSION})
 # remove -rc1 like string in version name.
 
 if ((NOT DEFINED project_version_in_env))
-    set(project_version_in_env "2.0.0")
+    set(project_version_in_env "2.4.0")
 endif()
 
 string(REGEX REPLACE "-rc[0-9]+" "" STRIPED_VERSION_STRING ${project_version_in_env})
