@@ -120,6 +120,7 @@ jobs:
     - name: Build manylinux wheels
       shell: bash
       run: |
+        set -x
         source /root/.bashrc
         if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
             source /miniconda/etc/profile.d/conda.sh
