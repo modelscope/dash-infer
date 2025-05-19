@@ -4,6 +4,8 @@ name: Build Check
 on:
   pull_request:
   merge_group:
+  workflow_dispatch:
+
 
 jobs:
   build-tgz:
