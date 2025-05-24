@@ -1,0 +1,138 @@
+name: Build Check
+# docker download mirror should setup in self host machine.
+# the mirror status can be found at : https://status.daocloud.io/status/docker
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+
+jobs:
+  build-tgz:
+    strategy:
+      matrix:
+        arch: [X64]
+        image: ["dev-centos7-cu124:v1"]
+        enable_cuda: [0, 1]
+        exclude:
+          - arch: X64
+            image: "dev-centos8-arm:v2"
+    on-runs: ubuntu-22.04
+    container:
+      image: dashinfer/${{ matrix.image }}
+    env:
+      # force use node16 instead of node20
+      # otherwise it may cause GLIBCXX_2.27 not found
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      ENABLE_CUDA: ${{ matrix.enable_cuda }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+      with:
+        lfs: false
+
+    - name: Pull LFS
+      run: |
+        git lfs install --force
+        git lfs pull
+
+    - name: Init submodule
+      run: |
+        git submodule init
+        git submodule update
+
+    - name: Build tgz package
+      shell: bash
+      run: |
+        source /root/.bashrc
+        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
+            source /miniconda/etc/profile.d/conda.sh
+        fi
+        source activate ds_py
+
+        git fetch --tags
+        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+
+        export AS_RELEASE_VERSION=$VERSION_NUMBER
+
+        echo "ENABLE_CUDA value: $ENABLE_CUDA"
+
+        # export ENABLE_MULTINUMA="ON"
+        if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
+            export AS_PLATFORM="armclang"
+            bash build.sh
+        else
+            if [ "$ENABLE_CUDA" -eq "1" ];
+            then
+                export AS_PLATFORM="cuda"
+                export AS_CUDA_SM="'70;75;80;86;89;90a'"
+                bash scripts/release/cpp_build_cuda.sh
+            else
+                export AS_PLATFORM="x86"
+                bash build.sh
+            fi
+        fi
+
+
+  build-wheels:
+    strategy:
+      matrix:
+        arch: [X64]
+        image: ["dev-centos7-cu124:v1"]
+        enable_cuda: [0, 1]
+    runs-on: ubuntu-22.04
+    container:
+      image: dashinfer/${{ matrix.image }}
+    env:
+      # force use node16 instead of node20
+      # otherwise it may cause GLIBCXX_2.27 not found
+      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      ENABLE_CUDA: ${{ matrix.enable_cuda }}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+      with:
+        lfs: false
+        
+    - name: Pull LFS
+      run: |
+        git lfs install --force
+        git lfs pull
+
+    - name: Init submodule
+      run: |
+        git submodule init
+        git submodule update
+
+    - name: Build manylinux wheels
+      shell: bash
+      run: |
+        source /root/.bashrc
+        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
+            source /miniconda/etc/profile.d/conda.sh
+        fi
+
+        git fetch --tags
+        TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
+        VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
+
+        export AS_RELEASE_VERSION=$VERSION_NUMBER
+
+        echo "ENABLE_CUDA value: $ENABLE_CUDA"
+
+        if [[ "${{ matrix.arch }}" == "ARM64" ]]; then
+            bash scripts/release/python_manylinux_build.sh
+        else
+            if [ "$ENABLE_CUDA" -eq "1" ];
+            then
+              export AS_PLATFORM="cuda"
+              export AS_CUDA_SM="'70;75;80;86;89;90a'"
+              bash scripts/release/python_manylinux_build_cuda.sh
+            else
+              bash scripts/release/python_manylinux_build.sh
+            fi
+        fi
