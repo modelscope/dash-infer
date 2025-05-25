@@ -2,7 +2,9 @@
 set -e -x
 
 ALL_VERSION="3.8 3.9 3.10 3.11"
-BUILD_VERSION=${@:-$ALL_VERSION}
+
+# check env BUILD_VERSION first, if not exists, use all version.
+BUILD_VERSION=${BUILD_VERSION:-$ALL_VERSION}
 
 echo " going to build python wheels with version: ${BUILD_VERSION}"
 

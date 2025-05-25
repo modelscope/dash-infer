@@ -2,7 +2,9 @@
 set -e -x
 
 ALL_VERSION="3.8 3.9 3.10 3.11"
-BUILD_VERSION=${@:-$ALL_VERSION}
+
+# check env BUILD_VERSION first, if not exists, use all version.
+BUILD_VERSION=${BUILD_VERSION:-$ALL_VERSION}
 
 echo " going to build python wheels with version: ${BUILD_VERSION}"
 
@@ -60,6 +62,9 @@ build_wheel_for_python() {
     # python ${REPO_ROOT}/python/setup.py bdist_wheel
     pip wheel ${REPO_ROOT}/python --no-deps -w ${REPO_ROOT}/python/wheelhouse/ --verbose
 
+    # clean up build folder save disk space.
+    rm -rf ${REPO_ROOT}/python/build/temp*
+    rm -rf ${REPO_ROOT}/python/build/lib*
     conda deactivate
     # conda remove --name "$env_name" --all -y
 }
