@@ -7,35 +7,58 @@ set(CUTLASS_NVCC_ARCHS ${CMAKE_CUDA_ARCHITECTURES} CACHE STRING "The SM architec
 set(CUTLASS_INSTALL ${INSTALL_LOCATION}/cutlass/install)
 message(STATUS "CUTLASS_INSTALL: ${CUTLASS_INSTALL}")
 
-  message(STATUS "Use cutlass from submodule")
-  set(CUTLASS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass)
+# 核心修复方案
+set(CUTLASS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/from_source/cutlass)
+set(CUTLASS_PACKAGE_FILE ${PROJECT_SOURCE_DIR}/third_party/cutlass_3.5.0.tgz)
+
+# 验证文件存在性
+if(NOT EXISTS "${CUTLASS_PACKAGE_FILE}")
+    message(FATAL_ERROR "Required package not found: ${CUTLASS_PACKAGE_FILE}")
+endif()
 
 include(ExternalProject)
 
 ExternalProject_Add(
-  project_cutlass
-  PREFIX ${CMAKE_CURRENT_BINARY_DIR}/cutlass
-  SOURCE_DIR ${CUTLASS_SOURCE_DIR}
-  CMAKE_GENERATOR "Ninja"
-  BUILD_COMMAND ${CMAKE_COMMAND} --build . -j32 -v
-  CMAKE_ARGS
-      -DCUTLASS_ENABLE_TESTS=${CUTLASS_ENABLE_TESTS}
-      -DCUTLASS_ENABLE_TOOLS=${CUTLASS_ENABLE_TOOLS}
-      -DCUTLASS_ENABLE_EXAMPLES=${CUTLASS_ENABLE_EXAMPLES}
-      -DCUTLASS_NVCC_ARCHS=${CUTLASS_NVCC_ARCHS}
-      -DCMAKE_INSTALL_PREFIX=${CUTLASS_INSTALL}
+    project_cutlass
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/cutlass
+    URL file://${CUTLASS_PACKAGE_FILE}
+    URL_HASH SHA256=40a3e0eca7d713d6d23db34f6527244f71442149708a87fe736282c952f83d60  # 替换为实际文件哈希
+    SOURCE_DIR ${CUTLASS_SOURCE_DIR}
+    CMAKE_GENERATOR "${CMAKE_GENERATOR}"
+    CMAKE_ARGS
+        -DCUTLASS_ENABLE_TESTS=${CUTLASS_ENABLE_TESTS}
+        -DCUTLASS_ENABLE_TOOLS=${CUTLASS_ENABLE_TOOLS}
+        -DCUTLASS_ENABLE_EXAMPLES=${CUTLASS_ENABLE_EXAMPLES}
+        -DCUTLASS_NVCC_ARCHS=${CUTLASS_NVCC_ARCHS}
+        -DCMAKE_INSTALL_PREFIX=${CUTLASS_INSTALL}
+        -DBUILD_TESTING=OFF
+        -DBUILD_BENCHMARKS=OFF
+        -DBUILD_EXAMPLES=OFF
+        -DBUILD_GEMM_TESTS=OFF
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} -j${NPROC}
+    INSTALL_COMMAND ${CMAKE_COMMAND} --install . --config ${CMAKE_BUILD_TYPE}
+    UPDATE_COMMAND ""
+    PATCH_COMMAND ""
 )
 
+# 依赖关系处理
+#add_dependencies(your_project_target project_cutlass)
+
+# 路径配置
+ExternalProject_Get_Property(project_cutlass INSTALL_DIR)
+set(CUTLASS_INCLUDE_DIR ${INSTALL_DIR}/include)
+set(CUTLASS_LIBRARY_DIR ${INSTALL_DIR}/lib)
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${INSTALL_DIR}")
+
+# 验证输出
+message(STATUS "CUTLASS_INCLUDE_DIR: ${CUTLASS_INCLUDE_DIR}")
+message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+message(STATUS "CUDA_ARCHITECTURES: ${CUTLASS_NVCC_ARCHS}")
+message("===========================")
+
+# 清理临时变量
 unset(CUTLASS_ENABLE_TESTS)
 unset(CUTLASS_ENABLE_TOOLS)
 unset(CUTLASS_ENABLE_EXAMPLES)
 unset(CUTLASS_NVCC_ARCHS)
 
-# ExternalProject_Get_Property(project_cutlass BINARY_DIR)
-ExternalProject_Get_Property(project_cutlass SOURCE_DIR)
-ExternalProject_Get_Property(project_cutlass INSTALL_DIR)
-set(CUTLASS_INCLUDE_DIR ${SOURCE_DIR}/include)
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${CUTLASS_INSTALL}")
-message(STATUS "CUTLASS_INCLUDE_DIR: ${CUTLASS_INCLUDE_DIR}")
-message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
-message("===========================")
