@@ -2,8 +2,6 @@ name: Build Check with Shared Runner
 # docker download mirror should setup in self host machine.
 # the mirror status can be found at : https://status.daocloud.io/status/docker
 on:
-  pull_request:
-  merge_group:
   workflow_dispatch:
 
 
