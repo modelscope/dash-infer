@@ -1,9 +1,9 @@
 dashinfer@https://github.com/modelscope/dash-infer/releases/download/v2.0.0-rc3/dashinfer-2.0.0rc3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 av
-numpy==1.24.3
-requests==2.32.3
-nvtx==0.2.10
-transformers>=4.45.0
+numpy>=1.24.3
+requests>=2.32.3
+nvtx>=0.2.10
+transformers>=4.48.9
 cachetools>=5.4.0
 six
 tiktoken
@@ -12,7 +12,7 @@ shortuuid
 fastapi
 pydantic_settings
 uvicorn
-cmake==3.22.6
+cmake>=3.22.6
 modelscope
 aiohttp
 onnx
