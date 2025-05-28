@@ -1,9 +1,7 @@
-name: Build Check
+name: Build Check with Shared Runner
 # docker download mirror should setup in self host machine.
 # the mirror status can be found at : https://status.daocloud.io/status/docker
 on:
-  pull_request:
-  merge_group:
   workflow_dispatch:
 
 
@@ -17,7 +15,7 @@ jobs:
         exclude:
           - arch: X64
             image: "dev-centos8-arm:v2"
-    on-runs: ubuntu-22.04
+    runs-on: ubuntu-22.04
     container:
       image: dashinfer/${{ matrix.image }}
     env:
