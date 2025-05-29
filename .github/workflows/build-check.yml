@@ -34,7 +34,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         lfs: true
-        submodules: true
+        submodules: false
 
     - name: Build tgz package
       shell: bash
@@ -85,7 +85,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         lfs: true
-        submodules: true
+        submodules: false
 
     - name: Build manylinux wheels
       shell: bash
