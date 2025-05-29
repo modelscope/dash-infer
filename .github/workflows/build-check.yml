@@ -29,6 +29,7 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
+    - uses: git9527/clean-up-action@v2
     - name: Check out code
       uses: actions/checkout@v4
       with:
@@ -79,6 +80,7 @@ jobs:
       ENABLE_CUDA: ${{ matrix.enable_cuda }}
       BUILD_VERSION: 3.10
     steps:
+    - uses: git9527/clean-up-action@v2
     - name: Check out code
       uses: actions/checkout@v4
       with:
