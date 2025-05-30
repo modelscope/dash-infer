@@ -33,19 +33,10 @@ jobs:
         shell: bash -l {0}
     steps:
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
-        lfs: false
-
-    - name: Pull LFS
-      run: |
-        git lfs install --force
-        git lfs pull
-
-    - name: Init submodule
-      run: |
-        git submodule init
-        git submodule update
+        lfs: true
+        submdules: false
 
     - name: Build tgz package
       shell: bash
@@ -104,19 +95,10 @@ jobs:
       ENABLE_CUDA: ${{ matrix.enable_cuda }}
     steps:
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
-        lfs: false
-        
-    - name: Pull LFS
-      run: |
-        git lfs install --force
-        git lfs pull
-
-    - name: Init submodule
-      run: |
-        git submodule init
-        git submodule update
+        lfs: true
+        submdules: false
 
     - name: Build manylinux wheels
       shell: bash
