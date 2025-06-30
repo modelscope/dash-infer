@@ -15,7 +15,6 @@
 
 
 ## News
-
 - [2024/12] 🔥 DashInfer: Announcing the release of v2.0, now with enhanced GPU (CUDA) support! This version includes features like prefix caching (with GPU & CPU swapping), guided decoding, optimized attention for GQA, a lockless reactor engine, and newly added support for the VLM model (Qwen-VL) and MoE Models. For more details, please refer to the [release notes](https://dashinfer.readthedocs.io/en/latest/index.html#v2-0-0).
 
 - [2024/06] DashInfer:  v1.0 release with x86 & ARMv9 CPU and CPU flash attention support.
@@ -208,8 +207,8 @@ If you find them useful, please feel free to cite these papers:
 - [x] Prefix Cache: Support GPU Prefix Cache and CPU Swap 
 - [x] Quantization: Fp8 A8W8 Activation quantization support on CUDA.
 - [x] LORA: Continues Batch LORA Optimization.
-- [ ] Parallel Context phase and Generation phase within engine.
-- [ ] More effective MoE Operator on GPU.
+- [x] Parallel Context phase and Generation phase within engine.
+- [x] More effective MoE Operator on GPU.
 - [ ] Porting to AMD(ROCm) Platform.
 
 # License
