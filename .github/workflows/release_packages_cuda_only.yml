@@ -47,6 +47,7 @@ jobs:
         fi
         source activate ds_py
 
+        git config --global --add safe.directory '*'
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//' | sed 's/-.*$//')
@@ -109,6 +110,7 @@ jobs:
             source /miniconda/etc/profile.d/conda.sh
         fi
 
+        git config --global --add safe.directory '*'
         git fetch --tags
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
