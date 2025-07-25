@@ -8,9 +8,14 @@ DashInfer VLMs is a toolkit to support Vision Language Models (VLMs) inference b
 
 ## Supported Models
 - Qwen2-VL 2B/7B/72B
+- Qwen2.5-VL 2B/7B/72B (Only support transformers vit engine)
 
 ## Architecture
 ![alt text](resource/dashinfer-vlm-arch.png)
+
+
+## Benchmark and Example
+- See [test/README](tests/README.md)
 
 ## API Reference
 Currently, some [openai chat completion API](https://platform.openai.com/docs/api-reference/chat) parameters are unavailable. Here are the list of supported parameters in dashinfer vlm.
