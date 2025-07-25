@@ -13,7 +13,6 @@ peft
 deepspeed
 
 optimum
-auto-gptq
 
 # xformers
 # transformers>=4.32.0

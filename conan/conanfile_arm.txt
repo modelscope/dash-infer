@@ -3,7 +3,7 @@
   gtest/1.11.0
   glog/0.5.0
   libunwind/1.7.2
-  pybind11/2.8.1
+  pybind11/2.13.6
   zlib/1.2.13
 [generators]
   cmake
