@@ -56,7 +56,7 @@ class CMakeBuild(build_ext):
         # 11.4
         cuda_version = os.getenv("AS_CUDA_VERSION", "12.4")
         nccl_version = os.getenv("AS_NCCL_VERSION", "2.23.4")
-        cuda_sm = os.getenv("AS_CUDA_SM", "'80;86'")
+        cuda_sm = os.getenv("AS_CUDA_SM", "'80;90a'")
         nv_system_lib = os.getenv("AS_SYSTEM_NV_LIB", "OFF")
         config = os.getenv("AS_BUILD_TYPE", "Release")
         as_platform = os.getenv("AS_PLATFORM", "cuda")
