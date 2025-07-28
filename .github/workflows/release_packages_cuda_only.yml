@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         arch: [X64]
-        image: ["dev-centos7-cu124:v1"]
+        image: ["docker.cnb.cool/thinksrc/dashinfer/dev-ubi8-cu124:latest"]
         enable_cuda: [1]
 
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
@@ -84,15 +84,12 @@ jobs:
     strategy:
       matrix:
         arch: [X64]
-        image: ["dev-centos7-cu124:v1"]
+        image: ["docker.cnb.cool/thinksrc/dashinfer/dev-ubi8-cu124:latest"]
         enable_cuda: [1]
     runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
     env:
-      # force use node16 instead of node20
-      # otherwise it may cause GLIBCXX_2.27 not found
-      # ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       ENABLE_CUDA: ${{ matrix.enable_cuda }}
     steps:
     - name: Check out code
