@@ -1,23 +1,22 @@
-FROM nvidia/cuda:12.4.0-devel-centos7
-RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
-RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
-RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
-RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-RUN echo "sslverify=false" >> /etc/yum.conf
+FROM nvidia/cuda:12.4.1-devel-ubi8
+#RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
+#RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
+#RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+#RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+#RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+#RUN echo "sslverify=false" >> /etc/yum.conf
 
-RUN yum install centos-release-scl -y --nogpgcheck
-RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
-RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
-RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
-RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+#RUN yum install centos-release-scl -y --nogpgcheck
+#RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
+#RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
+#RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+#RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+#RUN sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
-RUN rpm --rebuilddb && yum install openssl-devel curl-devel wget python3-devel -y --nogpgcheck
-RUN yum install -y bzip2 numactl
+#RUN rpm --rebuilddb 
+RUN yum install openssl-devel curl-devel wget python3-devel -y --nogpgcheck
+RUN yum install -y bzip2 
 RUN pip3 install --upgrade pip
-RUN yum install devtoolset-7 devtoolset-10 -y --nogpgcheck
-RUN echo "source /opt/rh/devtoolset-10/enable" >> /root/.bashrc && source /root/.bashrc
 ARG PY_VER=3.10
 
 RUN curl -LO https://repo.anaconda.com/miniconda/Miniconda3-py38_23.11.0-2-Linux-x86_64.sh \
@@ -71,19 +70,19 @@ RUN conda config --set ssl_verify false
 
 RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-RUN yum install -y epel-release && yum install -y dnf
-RUN dnf makecache &&  dnf -y install ccache
+# ubi8 don't have ccache
+#RUN dnf makecache &&  dnf -y install ccache
 RUN pip3 install jsonlines GitPython editdistance sacrebleu nltk rouge-score
 
 ## preinstall some conda package
 COPY ./requirements_dev.txt /root/requirements_dev.txt
 
-RUN yum install -y git-lfs rpm-build patchelf
-RUN yum install -y bash-completion tig
+RUN yum install -y git-lfs rpm-build 
+RUN yum install -y bash-completion 
 
-RUN yum install -y build-essential autoconf automake libtool ca-certificates
+RUN yum install -y autoconf automake libtool ca-certificates
 
-RUN yum install -y libtool flex
+RUN yum install -y libtool 
 RUN wget "ftp://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" && \
     tar -xvf automake-1.15.1.tar.gz && \
     cd automake-1.15.1 && ./configure --prefix=/usr/ && make -j && make install && \
@@ -112,7 +111,7 @@ RUN curl -LO https://github.com/NixOS/patchelf/archive/refs/tags/0.14.5.tar.gz &
     cd patchelf-0.14.5 && \
     ./bootstrap.sh && \
     ./configure && \
-    source /opt/rh/devtoolset-10/enable && make install && \
+    make install && \
     cd .. && rm -rf patchelf-0.14.5 0.14.5.tar.gz
 RUN pip3 install auditwheel==6.1.0
 

@@ -2,7 +2,7 @@
   protobuf/3.18.3
   gtest/1.11.0
   glog/0.5.0
-  pybind11/2.8.1
+  pybind11/2.13.6
   openmpi/4.1.0
   hwloc/2.9.3  # 2.10 only support shared lib, use older version to build static lib.
   zlib/1.2.13

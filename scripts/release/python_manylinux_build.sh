@@ -19,15 +19,29 @@ architecture=$(arch)
 
 export AS_PYTHON_PKG_NAME="dashinfer-cpu"
 
-# 使用if-else结构进行条件判断
+# 架构判断和平台设置
 if [ "${architecture}" == "aarch64" ]; then
+    # ARM64 处理
     export PLAT=manylinux_2_28_aarch64
     export AS_PLATFORM=armclang
-    # export ENABLE_MULTINUMA="ON"
 else
-    export PLAT=manylinux2014_x86_64
+    # x86_64 处理
+    if [ -f /etc/os-release ]; then
+        # 加载系统信息
+        . /etc/os-release
+        
+        # CentOS 7 检测
+        if [ "$ID" == "centos" ] && [ "$VERSION_ID" == "7" ]; then
+            export PLAT=manylinux2014_x86_64
+        else
+            export PLAT=manylinux_2_27_x86_64
+        fi
+    else
+        # 无系统信息文件时使用较新标准
+        export PLAT=manylinux_2_27_x86_64
+    fi
+    
     export AS_PLATFORM=x86
-    # export ENABLE_MULTINUMA="ON"
 fi
 
 if [ -z "$PLAT" ] || [ -z "$AS_PLATFORM" ];

@@ -127,7 +127,7 @@ def main(args, client):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str,
-                        default="0.0.0.0")
+                        default="localhost")
     parser.add_argument('--port', type=str,
                         default="8000")
     parser.add_argument('--type', type=str, default="all", choices=["all", "single_image", "multi_images", "video"])

@@ -44,6 +44,8 @@ include(ExternalProject)
 
     message(STATUS "Use flash-attention from external project")
     set(FLASH_ATTENTION_GIT_REPO https://github.com/Dao-AILab/flash-attention.git)
+# mirror for china.
+#    set(FLASH_ATTENTION_GIT_REPO https://gitee.com/lanyuflying/flash-attention.git)
     set(FLASH_ATTENTION_GIT_TAG 7551202cb2dd245432bc878447e19015c0af3c22)
     set(FLASH_ATTENTION_GIT_PATCH ${PROJECT_SOURCE_DIR}/third_party/patch/flash-attn.patch)
 
@@ -60,7 +62,7 @@ include(ExternalProject)
     SOURCE_SUBDIR csrc
     DEPENDS project_cutlass
     CMAKE_GENERATOR "Ninja"
-    BUILD_COMMAND ${CMAKE_COMMAND} --build . -j32 -v
+    BUILD_COMMAND ${CMAKE_COMMAND} --build . -j2 -v
     BUILD_BYPRODUCTS ${FLASHATTN_LIBRARY_PATH}/${FLASHATTN_LIBRARY_NAME}
     USES_TERMINAL true
     CMAKE_CACHE_ARGS

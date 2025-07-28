@@ -6,7 +6,7 @@ clean="OFF"
 with_platform="${AS_PLATFORM:-cuda}"
 # cuda related version, provide a defualt value for cuda 11.4
 cuda_version="${AS_CUDA_VERSION:-12.4}"
-cuda_sm="${AS_CUDA_SM:-80;86;90a}"
+cuda_sm="${AS_CUDA_SM:-80;90a}"
 NCCL_VERSION="${AS_NCCL_VERSION:-2.23.4}"
 build_folder="${AS_BUILD_FOLDER:-build}"
 force_conan="${AS_FORCE_CONAN:-OFF}"
