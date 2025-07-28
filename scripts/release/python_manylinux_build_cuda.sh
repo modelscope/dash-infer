@@ -17,8 +17,23 @@ pushd $SCRIPT_DIR
 # 捕获arch命令的输出
 architecture=$(arch)
 
-export PLAT=manylinux2014_x86_64
 export AS_PLATFORM=cuda
+
+if [ -f /etc/os-release ]; then
+    # 加载系统信息
+    . /etc/os-release
+
+    # CentOS 7 检测
+    if [ "$ID" == "centos" ] && [ "$VERSION_ID" == "7" ]; then
+        export PLAT=manylinux2014_x86_64
+    else
+        export PLAT=manylinux_2_27_x86_64
+    fi
+else
+    # 无系统信息文件时使用较新标准
+    export PLAT=manylinux_2_27_x86_64
+fi
+
 
 CUDA_VERSION=$(nvcc --version | grep -oP 'release \K[\d.]+')
 
