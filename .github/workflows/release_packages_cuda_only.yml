@@ -20,7 +20,7 @@ jobs:
         image: ["docker.cnb.cool/thinksrc/dashinfer/dev-ubi8-cu124:latest"]
         enable_cuda: [1]
 
-    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
+    runs-on: [ubuntu-latest, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
     env:
@@ -86,7 +86,7 @@ jobs:
         arch: [X64]
         image: ["docker.cnb.cool/thinksrc/dashinfer/dev-ubi8-cu124:latest"]
         enable_cuda: [1]
-    runs-on: [self-hosted, Linux, "${{ matrix.arch }}"]
+    runs-on: [ubuntu-latest, Linux, "${{ matrix.arch }}"]
     container:
       image: dashinfer/${{ matrix.image }}
     env:
