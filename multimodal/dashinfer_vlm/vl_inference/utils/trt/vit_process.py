@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import tensorrt as trt
 import contextlib
 from dataclasses import dataclass
+from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLVisionConfig
 
 logger = trt.Logger(trt.Logger.WARNING)
 
@@ -300,12 +301,9 @@ class Session(object):
 class VisualTRT_V2(HieModel_V2):
 
     def __init__(self, vit_engine_path, trt_vit_config, input=input):
-        print("loading qwen2-vit by pyhie")
         self.stream = torch.cuda.current_stream().cuda_stream
-        print(f"Loading engine from {vit_engine_path}")
         with open(vit_engine_path, "rb") as f:
             engine_buffer = f.read()
-        print(f"Creating session from engine {vit_engine_path}")
         self.session_vit = Session.from_serialized_engine(engine_buffer)
         self.device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
         self.trt_vit_config = trt_vit_config
@@ -320,34 +318,19 @@ class VisualTRT_V2(HieModel_V2):
             "input": images.to(torch.float32),
             "grid_thw": grid_thw.to(torch.int64),
         }
-        # visual_output_info = self.session_vit.infer_shapes(
-        #     [TensorInfo("input", trt.DataType.FLOAT, images.shape), TensorInfo("grid_thw", trt.DataType.INT64, grid_thw.shape)])
-        # visual_outputs = {
-        #     t.name: torch.empty(tuple(t.shape),
-        #                         dtype=trt_dtype_to_torch(t.dtype),
-        #                         device="cuda")
-        #     for t in visual_output_info
-        # }
         self.session_vit.context.set_input_shape("input", images.shape)
         self.session_vit.context.set_input_shape("grid_thw", grid_thw.shape)
-        hidden_size = self.trt_vit_config.hidden_size
-        embed_dim = self.trt_vit_config.embed_dim
+        if isinstance(self.trt_vit_config, Qwen2_5_VLVisionConfig):
+            hidden_size = self.trt_vit_config.out_hidden_size
+        else:
+            hidden_size = self.trt_vit_config.hidden_size
         spatial_merge_size = self.trt_vit_config.spatial_merge_size
-        image_tokens = int(
-            visual_inputs["input"].shape[1]
-            * embed_dim
-            / (embed_dim * (spatial_merge_size**2))
-        )
+        image_tokens = int(visual_inputs["input"].shape[1] * (spatial_merge_size**2))
         visual_outputs = {
             "output": torch.empty(
                 (1, image_tokens, hidden_size), dtype=torch.float32, device="cuda"
             )
         }
-        # profiler.start("ViT")
         ok = self.session_vit.run(visual_inputs, visual_outputs, self.stream)
-        # profiler.stop("ViT")
-        # Vit_time = profiler.elapsed_time_in_sec("ViT")
-        # print(f"TensorRT-LLM ViT latency: {Vit_time:3f} sec ")
         assert ok, "Runtime execution failed for vit session"
-
         return visual_outputs["output"].squeeze(0).clone()

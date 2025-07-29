@@ -6,17 +6,18 @@ from openai import OpenAI
 import argparse
 
 def test_text_image_1(client, model):
+    test_image = os.path.join(os.path.dirname(os.path.abspath(__file__)) , "test.jpg")
     response = client.chat.completions.create(
         model=model,
         messages=[
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe the image."},
+                    {"type": "text", "text": "Please Read and Describe the image."},
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": "https://farm4.staticflickr.com/3075/3168662394_7d7103de7d_z_d.jpg",
+                            "url": test_image,
                         },
                     },
                 ],
@@ -31,29 +32,24 @@ def test_text_image_1(client, model):
 
 
 def test_text_multi_images(client, model):
+    test_image = os.path.join(os.path.dirname(os.path.abspath(__file__)) , "test.jpg")
     response = client.chat.completions.create(
         model=model,
         messages=[
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Are these images different?"},
+                    {"type": "text", "text": "Describe the images?"},
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": "https://farm4.staticflickr.com/3075/3168662394_7d7103de7d_z_d.jpg",
+                            "url": test_image,
                         },
                     },
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": "https://farm9.staticflickr.com/8505/8441256181_4e98d8bff5_z_d.jpg",
-                        },
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": "https://farm3.staticflickr.com/2220/1572613671_7311098b76_z_d.jpg",
+                            "url": test_image,
                         },
                     },
                 ],
@@ -127,7 +123,7 @@ def main(args, client):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str,
-                        default="localhost")
+                        default="0.0.0.0")
     parser.add_argument('--port', type=str,
                         default="8000")
     parser.add_argument('--type', type=str, default="all", choices=["all", "single_image", "multi_images", "video"])
