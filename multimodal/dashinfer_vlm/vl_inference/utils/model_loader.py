@@ -160,7 +160,11 @@ class HuggingFaceVLModel(HuggingFaceModel):
             self.vision_model_path = os.path.join(
                 model_output_dir, self.pretain_model_name + ".plan"
             )
-            onnx_trt_obj = ONNX_TRT(self.hf_model_path)
+            if hasattr(self.hf_model_config, "architectures") and "Qwen2_5_VLForConditionalGeneration" in self.hf_model_config.architectures:
+                is_qwen_2_5= True
+            else:
+                is_qwen_2_5 = False
+            onnx_trt_obj = ONNX_TRT(self.hf_model_path, is_qwen_2_5=is_qwen_2_5)
             onnx_trt_obj.export_onnx(onnxFile)
             onnx_trt_obj.generate_trt_engine(onnxFile, self.vision_model_path)
         elif self.vision_engine == "transformers":

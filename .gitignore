@@ -26,3 +26,4 @@ third_party/from_source/openssl/*
 log*
 *.csv
 *.as*
+*.egg-info

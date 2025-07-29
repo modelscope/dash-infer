@@ -9,4 +9,4 @@ from .hie import *
 from .hie_allspark import *
 from .cache import *
 
-from .. import Qwen2VisionTransformer
+from .. import Qwen2VisionTransformer, Qwen2_5VisionTransformer

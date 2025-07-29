@@ -17,45 +17,52 @@ import time
 from typing import Any, Dict, List, Optional
 import contextlib
 from dataclasses import dataclass
-
+from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
+from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLConfig
 import tensorrt as trt
 import torch
 
-from .. import Qwen2VisionTransformer
+from .. import Qwen2VisionTransformer, Qwen2_5VisionTransformer
 
 
 class ONNX_TRT:
 
-    def __init__(self, model_path=None):
-        from transformers.models.qwen2_vl.configuration_qwen2_vl import (
-            Qwen2VLVisionConfig,
-        )
+    def __init__(self, model_path=None, is_qwen_2_5=False):
+        self.is_qwen_2_5 = is_qwen_2_5
+        if is_qwen_2_5:
+            self.config = Qwen2_5_VLConfig.from_pretrained(
+                model_path, trust_remote_code=True, revision=None, code_revision=None
+            ).vision_config
+            self.model_path = model_path
+            self.input_embed_dim = (
+                self.config.in_channels
+                * self.config.temporal_patch_size
+                * self.config.patch_size
+                * self.config.patch_size
+            )
+        else:
+            self.config = Qwen2VLVisionConfig.from_pretrained(
+                model_path, trust_remote_code=True, revision=None, code_revision=None
+            )
+            self.model_path = model_path        
+            self.input_embed_dim = (
+                self.config.in_channels
+                * self.config.temporal_patch_size
+                * self.config.patch_size
+                * self.config.patch_size
+            )
 
-        self.model_path = model_path
-        self.config = Qwen2VLVisionConfig.from_pretrained(
-            model_path, trust_remote_code=True, revision=None, code_revision=None
-        )
-        self.input_embed_dim = (
-            self.config.in_channels
-            * self.config.temporal_patch_size
-            * self.config.patch_size
-            * self.config.patch_size
-        )
 
     def export_onnx(self, onnx_file_path):
         print("Start converting ONNX model!")
-
-        # class SumModule(torch.nn.Module):
-        #     def forward(self, x, y):
-        #         x[0][0][0] =  y[0][0][1]
-        #         return torch.sum(x, dim=1)
         model_path = self.model_path
         config = self.config
+        vision_model = Qwen2_5VisionTransformer if self.is_qwen_2_5 else Qwen2VisionTransformer
 
         class WrapModel(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
                 super().__init__(*args, **kwargs)
-                self.vision_model = Qwen2VisionTransformer(config)
+                self.vision_model = vision_model(config)
 
                 def get_weights_iterator(model):
                     import glob
