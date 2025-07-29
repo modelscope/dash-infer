@@ -49,7 +49,7 @@ jobs:
         source activate ds_py
 
         git config --global --add safe.directory '*'
-        git fetch --tags
+        git fetch --tags -f
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//' | sed 's/-.*$//')
 
@@ -110,7 +110,7 @@ jobs:
         fi
 
         git config --global --add safe.directory '*'
-        git fetch --tags
+        git fetch --tags -f
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
 
@@ -159,6 +159,7 @@ jobs:
         path: release/
 
     - name: Release all packages
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
+      if: github.ref_type == 'tag'
       with:
         files: release/*
