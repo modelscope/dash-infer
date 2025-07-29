@@ -44,9 +44,9 @@ class BenchRequest:
 
 
 class OpenAIAPIBenchmark:
-    def __init__(self) -> None:
+    def __init__(self, host, port) -> None:
         openai_api_key = "EMPTY"
-        openai_api_base = "http://127.0.0.1:8000/v1"
+        openai_api_base = f"http://{host}:{port}/v1"
 
         self.client = OpenAI(
             api_key=openai_api_key,
@@ -269,6 +269,8 @@ if __name__ == "__main__":
     parser.add_argument("--image-nums-range", type=int, default=1)
     parser.add_argument("--frequency", type=float, default=1000)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", type=str, default="localhost")
     args = parser.parse_args()
 
     ds = load_dataset("json", data_files=args.prompt_file, split="train")
@@ -298,7 +300,7 @@ if __name__ == "__main__":
         image_list, qa, args.req_nums, args.multi_turn, response_lens, image_nums
     )
 
-    model = OpenAIAPIBenchmark()
+    model = OpenAIAPIBenchmark(args.host, args.port)
 
     global_start = time.time()
 
