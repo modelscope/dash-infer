@@ -138,7 +138,7 @@ jobs:
             source /miniconda/etc/profile.d/conda.sh
         fi
 
-        git fetch --tags
+        git fetch --tags -f
         TAG_NAME=$(git describe --tags $(git rev-list --tags --max-count=1))
         VERSION_NUMBER=$(echo "$TAG_NAME" | sed 's/^v//')
 
