@@ -119,6 +119,9 @@ if (ENABLE_CUDA)
       file(GLOB_RECURSE CUDA_MOE_SRC cuda/moe/*.cu)
 
     list(APPEND KERNEL_SRC ${CUDA_COMMON_KERNEL_SRC} ${CUDA_XFORMER_SRC} ${CUDA_MOE_SRC})
+    if (ENABLE_R2SK_SAMPLING)
+        list(APPEND KERNEL_SRC cuda/topk_r2sk/r2sk.cu cuda/topk_r2sk/sampling.cu)
+    endif()
 endif()
 
 if (ENABLE_JSON_MODE)
@@ -137,6 +140,9 @@ message(STATUS "ALLSPARK_PUBLIC_DEFINITIONS:${ALLSPARK_PUBLIC_DEFINITIONS}")
 
 add_library(allspark_kernel STATIC ${KERNEL_SRC})
 set_target_properties(allspark_kernel PROPERTIES CXX_STANDARD ${CXX_STD})
+if (ENABLE_R2SK_SAMPLING)
+    target_compile_features(allspark_kernel PRIVATE cuda_std_17)
+endif()
 
 
 target_compile_definitions(

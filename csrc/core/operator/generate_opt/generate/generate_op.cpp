@@ -9,6 +9,8 @@
 #include <utility/datatype_dispatcher.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #ifdef ENABLE_CUDA
 #include <check_cuda.h>
@@ -137,6 +139,20 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
                               rank_info_.rank_id);
 
       const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
+#ifdef ENABLE_R2SK_SAMPLING
+      const char* enable_r2sk = std::getenv("AS_ENABLE_R2SK_SAMPLING");
+      if (dtype_ == DataType::BFLOAT16 && enable_r2sk &&
+          std::strcmp(enable_r2sk, "1") == 0) {
+        // The BF16 sampling experiment targets Ampere and newer devices.
+        int device = cuda_ctx->GetDeviceId();
+        int major = 0;
+        AS_CHECK_CUDA(cudaDeviceGetAttribute(
+            &major, cudaDevAttrComputeCapabilityMajor, device));
+        if (major >= 8) {
+          r2sk_sampling_ = std::make_shared<cuda::R2skSampling>(device);
+        }
+      }
+#endif
       rank_id_ = cuda_ctx->GetRank();
       nrank_ = cuda_ctx->GetNranks();
       break;
@@ -410,6 +426,20 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
           cuda::TopKRadixGetWorkspaceSize<T>(&topk_ws_bytes, max_batch,
                                              vocab_size_);
         });
+#ifdef ENABLE_R2SK_SAMPLING
+        if (r2sk_sampling_) {
+          try {
+            // The workspace tensor may move during SetShape below.
+            r2sk_sampling_->Wait();
+            const size_t r2sk_bytes =
+                r2sk_sampling_->ReserveBytes(max_batch, vocab_size_);
+            topk_ws_bytes = std::max(topk_ws_bytes, r2sk_bytes);
+          } catch (const std::exception& error) {
+            LOG(ERROR) << "R2S-K workspace planning failed: " << error.what();
+            return AsStatus::ALLSPARK_RUNTIME_ERROR;
+          }
+        }
+#endif
         if (topk_ws_bytes > std::numeric_limits<dim_t>::max()) {
           LOG(ERROR) << "radix top-k workspace size too large in "
                         "SampleOp::Reshape()";
@@ -587,13 +617,13 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
 
   // don't remove this sync, otherwise wrong token will generate.
   ctx_->Synchronize();
-  kernel_launcher(dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
-                  topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
-                  sample_states, batch_size_, max_k_, vocab_size_,
-                  static_cast<int*>(topk_list_->GetDataPtr()),
-                  static_cast<float*>(topp_list_->GetDataPtr()),
-                  static_cast<float*>(temperature_list_->GetDataPtr()), ctx_,
-                  runtime_ctx, ws_ptr, ws_bytes, device_prop_ptr);
+  AS_CHECK_STATUS(kernel_launcher(
+      dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_, topp_value_ptr_,
+      static_cast<int*>(topk_indice_ptr_), in_ptr, sample_states, batch_size_,
+      max_k_, vocab_size_, static_cast<int*>(topk_list_->GetDataPtr()),
+      static_cast<float*>(topp_list_->GetDataPtr()),
+      static_cast<float*>(temperature_list_->GetDataPtr()), ctx_, runtime_ctx,
+      ws_ptr, ws_bytes, device_prop_ptr, r2sk_sampling_.get()));
 
   if (need_logprobs_) {
     logprobs_launcher(dtype_, in_ptr, static_cast<int64_t*>(out_ptr),

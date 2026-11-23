@@ -89,6 +89,7 @@ if [ "${with_platform,,}" == "cuda" ]; then
       -DNCCL_VERSION=${NCCL_VERSION} \
       -DCUDA_VERSION=${cuda_version} \
       -DCMAKE_CUDA_ARCHITECTURES="${cuda_sm}" \
+      -DENABLE_R2SK_SAMPLING="${AS_BUILD_R2SK_SAMPLING:-OFF}" \
       -DUSE_SYSTEM_NV_LIB=${system_nv_lib} \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
       -DENABLE_NV_STATIC_LIB=${cuda_static} \

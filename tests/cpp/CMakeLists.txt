@@ -117,3 +117,14 @@ add_test(NAME cpp_interface_test
 add_test(NAME cpp_operator_test
          COMMAND ${CMAKE_BINARY_DIR}/bin/cpp_operator_test)
 add_test(NAME cpp_model_test COMMAND ${CMAKE_BINARY_DIR}/bin/cpp_model_test)
+if (ENABLE_R2SK_SAMPLING)
+  add_executable(cpp_r2sk_sampling_test kernel/cuda_r2sk_sampling_test.cpp)
+  set_target_properties(cpp_r2sk_sampling_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  target_link_libraries(cpp_r2sk_sampling_test PRIVATE allspark_kernel
+    ${AS_CUDA_CUDART} ${AS_CUDA_CUBLAS} ${HIEDNN_LIBRARY}
+    CONAN_PKG::glog CONAN_PKG::protobuf)
+  add_dependencies(cpp_r2sk_sampling_test protobuf_target project_hiednn)
+  add_test(NAME cpp_r2sk_sampling_test COMMAND cpp_r2sk_sampling_test)
+  set_tests_properties(cpp_r2sk_sampling_test PROPERTIES SKIP_RETURN_CODE 77)
+endif()

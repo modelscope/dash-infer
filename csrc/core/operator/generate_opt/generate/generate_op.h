@@ -6,6 +6,10 @@
 #pragma once
 #include <core/operator/operator.h>
 namespace allspark {
+namespace cuda {
+class R2skSampling;
+}
+
 class GenerateOp : public AsOperator {
  public:
   explicit GenerateOp(const std::string& op_type = "")
@@ -39,6 +43,7 @@ class GenerateOp : public AsOperator {
   int eos_token_id_ = -1;
   int min_length_ = 10;
   bool need_logprobs_ = false;
+  std::shared_ptr<cuda::R2skSampling> r2sk_sampling_;
   /* deprecated basic params
   int k_=1;
   */
@@ -126,7 +131,8 @@ class GenerateOp : public AsOperator {
                               int length, int* k_arr, float* p_arr,
                               float* temperature_arr, const DeviceContext* ctx,
                               RuntimeContext* runtime_ctx, void* ws_ptr,
-                              size_t ws_bytes, void* device_prop) = nullptr;
+                              size_t ws_bytes, void* device_prop,
+                              cuda::R2skSampling* r2sk_sampling) = nullptr;
 
   void (*beam_init_launcher)(DataType dtype, void* beam_score,
                              void* hyps_beam_score, int64_t* hyps_beam_idx,
