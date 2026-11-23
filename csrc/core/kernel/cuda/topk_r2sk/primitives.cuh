@@ -20,17 +20,24 @@ template<class Value> __device__ FourValues load_four(const Value* input){
     }
 }
 
-template<int BINS,int THREADS,bool BATCHED=false,class Value=float>
+template<int BINS,int THREADS,bool BATCHED=false,class Value=float,bool GRAPH_BF16=false>
 __global__ void __launch_bounds__(THREADS) count_packed(ValueView<Value> src,uint32_t n,int pass,uint32_t* hist,const KernelJobT<Value>* jobs=nullptr,uint32_t* scale_unsafe=nullptr){
     if constexpr(BATCHED){auto job=jobs[blockIdx.y];src=job.src;n=job.n;pass=job.pass;hist=job.hist;scale_unsafe=job.scale_unsafe;}
+    if constexpr(GRAPH_BF16) {
+        if(uint64_t(blockIdx.x)*THREADS*4>=n)return;
+    }
     __shared__ uint32_t local[BINS];
     float reference=src.shift_reference && pass<3?*src.shift_reference:0.f;
     for(int j=threadIdx.x;j<BINS;j+=THREADS)local[j]=0;
     __syncthreads();
     bool shifted=src.shift_reference && pass<3;int unsafe=0;
     auto update=[&](float value){float key_value=shifted?shift_value(value,reference):value;
-        atomicAdd(local+digit(key_value,pass),1u);
-        if(scale_unsafe && (shifted ? !shift_reversible(value,key_value,reference) : !finite_key(value)))unsafe=1;};
+        uint32_t bin=digit(key_value,pass);
+        if constexpr(GRAPH_BF16 && BINS==16)bin>>=8;
+        atomicAdd(local+bin,1u);
+        if constexpr(GRAPH_BF16){
+            if(scale_unsafe && (float_bits(value)&0x7fffffffu)>0x7f800000u)unsafe=1;
+        }else if(scale_unsafe && (shifted ? !shift_reversible(value,key_value,reference) : !finite_key(value)))unsafe=1;};
     auto plan=value_pack_plan<Value>(reinterpret_cast<uintptr_t>(src.v),n);
     const Value* input=src.v+plan.peel;
     for(uint64_t q=uint64_t(blockIdx.x)*THREADS+threadIdx.x;q<plan.packs;q+=uint64_t(gridDim.x)*THREADS){
@@ -126,12 +133,15 @@ struct GatherCache {
     }
 };
 
-template<bool INDEXED,bool FILTER,bool BUFFERED,bool BATCHED=false,class Value=float>
+template<bool INDEXED,bool FILTER,bool BUFFERED,bool BATCHED=false,class Value=float,bool GRAPH_BF16=false>
 __global__ void __launch_bounds__(BLOCK) gather_packed(ValueView<Value> src,uint32_t n,int pass,uint32_t boundary,
                              ValueBuffer<Value> G,uint32_t gcap,ValueBuffer<Value> E,uint32_t ecap,uint32_t* counters,const KernelJobT<Value>* jobs=nullptr){
     if constexpr(BATCHED){auto job=jobs[blockIdx.y];src=job.src;n=job.n;pass=job.pass;
         boundary=FILTER && job.pivot.v?ordered_key(job.pivot.v[0]):job.boundary;
         G=job.G;gcap=job.gcap;E=job.E;ecap=job.ecap;counters=job.counters;}
+    if constexpr(GRAPH_BF16) {
+        if(uint64_t(blockIdx.x)*BLOCK*4>=n)return;
+    }
     using Cache=GatherCache<INDEXED,FILTER,BUFFERED,Value>;
     uint32_t gslots=gcap<Cache::CAPACITY?gcap:Cache::CAPACITY;
     extern __shared__ uint32_t storage[];

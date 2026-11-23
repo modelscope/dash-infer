@@ -3,6 +3,7 @@
 // Kernels below are rewritten for single/batched rows, bounded dual destinations,
 // scalar/packed loads, reusable allocations, and optional carried indices.
 #include "r2sk/cuda.hpp"
+#include "r2sk/bfloat16_graph.hpp"
 #include "r2sk/primitive_plan.hpp"
 #include "r2sk/workspace_plan.hpp"
 #include <math_constants.h>
@@ -841,4 +842,6 @@ BatchStats topk_batch_bf16(const BFloat16* input,const uint32_t* lengths,uint32_
                          BFloat16* output,uint32_t* indices,BFloat16BatchWorkspace& workspace,Options options,cudaStream_t stream){
     return topk_batch_impl<BFloat16>(*workspace.impl_,input,lengths,batch,k,output,indices,options,stream);
 }
+#include "bfloat16_graph.cuh"
+
 } // namespace r2sk

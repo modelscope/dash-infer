@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/kernel/cuda/topk_r2sk/sampling.h>
+#include <core/kernel/cuda/topk_r2sk/r2sk/bfloat16_graph.hpp>
 #include <core/kernel/cuda/cuda_kernel.h>
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -237,6 +239,259 @@ void Replay(int device, cudaStream_t stream, const char* path, int batch,
   }
 }
 
+struct Event {
+  explicit Event(unsigned flags = cudaEventDisableTiming) {
+    Check(cudaEventCreateWithFlags(&value, flags));
+  }
+  ~Event() { cudaEventDestroy(value); }
+  cudaEvent_t value;
+};
+
+struct CapturedSelector {
+  ~CapturedSelector() {
+    if (exec) cudaGraphExecDestroy(exec);
+    if (graph) cudaGraphDestroy(graph);
+  }
+  void Finish(cudaStream_t stream) {
+    Check(cudaStreamEndCapture(stream, &graph));
+    Check(cudaGraphInstantiate(&exec, graph, 0));
+  }
+  cudaGraph_t graph = nullptr;
+  cudaGraphExec_t exec = nullptr;
+};
+
+bool IsNan(uint16_t value) { return (value & 0x7fffu) > 0x7f80u; }
+
+void CheckGraphOutput(const std::vector<uint16_t>& input,
+                      const std::vector<uint16_t>& values,
+                      const std::vector<uint32_t>& indices,
+                      r2sk::BFloat16GraphShape shape, size_t guard = 0) {
+  for (uint32_t row = 0; row < shape.batch; ++row) {
+    const auto begin = input.begin() + size_t(row) * shape.vocabulary;
+    const auto end = begin + shape.vocabulary;
+    if (std::any_of(begin, end, IsNan)) {
+      for (uint32_t j = 0; j < shape.k; ++j) {
+        const size_t pos = size_t(row) * shape.k + j + guard;
+        Require(values[pos] == 0xccccu && indices[pos] == 0xccccccccu,
+                "NaN row modified output");
+      }
+      continue;
+    }
+    std::vector<float> expected(shape.vocabulary);
+    std::transform(begin, end, expected.begin(), Decode);
+    std::partial_sort(expected.begin(), expected.begin() + shape.k,
+                      expected.end(), std::greater<float>{});
+    std::vector<bool> used(shape.vocabulary);
+    for (uint32_t j = 0; j < shape.k; ++j) {
+      const size_t pos = size_t(row) * shape.k + j + guard;
+      const uint32_t index = indices[pos];
+      Require(index < shape.vocabulary && !used[index], "invalid graph index");
+      used[index] = true;
+      Require(begin[index] == values[pos] && Decode(values[pos]) == expected[j],
+              "incorrect graph value or occurrence");
+    }
+  }
+}
+
+void TestGraph(cudaStream_t main) {
+  using r2sk::GraphRoute;
+  Stream winners;
+  Event ready, done;
+  const r2sk::BFloat16GraphFork fork{winners.value, ready.value, done.value};
+  for (const r2sk::BFloat16GraphShape shape : {
+           r2sk::BFloat16GraphShape{4, 2053, 20},
+           r2sk::BFloat16GraphShape{1, 2, 2},
+           r2sk::BFloat16GraphShape{3, 2099, 256},
+       }) {
+    const auto bytes = r2sk::bfloat16_graph_bytes(shape);
+    DeviceBuffer<unsigned char> scratch(bytes);
+    const size_t n = shape.vocabulary;
+    const size_t output_count = size_t(shape.batch) * shape.k;
+    std::vector<uint16_t> input(n * shape.batch), saved(input.size());
+    std::vector<uint16_t> out(output_count + 2);
+    std::vector<uint32_t> indices(output_count + 2);
+    std::vector<r2sk::BFloat16GraphRow> reports(shape.batch);
+    DeviceBuffer<uint16_t> logits(input.size()), values(out.size());
+    DeviceBuffer<uint32_t> ids(indices.size());
+    DeviceBuffer<r2sk::BFloat16GraphRow> device_reports(shape.batch);
+
+    for (auto resources : {fork, r2sk::BFloat16GraphFork{}}) {
+      static_assert(sizeof(uint16_t) == 2);
+      CapturedSelector captured;
+      Check(cudaStreamBeginCapture(main, cudaStreamCaptureModeGlobal));
+      r2sk::enqueue_bfloat16_graph(shape, logits.data, values.data + 1, ids.data + 1,
+          scratch.data, bytes, main, resources, device_reports.data);
+      // The output consumer may reuse the arena immediately after the join.
+      Check(cudaMemsetAsync(scratch.data, 0xa5, bytes, main));
+      captured.Finish(main);
+      for (uint32_t rep = 0; rep < 18; ++rep) {
+        for (uint32_t row = 0; row < shape.batch; ++row) {
+          auto* src = input.data() + row * n;
+          uint32_t pattern = (row + rep) % 6;
+          std::fill_n(src, n, uint16_t{0xbf80});
+          if (pattern == 0 || pattern == 1) {
+            const uint32_t high = std::min(shape.vocabulary,
+                shape.k + (pattern == 1 ? 9 : 0));
+            for (uint32_t j = 0; j < high; ++j) src[j] = 0x4000u + j % 16;
+          } else if (pattern == 2) {
+            for (size_t j = 0; j < n; ++j) src[j] = 0xbf8fu - j % 16;
+            for (size_t j = 0; j < std::min(n, size_t{5}); ++j) src[j] = 0x4000u + j;
+          } else if (pattern == 3) {
+            src[n - 1] = 0x7fc1u;
+          } else if (pattern == 4) {
+            for (size_t j = 0; j < n; ++j) src[j] = j % 2 ? 0x8000u : 0;
+          } else {
+            std::fill_n(src, n, uint16_t{0xff80});
+            if (rep % 2 == 1) src[n - 1] = 0x7f80u;
+          }
+        }
+        Check(cudaMemcpyAsync(logits.data, input.data(), input.size() * 2,
+                              cudaMemcpyHostToDevice, main));
+        Check(cudaMemsetAsync(values.data, 0xcc, out.size() * 2, main));
+        Check(cudaMemsetAsync(ids.data, 0xcc, indices.size() * 4, main));
+        Check(cudaGraphLaunch(captured.exec, main));
+        Check(cudaStreamSynchronize(main));
+        Check(cudaMemcpy(out.data(), values.data, out.size() * 2, cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(indices.data(), ids.data, indices.size() * 4, cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(saved.data(), logits.data, saved.size() * 2, cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(reports.data(), device_reports.data, reports.size() * sizeof(reports[0]),
+                         cudaMemcpyDeviceToHost));
+        Require(saved == input, "graph modified its input");
+        Require(out.front() == 0xcccc && out.back() == 0xcccc &&
+                    indices.front() == 0xcccccccc && indices.back() == 0xcccccccc,
+                "graph output overrun");
+        CheckGraphOutput(input, out, indices, shape, 1);
+        for (uint32_t row = 0; row < shape.batch; ++row) {
+          const auto pattern = (row + rep) % 6;
+          const auto& report = reports[row];
+          if (pattern == 0)
+            Require(report.route == GraphRoute::exact, "expected exact route");
+          if (pattern == 1 && n > 1024)
+            Require(report.route == GraphRoute::early_sort, "expected early sort");
+          if (pattern == 2 && n > 1024)
+            Require(report.route == GraphRoute::refine && report.first_winners == 5 &&
+                        report.passes == 2, "expected refine with independent winners");
+          if (pattern == 3)
+            Require(report.route == GraphRoute::invalid_nan, "expected NaN rejection");
+        }
+      }
+    }
+  }
+  std::cout << "PASS graph BF16: 108 captured replays, changed routes and logits, "
+               "both schedules, mixed rows, signed zeros, infinities, NaN, guards and arena reuse.\n";
+}
+
+void BenchGraph(int device, cudaStream_t stream, const std::string& input_source,
+                r2sk::BFloat16GraphShape shape) {
+  const size_t count = size_t(shape.batch) * shape.vocabulary;
+  const size_t kept = size_t(shape.batch) * shape.k;
+  std::vector<uint16_t> input(count), values(kept);
+  std::vector<uint32_t> indices(kept);
+  if (input_source == "gaussian") {
+    std::mt19937 rng(42);
+    std::normal_distribution<float> normal;
+    for (auto& w : input) {
+      float value = normal(rng);
+      uint32_t bits;
+      std::memcpy(&bits, &value, sizeof(bits));
+      w = static_cast<uint16_t>(bits >> 16);
+    }
+  } else {
+    std::ifstream file(input_source, std::ios::binary);
+    Require(static_cast<bool>(file.read(reinterpret_cast<char*>(input.data()), count * 2)) &&
+                file.peek() == std::ifstream::traits_type::eof(), "graph fixture size");
+  }
+
+  size_t radik_bytes = 0;
+  using Bf16 = hie::bfloat16;
+  allspark::cuda::TopKRadixGetWorkspaceSize<Bf16>(&radik_bytes, shape.batch, shape.vocabulary);
+  allspark::cuda::R2skSampling original(device);
+  const size_t original_bytes = original.ReserveBytes(shape.batch, shape.vocabulary);
+  const auto graph_bytes = r2sk::bfloat16_graph_bytes(shape);
+  const size_t bytes = std::max({radik_bytes, original_bytes, size_t(graph_bytes)});
+  DeviceBuffer<unsigned char> scratch(bytes);
+  DeviceBuffer<uint16_t> logits(count), out(kept);
+  DeviceBuffer<uint32_t> ids(kept);
+  Stream winners;
+  Event ready, done;
+  const r2sk::BFloat16GraphFork fork{winners.value, ready.value, done.value};
+  Check(cudaMemcpy(logits.data, input.data(), count * 2, cudaMemcpyHostToDevice));
+  auto enqueue = [&](r2sk::BFloat16GraphFork resources) {
+    r2sk::enqueue_bfloat16_graph(shape, logits.data, out.data, ids.data,
+        scratch.data, bytes, stream, resources);
+  };
+  CapturedSelector overlap, serial;
+  for (auto* captured : {&overlap, &serial}) {
+    Check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+    enqueue(captured == &overlap ? fork : r2sk::BFloat16GraphFork{});
+    captured->Finish(stream);
+  }
+  auto invoke = [&](int method) {
+    switch (method) {
+      case 0:
+        allspark::cuda::TopKRadixKernelLauncher(reinterpret_cast<Bf16*>(out.data),
+            reinterpret_cast<int*>(ids.data), reinterpret_cast<const Bf16*>(logits.data),
+            scratch.data, shape.batch, shape.vocabulary, shape.k, stream);
+        break;
+      case 1:
+        Require(original.Try(logits.data, out.data, reinterpret_cast<int*>(ids.data),
+            shape.batch, shape.vocabulary, shape.k, scratch.data, bytes, stream),
+            "original R2S-K declined benchmark");
+        break;
+      case 2:
+        enqueue(fork);
+        break;
+      case 3:
+        Check(cudaGraphLaunch(overlap.exec, stream));
+        break;
+      case 4:
+        Check(cudaGraphLaunch(serial.exec, stream));
+        break;
+    }
+  };
+  constexpr int methods = 5;
+  for (int method = 0; method < methods; ++method) {
+    Check(cudaMemsetAsync(ids.data, 0xff, kept * 4, stream));
+    invoke(method);
+    Check(cudaStreamSynchronize(stream));
+    Check(cudaMemcpy(values.data(), out.data, kept * 2, cudaMemcpyDeviceToHost));
+    Check(cudaMemcpy(indices.data(), ids.data, kept * 4, cudaMemcpyDeviceToHost));
+    CheckGraphOutput(input, values, indices, shape);
+  }
+  const char* names[methods] = {"radik_eager", "r2sk_pr_eager", "device_eager",
+                                "graph_overlap", "graph_serial"};
+  const size_t arena_bytes[methods] = {radik_bytes, original_bytes, size_t(graph_bytes),
+                                        size_t(graph_bytes), size_t(graph_bytes)};
+  for (int rep = 0; rep < 12; ++rep)
+    for (int method = 0; method < methods; ++method) {
+      invoke(method);
+      Check(cudaStreamSynchronize(stream));
+    }
+  Event start(cudaEventDefault), stop(cudaEventDefault);
+  std::cout << "rep,method,batch,n,k,scratch_bytes,host_us,event_us\n";
+  for (int rep = 0; rep < 51; ++rep) {
+    for (int position = 0; position < methods; ++position) {
+      const int method = (position + rep) % methods;
+      const auto tick = std::chrono::steady_clock::now();
+      invoke(method);
+      Check(cudaStreamSynchronize(stream));
+      const auto elapsed = std::chrono::steady_clock::now() - tick;
+      // Measure a second complete call for device timing so the host result
+      // excludes the event API cost and each arm has identical accounting.
+      Check(cudaEventRecord(start.value, stream));
+      invoke(method);
+      Check(cudaEventRecord(stop.value, stream));
+      Check(cudaEventSynchronize(stop.value));
+      float gpu_ms;
+      Check(cudaEventElapsedTime(&gpu_ms, start.value, stop.value));
+      std::cout << rep << ',' << names[method] << ',' << shape.batch << ','
+                << shape.vocabulary << ',' << shape.k << ',' << arena_bytes[method] << ','
+                << std::chrono::duration<double, std::micro>(elapsed).count() << ','
+                << gpu_ms * 1000 << '\n';
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -255,7 +510,18 @@ int main(int argc, char** argv) {
              std::stoi(argv[4]), std::stoi(argv[5]));
       return 0;
     }
-    Require(argc == 1, "usage: cpp_r2sk_sampling_test [--replay FILE B N K]");
+    if (argc == 2 && std::string(argv[1]) == "--graph-test") {
+      TestGraph(stream.value);
+      return 0;
+    }
+    if (argc == 6 && std::string(argv[1]) == "--graph-replay") {
+      BenchGraph(device, stream.value, argv[2],
+                 {static_cast<uint32_t>(std::stoul(argv[3])),
+                  static_cast<uint32_t>(std::stoul(argv[4])),
+                  static_cast<uint32_t>(std::stoul(argv[5]))});
+      return 0;
+    }
+    Require(argc == 1, "usage: cpp_r2sk_sampling_test [--graph-test | --graph-replay FILE B N K | --replay FILE B N K]");
     TestSampling(device, stream.value);
     std::cout << "R2S-K sampling tests passed\n";
   } catch (const std::exception& error) {
