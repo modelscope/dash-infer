@@ -64,17 +64,12 @@ jobs:
             fi
         fi
 
-    - name: Run R2S-K CUDA tests
+    - name: Verify R2S-K CUDA test binaries (compile only)
       if: matrix.enable_cuda == 1
       shell: bash
       run: |
-        source /root/.bashrc
-        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
-            source /miniconda/etc/profile.d/conda.sh
-        fi
-        source activate ds_py
-        ctest --test-dir build --no-tests=error --output-on-failure \
-          -R '^cpp_r2sk_(sampling|graph)_test$'
+        test -x build/bin/cpp_r2sk_sampling_test
+        test -x build/bin/cpp_r2sk_decode_graph_test
 
 
   build-wheels:

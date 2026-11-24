@@ -8,7 +8,8 @@
 
 namespace allspark::cuda {
 namespace {
-constexpr int kMaxRank = 256;
+// Keep the shared arena reservation used by the decode graph.
+constexpr int kArenaRankCapacity = 256;
 constexpr int kSortLimit = 1024;
 constexpr size_t kArenaAlignment = 256;
 }  // namespace
@@ -50,10 +51,10 @@ size_t R2skSampling::ReserveBytes(int max_batch, int vocabulary) {
     return 0;
   }
   if (state.batch == max_batch && state.vocabulary == vocabulary) {
-    state.rank_capacity = std::min(kMaxRank, vocabulary - 1);
+    state.rank_capacity = std::min(kArenaRankCapacity, vocabulary - 1);
     return state.bytes;
   }
-  const int rank = std::min(kMaxRank, vocabulary - 1);
+  const int rank = std::min(kArenaRankCapacity, vocabulary - 1);
   const auto bytes = r2sk::BFloat16BatchWorkspace::required_device_bytes(
       max_batch, vocabulary, rank, kSortLimit, true, true);
   Wait();
@@ -80,8 +81,9 @@ bool R2skSampling::Try(const void* logits, void* values, int* indices,
                        int batch, int vocabulary, int k, void* arena,
                        size_t arena_bytes, cudaStream_t stream) {
   auto& state = *state_;
+  // Use the small-rank regime that improved across the GB300 test cases.
   if (batch < 1 || batch > state.batch || vocabulary != state.vocabulary ||
-      k <= 1 || k > state.rank_capacity || !arena ||
+      k <= 1 || k > kMaxEagerRank || k > state.rank_capacity || !arena ||
       reinterpret_cast<uintptr_t>(arena) % kArenaAlignment != 0 ||
       arena_bytes < state.bytes) {
     return false;

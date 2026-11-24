@@ -2,7 +2,7 @@
 
 # R2S-K review validation on H100 and B200
 
-The tests used DashInfer commit `71592904387d42e792bd3dd296525cbb89f454b8`,
+The H100 model tests used DashInfer commit `71592904387d42e792bd3dd296525cbb89f454b8`,
 CUDA 12.4.1 targeting `sm_90a`, and one NVIDIA H100 80 GB HBM3. The model
 was Qwen2.5-1.5B-Instruct BF16 at revision
 `989aa7980e4cf806f80c7fef2b1adb7bc71aa306`. Each backend used the same DashInfer
@@ -55,27 +55,27 @@ possible. Quality equivalence remains unverified.
 
 ## Build and CI
 
-The CUDA package CI matrix enables `ENABLE_R2SK_SAMPLING` and invokes the
-selector and graph selector CTests. Both tests built in the full SM90a engine
-build. The CPU builder recorded both CTests as skipped because it had no GPU.
-The built binaries passed both tests on H100, and the integrated sampler
-matched native RadiK and sampling on the focused 18-call parity test.
-Device execution in GitHub Actions remains to be verified with a
-CUDA-visible runner.
+The CUDA package CI matrix enables `ENABLE_R2SK_SAMPLING` and verifies the
+selector and decode parity executables were built. This is compile-only
+coverage. The earlier CPU builder marked the selector CTests as skipped.
+The standalone selector, selector graph, and integrated sampler parity tests
+passed on Modal H100.
+
+The manually dispatched **R2S-K GPU correctness** workflow targets a
+self-hosted `gpu` runner with NVIDIA container support and an Ampere, Ada or
+Hopper GPU. It directly runs all three test entry points, so a skipped test
+fails the job. GPU execution in GitHub Actions remains unverified.
 
 The selector and graph sources passed the repository's clang-format rules.
 Clang's raw token streams matched before and after formatting for all 11
 changed sources. Prior HIE-DNN mixed-count initcheck findings remain open.
 
-## Reproduction
+## H100 model experiment artifacts
 
-The experiment ran from the `radik-design` workspace with the checked-out
-graph branch and cached public Qwen and GSM8K inputs.
-
-```sh
-git -C .cache/dash-infer-r2sk-graph diff --binary 06669fa 7159290 > .cache/dash-infer-r2sk-decode-source.patch
-modal run --detach modal_dash_decode_graph.py --arch 90a --source-revision 7159290
-```
+The historical full-model experiment used a separate `radik-design` runner
+and cached public Qwen and GSM8K inputs. Its exact prompt set, runner and
+raw artifacts are outside this checkout. The [selector reproduction](r2sk_sampling.md#validate-and-replay)
+uses generated inputs and runs from this repository.
 
 The [Modal run](https://modal.com/apps/siraajr/main/ap-RQTqTAc3MEhBQQP9pP9xla)
 saved build logs, all 120 timing samples, and all 1,200 scored responses under
@@ -100,9 +100,18 @@ completion. Graph instantiation is outside the timed region.
 | 16 | 93.605 | 97.485 | 48.158 | 43.569 |
 | 64 | 122.300 | 150.834 | 86.600 | 82.565 |
 
-The original eager path regressed by 4.1% at batch 16 and 23.3% at batch
-64. The device-controlled eager path reduced latency relative to RadiK by
-56.6%, 48.6%, and 29.2% at batches 1, 16, and 64. Its sample IQR was fully
-below RadiK's at each batch, and it used about 24% less selector scratch.
-These measurements reproduce the large-k regression pattern and show its
-reversal on B200. The reviewer's GB300 workload remains to be retested.
+Before the dispatch cutoff, eager `R2skSampling::Try` was 4.1% slower than
+RadiK at batch 16 and 23.3% slower at batch 64 on this workload. Eager
+dispatch now caps the active batch's maximum rank at 50, where the reviewer's
+GB300 results favored R2S-K on all tested shapes. Higher ranks fall back to
+RadiK. The cutoff avoids the measured eager regression by dispatch policy.
+Device-controlled eager is a benchmark-only mode. It reduced latency
+relative to eager RadiK by 56.6%, 48.6%, and 29.2% at batches 1, 16, and
+64, respectively, with separated timing IQRs and about 24% less selector
+scratch.
+
+In the engine, the device controller is used only when the additional graph
+flag is enabled and the request meets the decode-only, single-GPU, native
+sampler and no-log-probability requirements. Eligible graph calls still
+support ranks through 256. The graph column compares R2S-K replay with eager
+RadiK. The reviewer's GB300 retest of the new dispatch remains outstanding.

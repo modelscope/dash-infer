@@ -12,6 +12,8 @@ namespace allspark::cuda {
 // Device storage is borrowed from the engine's top-k/top-p scratch arena.
 class R2skSampling {
  public:
+  static constexpr int kMaxEagerRank = 50;
+
   explicit R2skSampling(int device);
   ~R2skSampling();
 

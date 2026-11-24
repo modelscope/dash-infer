@@ -50,7 +50,7 @@ float Decode(uint16_t bf16) {
 void TestSampling(int device, cudaStream_t stream) {
   constexpr int n = 2053;  // Odd length exercises packed tails and row alignment.
   constexpr int max_batch = 3;
-  constexpr int max_k = 100;
+  constexpr int max_k = 256;
   std::vector<uint16_t> input(max_batch * n, 0x3f80);  // All-tied first row.
   for (int i = 0; i < n; ++i) {
     input[n + i] = static_cast<uint16_t>(0xbf80 + (i * 23) % 128);
@@ -73,7 +73,7 @@ void TestSampling(int device, cudaStream_t stream) {
                    cudaMemcpyHostToDevice));
 
   for (int batch : {3, 1, 2, 3}) {
-    for (int k : {2, 20, 100}) {
+    for (int k : {2, 20, 50}) {
       auto* scratch = k == 20 ? first.data : second.data;
       std::vector<uint16_t> selected(batch * k + 2);
       std::vector<int> ids(batch * k + 2);
@@ -115,29 +115,35 @@ void TestSampling(int device, cudaStream_t stream) {
                    cudaMemcpyDeviceToHost));
   Require(saved == input, "selection modified its input");
 
-  for (uint16_t nonfinite : {uint16_t{0xff80}, uint16_t{0x7f80}, uint16_t{0x7fc0}}) {
-    // Put the value in a different row and at the last element of a partial tile.
-    Check(cudaMemcpy(logits.data + input.size() - 1, &nonfinite, sizeof(nonfinite),
-                     cudaMemcpyHostToDevice));
-    Check(cudaMemsetAsync(values.data, 0xcc, 3 * 20 * sizeof(uint16_t), stream));
-    Check(cudaMemsetAsync(indices.data, 0xcc, 3 * 20 * sizeof(int), stream));
-    Require(!selector.Try(logits.data, values.data, indices.data, 3, n, 20,
-                          first.data, bytes, stream), "nonfinite input must fall back");
-    uint16_t untouched[60];
-    int untouched_ids[60];
-    Check(cudaMemcpyAsync(untouched, values.data, sizeof(untouched),
-                          cudaMemcpyDeviceToHost, stream));
-    Check(cudaMemcpyAsync(untouched_ids, indices.data, sizeof(untouched_ids),
-                          cudaMemcpyDeviceToHost, stream));
+  auto check_fallback = [&](int batch, int k, const char* message) {
+    const int count = batch * k;
+    std::vector<uint16_t> untouched(count);
+    std::vector<int> untouched_ids(count);
+    Check(cudaMemsetAsync(values.data, 0xcc, count * sizeof(uint16_t), stream));
+    Check(cudaMemsetAsync(indices.data, 0xcc, count * sizeof(int), stream));
+    Require(!selector.Try(logits.data, values.data, indices.data, batch, n, k,
+                          first.data, bytes, stream), message);
+    Check(cudaMemcpyAsync(untouched.data(), values.data,
+                          count * sizeof(uint16_t), cudaMemcpyDeviceToHost,
+                          stream));
+    Check(cudaMemcpyAsync(untouched_ids.data(), indices.data,
+                          count * sizeof(int), cudaMemcpyDeviceToHost, stream));
     Check(cudaStreamSynchronize(stream));
-    for (int j = 0; j < 60; ++j) {
+    for (int j = 0; j < count; ++j) {
       Require(untouched[j] == 0xcccc &&
                   static_cast<uint32_t>(untouched_ids[j]) == 0xcccccccc,
               "fallback changed the output");
     }
+  };
+  for (int k : {51, 256}) {
+    check_fallback(1, k, "rank above the eager cutoff must fall back");
   }
-  Require(!selector.Try(logits.data, values.data, indices.data, 1, n, 512,
-                        first.data, bytes, stream), "large k must fall back");
+  for (uint16_t nonfinite : {uint16_t{0xff80}, uint16_t{0x7f80}, uint16_t{0x7fc0}}) {
+    // Put the value in a different row and at the last element of a partial tile.
+    Check(cudaMemcpy(logits.data + input.size() - 1, &nonfinite, sizeof(nonfinite),
+                     cudaMemcpyHostToDevice));
+    check_fallback(3, 20, "nonfinite input must fall back");
+  }
   Require(!selector.Try(logits.data, values.data, indices.data, 1, n, 20,
                         first.data, bytes - 1, stream), "short arena must fall back");
   Check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
@@ -153,7 +159,8 @@ void TestSampling(int device, cudaStream_t stream) {
 // The input is dense little-endian BF16 words from a pre-top-k capture.
 void Replay(int device, cudaStream_t stream, const char* path, int batch,
             int n, int k) {
-  Require(batch >= 1 && batch <= 65535 && k > 1 && k <= 256 && k < n,
+  Require(batch >= 1 && batch <= 65535 && k > 1 &&
+              k <= allspark::cuda::R2skSampling::kMaxEagerRank && k < n,
           "unsupported replay shape");
   const size_t count = static_cast<size_t>(batch) * n;
   std::vector<uint16_t> input(count);
@@ -449,8 +456,12 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
         break;
     }
   };
-  constexpr int methods = 5;
-  for (int method = 0; method < methods; ++method) {
+  std::vector<int> methods{0, 2, 3, 4};
+  if (shape.k > 1 && shape.k <= allspark::cuda::R2skSampling::kMaxEagerRank &&
+      shape.k < shape.vocabulary) {
+    methods.insert(methods.begin() + 1, 1);
+  }
+  for (int method : methods) {
     Check(cudaMemsetAsync(ids.data, 0xff, kept * 4, stream));
     invoke(method);
     Check(cudaStreamSynchronize(stream));
@@ -458,20 +469,20 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
     Check(cudaMemcpy(indices.data(), ids.data, kept * 4, cudaMemcpyDeviceToHost));
     CheckGraphOutput(input, values, indices, shape);
   }
-  const char* names[methods] = {"radik_eager", "r2sk_pr_eager", "device_eager",
-                                "graph_overlap", "graph_serial"};
-  const size_t arena_bytes[methods] = {radik_bytes, original_bytes, size_t(graph_bytes),
-                                        size_t(graph_bytes), size_t(graph_bytes)};
+  const char* names[] = {"radik_eager", "r2sk_pr_eager", "device_eager",
+                         "graph_overlap", "graph_serial"};
+  const size_t arena_bytes[] = {radik_bytes, original_bytes, size_t(graph_bytes),
+                                 size_t(graph_bytes), size_t(graph_bytes)};
   for (int rep = 0; rep < 12; ++rep)
-    for (int method = 0; method < methods; ++method) {
+    for (int method : methods) {
       invoke(method);
       Check(cudaStreamSynchronize(stream));
     }
   Event start(cudaEventDefault), stop(cudaEventDefault);
   std::cout << "rep,method,batch,n,k,scratch_bytes,host_us,event_us\n";
   for (int rep = 0; rep < 51; ++rep) {
-    for (int position = 0; position < methods; ++position) {
-      const int method = (position + rep) % methods;
+    for (size_t position = 0; position < methods.size(); ++position) {
+      const int method = methods[(position + rep) % methods.size()];
       const auto tick = std::chrono::steady_clock::now();
       invoke(method);
       Check(cudaStreamSynchronize(stream));

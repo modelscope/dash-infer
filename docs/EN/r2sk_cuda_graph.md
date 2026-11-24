@@ -27,19 +27,23 @@ Callers omitting the report must ensure there are no NaNs.
 
 Set `AS_ENABLE_R2SK_SAMPLING=1` and `AS_ENABLE_R2SK_DECODE_GRAPH=1` on
 an R2S-K-enabled build. Eligible single-GPU BF16 decode steps using the
-native sampler capture the selector, sorted top-p/softmax, and token draw
-together. Prefill, log-probability requests, the Torch-compatible sampler,
-and unsupported ranks retain their existing dispatch. A GPU finite-input
-check uses the existing pre-sampling host synchronization and preserves
-the fallback for nonfinite logits.
+native sampler and `2 <= max_k <= 256` capture the selector, sorted
+top-p/softmax, and token draw together. Prefill, log-probability requests,
+the Torch-compatible sampler, and unsupported ranks retain existing dispatch.
+Before capture or replay, `Prepare()` checks the logits on the GPU and
+copies a nonfinite flag to the host. The existing pre-sampling host
+synchronization completes that readback.
 
 GenerateOp still updates the device logits, top-p parameters and RNG
 pointer table between launches. Cached graphs are keyed by the active
 shape and addresses. Each graph reads the current buffers on replay. The
-initial capture, request bookkeeping and generated-token copy stay outside
-the graph. This captures the decode sampling GPU stage within the engine.
-It is separate from whole-decode graph capture including the model forward
-pass and host scheduler.
+request bookkeeping and generated-token copy stay outside the graph. The
+integration owns this sampler graph. Both `Prepare()` and eager `Try()`
+decline when the caller is already capturing, so whole-decode capture cannot
+dispatch R2S-K through these entry points. The model forward pass and host
+scheduler also remain outside the sampler graph.
+HIE-DNN uses external CUDA event nodes for the prefix-sum workspace dependency
+so eager calls and graph replays can share the same handle.
 
 `AS_TRACE_R2SK_DECODE_GRAPH=1` reports graph creation and cache hits. The
 decode graph test compares the graph with the eager RadiK plus native
@@ -57,5 +61,7 @@ build/bin/cpp_r2sk_sampling_test --graph-replay /path/to/capture.bin 1 151936 20
 
 The test replays different data through one instantiated graph for each
 shape and schedule, including concurrent rows that finish on different
-passes. The benchmark compares RadiK eager, the PR selector eager, the
-device controller eager, and graph replay with and without winner overlap.
+passes. The benchmark compares eager RadiK, the device controller in a
+benchmark-only eager mode, and R2S-K graph replay with and without winner
+overlap. It includes the engine's eager R2S-K wrapper at eager-eligible
+ranks through 50. See the [results and limits](r2sk_review_validation.md).

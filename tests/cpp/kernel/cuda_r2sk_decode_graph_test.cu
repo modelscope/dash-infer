@@ -183,6 +183,14 @@ void Run(int device) {
 
 int main() {
   try {
+    int devices = 0;
+    const auto status = cudaGetDeviceCount(&devices);
+    if (status == cudaErrorNoDevice || status == cudaErrorInsufficientDriver ||
+        (status == cudaSuccess && devices == 0)) {
+      std::cout << "R2S-K decode graph tests require a visible CUDA device\n";
+      return 77;
+    }
+    Check(status);
     int device = 0, major = 0;
     Check(cudaGetDevice(&device));
     Check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device));
