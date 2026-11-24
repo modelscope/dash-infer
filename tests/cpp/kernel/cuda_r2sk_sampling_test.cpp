@@ -496,6 +496,14 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
 
 int main(int argc, char** argv) {
   try {
+    int devices = 0;
+    const auto status = cudaGetDeviceCount(&devices);
+    if (status == cudaErrorNoDevice || status == cudaErrorInsufficientDriver ||
+        (status == cudaSuccess && devices == 0)) {
+      std::cout << "R2S-K sampling tests require a visible CUDA device\n";
+      return 77;
+    }
+    Check(status);
     int device;
     Check(cudaGetDevice(&device));
     int major;

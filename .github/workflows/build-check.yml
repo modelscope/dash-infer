@@ -56,12 +56,25 @@ jobs:
             then
                 export AS_PLATFORM="cuda"
                 export AS_CUDA_SM="'70;75;80;86;89;90a'"
+                export AS_BUILD_R2SK_SAMPLING=ON
                 bash scripts/release/cpp_build_cuda.sh
             else
                 export AS_PLATFORM="x86"
                 bash build.sh
             fi
         fi
+
+    - name: Run R2S-K CUDA tests
+      if: matrix.enable_cuda == 1
+      shell: bash
+      run: |
+        source /root/.bashrc
+        if [ -f "/miniconda/etc/profile.d/conda.sh" ]; then
+            source /miniconda/etc/profile.d/conda.sh
+        fi
+        source activate ds_py
+        ctest --test-dir build --no-tests=error --output-on-failure \
+          -R '^cpp_r2sk_(sampling|graph)_test$'
 
 
   build-wheels:
