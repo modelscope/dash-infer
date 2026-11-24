@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 AND MIT
 // Histogram and staged compaction adapted from ideas in RadiK.
 // Copyright (c) 2023-present Alibaba Inc. MIT license: LICENSE.RadiK.
 // Kernels below are rewritten for single/batched rows, bounded dual

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # R2S-K review validation on H100 and B200
 
 The tests used DashInfer commit `71592904387d42e792bd3dd296525cbb89f454b8`,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 AND MIT
 // Optimized primitive paths adapted from the ideas in RadiK's countBinEx,
 // selectCandidateEx, selectBin and warpPrefixSum, pinned at
 // c934b15d45655bec1cf4fdc4fcb04ba4f31511cf.

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Experimental R2S-K token sampling
 
 R2S-K refines a radix boundary while saving confirmed winners. When the

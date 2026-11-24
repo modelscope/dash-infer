@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # BF16 R2S-K CUDA Graph experiment
 
 This branch adds a selector API for a fixed shape and stable device addresses.

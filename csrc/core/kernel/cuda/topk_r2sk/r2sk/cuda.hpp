@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <cuda_runtime.h>
 #include "core.hpp"
