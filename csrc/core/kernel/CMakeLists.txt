@@ -120,7 +120,8 @@ if (ENABLE_CUDA)
 
     list(APPEND KERNEL_SRC ${CUDA_COMMON_KERNEL_SRC} ${CUDA_XFORMER_SRC} ${CUDA_MOE_SRC})
     if (ENABLE_R2SK_SAMPLING)
-        list(APPEND KERNEL_SRC cuda/topk_r2sk/r2sk.cu cuda/topk_r2sk/sampling.cu)
+        list(APPEND KERNEL_SRC cuda/topk_r2sk/r2sk.cu cuda/topk_r2sk/sampling.cu
+            cuda/topk_r2sk/decode_graph.cu)
     endif()
 endif()
 

@@ -8,6 +8,7 @@
 namespace allspark {
 namespace cuda {
 class R2skSampling;
+class R2skDecodeGraph;
 }
 
 class GenerateOp : public AsOperator {
@@ -44,6 +45,7 @@ class GenerateOp : public AsOperator {
   int min_length_ = 10;
   bool need_logprobs_ = false;
   std::shared_ptr<cuda::R2skSampling> r2sk_sampling_;
+  std::shared_ptr<cuda::R2skDecodeGraph> r2sk_decode_graph_;
   /* deprecated basic params
   int k_=1;
   */

@@ -21,15 +21,34 @@ raw values and row-relative occurrence indices. NaN rows leave output
 untouched and expose an invalid flag through the optional device report.
 Callers omitting the report must ensure there are no NaNs.
 
-This API is experimental. Enabling the existing DashInfer feature still
-selects the PR's host-controlled backend. Capturing the full sampling call
-also requires resolving the synchronization in GenerateOp and defining
-how the engine handles invalid graph rows.
+## Experimental decode integration
+
+Set `AS_ENABLE_R2SK_SAMPLING=1` and `AS_ENABLE_R2SK_DECODE_GRAPH=1` on
+an R2S-K-enabled build. Eligible single-GPU BF16 decode steps using the
+native sampler capture the selector, sorted top-p/softmax, and token draw
+together. Prefill, log-probability requests, the Torch-compatible sampler,
+and unsupported ranks retain their existing dispatch. A GPU finite-input
+check uses the existing pre-sampling host synchronization and preserves
+the fallback for nonfinite logits.
+
+GenerateOp still updates the device logits, top-p parameters and RNG
+pointer table between launches. Cached graphs are keyed by the active
+shape and addresses. Each graph reads the current buffers on replay. The
+initial capture, request bookkeeping and generated-token copy stay outside
+the graph. This captures the decode sampling GPU stage within the engine.
+It is separate from whole-decode graph capture including the model forward
+pass and host scheduler.
+
+`AS_TRACE_R2SK_DECODE_GRAPH=1` reports graph creation and cache hits. The
+decode graph test compares the graph with the eager RadiK plus native
+sampling pipeline using matched RNG state and changing logits, temperatures
+and top-p cutoffs.
 
 With a build configured for CUDA and `ENABLE_R2SK_SAMPLING=ON`:
 
 ```sh
 ctest --test-dir build -R '^cpp_r2sk_graph_test$' --output-on-failure
+ctest --test-dir build -R '^cpp_r2sk_decode_graph_test$' --output-on-failure
 compute-sanitizer --tool memcheck --error-exitcode 1 build/bin/cpp_r2sk_sampling_test --graph-test
 build/bin/cpp_r2sk_sampling_test --graph-replay /path/to/capture.bin 1 151936 20
 ```
