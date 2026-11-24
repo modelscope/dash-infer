@@ -32,7 +32,8 @@ struct GraphStorage {
 
 struct GraphLayout {
   detail::ArenaRegion first, last, decisions, histogram, counters;
-  detail::ArenaRegion first_sort, last_sort, candidate_values, candidate_indices;
+  detail::ArenaRegion first_sort, last_sort, candidate_values,
+      candidate_indices;
   detail::ArenaRegion potential_values, potential_indices;
   uint64_t bytes;
 };
@@ -41,7 +42,8 @@ GraphLayout graph_layout(BFloat16GraphShape s) {
   if (!s.batch || s.batch > 65535 || s.vocabulary < 2 ||
       s.vocabulary > 0x7fffffffu || !s.k || s.k > 256 || s.k > s.vocabulary ||
       s.sort_limit < s.k || s.sort_limit > kGraphMaxSort ||
-      (s.sort_limit & (s.sort_limit - 1)) || !s.block_cap || s.block_cap > 65535) {
+      (s.sort_limit & (s.sort_limit - 1)) || !s.block_cap ||
+      s.block_cap > 65535) {
     throw std::invalid_argument("invalid BF16 graph shape or launch limits");
   }
 
@@ -65,7 +67,8 @@ GraphLayout graph_layout(BFloat16GraphShape s) {
 
 template <class T>
 T* graph_region(void* arena, detail::ArenaRegion region) {
-  return reinterpret_cast<T*>(static_cast<unsigned char*>(arena) + region.offset);
+  return reinterpret_cast<T*>(static_cast<unsigned char*>(arena) +
+                              region.offset);
 }
 
 __device__ GraphBuffer row_buffer(GraphBuffer buffer, uint64_t offset) {
@@ -87,8 +90,9 @@ __global__ void init_graph_jobs(BFloat16GraphShape shape, const BFloat16* input,
   storage.first[row] = first;
 }
 
-__global__ void plan_graph_partition(BFloat16GraphShape shape, GraphStorage storage,
-                                      GraphBuffer output, BFloat16GraphRow* rows) {
+__global__ void plan_graph_partition(BFloat16GraphShape shape,
+                                     GraphStorage storage, GraphBuffer output,
+                                     BFloat16GraphRow* rows) {
   const uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= shape.batch) return;
   GraphJob first = storage.first[row];
@@ -101,7 +105,8 @@ __global__ void plan_graph_partition(BFloat16GraphShape shape, GraphStorage stor
     first.n = 0;
   } else {
     const auto destination = row_buffer(output, uint64_t(row) * shape.k);
-    const auto potential = row_buffer(storage.potential, uint64_t(row) * shape.sort_limit);
+    const auto potential =
+        row_buffer(storage.potential, uint64_t(row) * shape.sort_limit);
     const uint32_t retained = decision.h + decision.B;
     first.boundary = static_cast<uint32_t>(decision.bin);
     first.gcap = decision.h;
@@ -113,7 +118,8 @@ __global__ void plan_graph_partition(BFloat16GraphShape shape, GraphStorage stor
       sort = {potential, destination, retained, shape.k};
     } else {
       route = GraphRoute::refine;
-      const auto candidate = row_buffer(storage.candidate, uint64_t(row) * shape.vocabulary);
+      const auto candidate =
+          row_buffer(storage.candidate, uint64_t(row) * shape.vocabulary);
       first.G = destination;
       first.E = candidate;
       sort = {destination, destination, decision.h, decision.h};
@@ -147,7 +153,8 @@ __global__ void plan_graph_partition(BFloat16GraphShape shape, GraphStorage stor
   }
 }
 
-__global__ void plan_graph_tail(BFloat16GraphShape shape, GraphStorage storage) {
+__global__ void plan_graph_tail(BFloat16GraphShape shape,
+                                GraphStorage storage) {
   const uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= shape.batch) return;
   GraphJob last = storage.last[row];
@@ -161,7 +168,8 @@ __global__ void plan_graph_tail(BFloat16GraphShape shape, GraphStorage storage) 
       if (above + ties >= last.rank) break;
       above += ties;
     }
-    const auto potential = row_buffer(storage.potential, uint64_t(row) * shape.sort_limit);
+    const auto potential =
+        row_buffer(storage.potential, uint64_t(row) * shape.sort_limit);
     sort = {potential, last.G, last.rank, last.rank};
     last.G = potential;
     last.E = row_buffer(potential, above);
@@ -238,8 +246,8 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
   const auto layout = graph_layout(shape);
   const auto address = reinterpret_cast<uintptr_t>(arena);
   if (!arena || address % detail::ArenaPlanner::alignment ||
-      bytes < layout.bytes || layout.bytes > UINTPTR_MAX - address ||
-      !input || !values || !indices) {
+      bytes < layout.bytes || layout.bytes > UINTPTR_MAX - address || !input ||
+      !values || !indices) {
     throw std::invalid_argument("invalid BF16 graph buffers");
   }
   if ((fork.stream && (!fork.ready || !fork.done || fork.ready == fork.done ||
@@ -260,10 +268,12 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
       {graph_region<BFloat16>(arena, layout.potential_values),
        graph_region<uint32_t>(arena, layout.potential_indices)},
   };
-  const uint32_t plan_blocks = (shape.batch + kGraphPlanThreads - 1) / kGraphPlanThreads;
+  const uint32_t plan_blocks =
+      (shape.batch + kGraphPlanThreads - 1) / kGraphPlanThreads;
   const uint32_t row_cap = std::max(1u, shape.block_cap / shape.batch);
   const auto grid = [&](int threads) {
-    return dim3(primitive_blocks(shape.vocabulary, row_cap, PrimitiveMode::radik, threads),
+    return dim3(primitive_blocks(shape.vocabulary, row_cap,
+                                 PrimitiveMode::radik, threads),
                 shape.batch);
   };
   const uint32_t gather_bytes = gather_shared_bytes(shape.k, true, true);
@@ -273,30 +283,33 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
   CK(cudaMemsetAsync(storage.histogram, 0, layout.histogram.bytes, stream));
   init_graph_jobs<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, static_cast<const BFloat16*>(input), storage);
-  count_packed<4096, 1024, true, BFloat16, true><<<grid(1024), 1024, 0, stream>>>(
-      {}, 0, 0, nullptr, storage.first);
-  select_bin_warp<4096, true, false, BFloat16><<<dim3(1, shape.batch), 1024, 0, stream>>>(
-      nullptr, 0, nullptr, storage.first);
+  count_packed<4096, 1024, true, BFloat16, true>
+      <<<grid(1024), 1024, 0, stream>>>({}, 0, 0, nullptr, storage.first);
+  select_bin_warp<4096, true, false, BFloat16>
+      <<<dim3(1, shape.batch), 1024, 0, stream>>>(nullptr, 0, nullptr,
+                                                  storage.first);
   plan_graph_partition<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, storage, output, rows);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>(
-          {}, 0, 0, 0, {}, 0, {}, 0, nullptr, storage.first);
+      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 0, 0, {}, 0, {}, 0,
+                                                     nullptr, storage.first);
 
   const auto sort_stream = fork.stream ? fork.stream : stream;
   if (fork.stream) {
     CK(cudaEventRecord(fork.ready, stream));
     CK(cudaStreamWaitEvent(fork.stream, fork.ready, 0));
   }
-  sort_graph_run<<<shape.batch, BLOCK, sort_bytes, sort_stream>>>(storage.first_sort);
+  sort_graph_run<<<shape.batch, BLOCK, sort_bytes, sort_stream>>>(
+      storage.first_sort);
   if (fork.stream) CK(cudaEventRecord(fork.done, fork.stream));
 
-  count_packed<16, BLOCK, true, BFloat16, true><<<grid(BLOCK), BLOCK, 0, stream>>>(
-      {}, 0, 1, nullptr, storage.last);
-  plan_graph_tail<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(shape, storage);
+  count_packed<16, BLOCK, true, BFloat16, true>
+      <<<grid(BLOCK), BLOCK, 0, stream>>>({}, 0, 1, nullptr, storage.last);
+  plan_graph_tail<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(shape,
+                                                                 storage);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>(
-          {}, 0, 1, 0, {}, 0, {}, 0, nullptr, storage.last);
+      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 1, 0, {}, 0, {}, 0,
+                                                     nullptr, storage.last);
   sort_graph_run<<<shape.batch, BLOCK, sort_bytes, stream>>>(storage.last_sort);
 
   // Pass-one sorts write a row's prefix. Final sorts write only its tail,

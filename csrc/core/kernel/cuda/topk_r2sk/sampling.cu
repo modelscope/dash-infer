@@ -19,8 +19,8 @@ struct R2skSampling::State {
   ~State() {
     if (!workspace && !completion) return;
     int previous = device;
-    const bool restore = cudaGetDevice(&previous) == cudaSuccess &&
-                         previous != device;
+    const bool restore =
+        cudaGetDevice(&previous) == cudaSuccess && previous != device;
     if (restore) cudaSetDevice(device);
     if (pending) cudaEventSynchronize(completion);
     workspace.reset();
@@ -71,7 +71,7 @@ void R2skSampling::Wait() {
   auto& state = *state_;
   if (state.pending) {
     r2sk::cuda_check(cudaEventSynchronize(state.completion),
-                    "wait for R2S-K scratch");
+                     "wait for R2S-K scratch");
     state.pending = false;
   }
 }
@@ -88,7 +88,7 @@ bool R2skSampling::Try(const void* logits, void* values, int* indices,
   }
   cudaStreamCaptureStatus capture;
   r2sk::cuda_check(cudaStreamIsCapturing(stream, &capture),
-                  "query R2S-K stream capture status");
+                   "query R2S-K stream capture status");
   if (capture != cudaStreamCaptureStatusNone) return false;
 
   // Pinned descriptors can only be reused after their asynchronous uploads
@@ -116,12 +116,12 @@ bool R2skSampling::Try(const void* logits, void* values, int* indices,
   static_assert(sizeof(int) == sizeof(uint32_t));
   try {
     r2sk::topk_batch_bf16(static_cast<const r2sk::BFloat16*>(logits),
-                         state.lengths.data(), batch, k,
-                         static_cast<r2sk::BFloat16*>(values),
-                         reinterpret_cast<uint32_t*>(indices),
-                         *state.workspace, options, stream);
+                          state.lengths.data(), batch, k,
+                          static_cast<r2sk::BFloat16*>(values),
+                          reinterpret_cast<uint32_t*>(indices),
+                          *state.workspace, options, stream);
     r2sk::cuda_check(cudaEventRecord(state.completion, stream),
-                    "record R2S-K completion");
+                     "record R2S-K completion");
     state.pending = true;
   } catch (const r2sk::NonFiniteInput&) {
     // The entry histogram is synchronized before reporting this condition.
