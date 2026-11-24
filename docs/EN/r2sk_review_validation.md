@@ -1,4 +1,4 @@
-# R2S-K review validation on H100
+# R2S-K review validation on H100 and B200
 
 The tests used DashInfer commit `71592904387d42e792bd3dd296525cbb89f454b8`,
 CUDA 12.4.1 targeting `sm_90a`, and one NVIDIA H100 80 GB HBM3. The model
@@ -57,9 +57,9 @@ The CUDA package CI matrix enables `ENABLE_R2SK_SAMPLING` and invokes the
 selector and graph selector CTests. Both tests built in the full SM90a engine
 build. The CPU builder recorded both CTests as skipped because it had no GPU.
 The built binaries passed both tests on H100, and the integrated sampler
-matched native RadiK and sampling on the focused 18-call parity test. The
-private repository has no self-hosted GitHub Actions runner. Device execution
-in Actions remains to be verified with a CUDA-visible runner.
+matched native RadiK and sampling on the focused 18-call parity test.
+Device execution in GitHub Actions remains to be verified with a
+CUDA-visible runner.
 
 The selector and graph sources passed the repository's clang-format rules.
 Clang's raw token streams matched before and after formatting for all 11
@@ -78,3 +78,29 @@ modal run --detach modal_dash_decode_graph.py --arch 90a --source-revision 71592
 The [Modal run](https://modal.com/apps/siraajr/main/ap-RQTqTAc3MEhBQQP9pP9xla)
 saved build logs, all 120 timing samples, and all 1,200 scored responses under
 `dash-decode-20261124T040747Z` in the `r2sk-results` volume.
+
+## Large-k selector validation on B200
+
+The standalone selector suite ran on one B200 with CUDA 13.1.115 targeting
+`sm_100`, from source revision `779a20e267ea9077d389d7939999448f20dcb5ce`.
+The standalone build omitted an unused NCCL include from the shared CUDA
+header. The selector and graph correctness tests completed, and each timed
+variant passed the CPU oracle for sorted BF16 scores and indices.
+
+Inputs were BF16 Gaussian logits generated with seed 42, vocabulary 151,936,
+and `k=256`. Results are complete-call host medians in microseconds, with
+51 repetitions per method after 12 warmups. Median timings include stream
+completion. Graph instantiation is outside the timed region.
+
+| Batch | Native RadiK | Original eager R2S-K | Device-controlled eager R2S-K | Graph R2S-K with overlap |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 86.357 | 65.821 | 37.507 | 32.473 |
+| 16 | 93.605 | 97.485 | 48.158 | 43.569 |
+| 64 | 122.300 | 150.834 | 86.600 | 82.565 |
+
+The original eager path regressed by 4.1% at batch 16 and 23.3% at batch
+64. The device-controlled eager path reduced latency relative to RadiK by
+56.6%, 48.6%, and 29.2% at batches 1, 16, and 64. Its sample IQR was fully
+below RadiK's at each batch, and it used about 24% less selector scratch.
+These measurements reproduce the large-k regression pattern and show its
+reversal on B200. The reviewer's GB300 workload remains to be retested.
