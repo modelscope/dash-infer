@@ -396,11 +396,10 @@ hiednnStatus_t TiledPrefixSum(
         }
 
         TilePrefixT *tilePrefix;
-        DeviceWsGuard wsGuard(handle);
-        wsGuard.GetWorkspace(&tilePrefix, tilePrefixSize * sizeof(TilePrefixT));
-        if (tilePrefix == nullptr) {
-            return HIEDNN_STATUS_INTERNAL_ERROR;
-        }
+        DeviceWsGuard wsGuard(handle, true);
+        auto status = wsGuard.GetWorkspace(&tilePrefix,
+                                           tilePrefixSize * sizeof(TilePrefixT));
+        if (status != HIEDNN_STATUS_SUCCESS) return status;
 
         TilePrefixInit<1, TILE_PREFIX_PADDING, TilePrefixT>(
             handle.stream, tilePrefix, tilePrefixSize);
@@ -429,11 +428,10 @@ hiednnStatus_t TiledPrefixSum(
         int64_t tilePrefixSize = tilePrefixSizeX * tilePrefixSizeY;
 
         TilePrefixT *tilePrefix;
-        DeviceWsGuard wsGuard(handle);
-        wsGuard.GetWorkspace(&tilePrefix, tilePrefixSize * sizeof(TilePrefixT));
-        if (tilePrefix == nullptr) {
-            return HIEDNN_STATUS_INTERNAL_ERROR;
-        }
+        DeviceWsGuard wsGuard(handle, true);
+        auto status = wsGuard.GetWorkspace(&tilePrefix,
+                                           tilePrefixSize * sizeof(TilePrefixT));
+        if (status != HIEDNN_STATUS_SUCCESS) return status;
 
         TilePrefixInit<2, TILE_PREFIX_PADDING, TilePrefixT>(
             handle.stream, tilePrefix, tilePrefixSizeX, m);

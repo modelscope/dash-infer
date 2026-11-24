@@ -89,6 +89,7 @@ void Run(int device) {
   size_t bytes = std::max({radik_bytes, topp_bytes, static_cast<size_t>(
       r2sk::bfloat16_graph_bytes({kBatch, kVocab, kRank}))});
   Arm eager(bytes), graph(bytes);
+  Buffer<uint16_t> alternate_tmp(kBatch * kRank);
   R2skDecodeGraph selector(device);
   for (auto* a : {&eager, &graph}) {
     for (int row = 0; row < kBatch; ++row) {
@@ -129,7 +130,9 @@ void Run(int device) {
       // Host arrays above may go out of scope after completion of these copies.
       Check(cudaStreamSynchronize(stream));
     }
-    Require(selector.Prepare({logits.data, graph.scores.data, graph.tmp.data,
+    // Switch buffers to capture a second graph after eager work used the handle.
+    auto* temp_probs = step % 2 ? alternate_tmp.data : graph.tmp.data;
+    Require(selector.Prepare({logits.data, graph.scores.data, temp_probs,
         graph.indices.data, graph.tokens.data, graph.rng.data, graph.counts.data,
         p.data, temperature.data, graph.scratch.data, bytes, bytes, handle.value,
         stream, kBatch, kVocab, kRank}), "valid graph shape failed preflight");
@@ -171,7 +174,7 @@ void Run(int device) {
             "graph and eager sampled tokens differ");
   }
   Require(graph_launches == 18, "unexpected replay count");
-  std::cout << "PASS decode sampling parity: 18 graph calls, changing logits, top-p, "
+  std::cout << "PASS decode sampling parity: 18 graph calls, two captured bindings, changing logits, top-p, "
                "temperatures and RNG pointers, exact probabilities and tokens, "
                "NaN and infinity fallback.\n";
 }
