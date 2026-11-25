@@ -53,7 +53,7 @@ GraphLayout graph_layout(BFloat16GraphShape s) {
       planner.add(batch, sizeof(GraphJob)),
       planner.add(batch, sizeof(GraphJob)),
       planner.add(batch, sizeof(Decision)),
-      planner.add(batch * kGraphHistogramStride, sizeof(uint32_t)),
+      planner.add(batch * kGraphHistogramStride + 1, sizeof(uint32_t)),
       planner.add(batch * 2, sizeof(uint32_t)),
       planner.add(batch, sizeof(GraphSort)),
       planner.add(batch, sizeof(GraphSort)),
@@ -233,29 +233,14 @@ __global__ void sort_graph_run(const GraphSort* jobs) {
   }
 }
 
-}  // namespace
-
-uint64_t bfloat16_graph_bytes(BFloat16GraphShape shape) {
-  return graph_layout(shape).bytes;
-}
-
-void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
-                            void* values, uint32_t* indices, void* arena,
-                            uint64_t bytes, cudaStream_t stream,
-                            BFloat16GraphFork fork, BFloat16GraphRow* rows) {
-  const auto layout = graph_layout(shape);
+GraphStorage bind_graph_storage(void* arena, uint64_t bytes,
+                                const GraphLayout& layout) {
   const auto address = reinterpret_cast<uintptr_t>(arena);
   if (!arena || address % detail::ArenaPlanner::alignment ||
-      bytes < layout.bytes || layout.bytes > UINTPTR_MAX - address || !input ||
-      !values || !indices) {
-    throw std::invalid_argument("invalid BF16 graph buffers");
+      bytes < layout.bytes || layout.bytes > UINTPTR_MAX - address) {
+    throw std::invalid_argument("invalid BF16 selection arena");
   }
-  if ((fork.stream && (!fork.ready || !fork.done || fork.ready == fork.done ||
-                       fork.stream == stream)) ||
-      (!fork.stream && (fork.ready || fork.done))) {
-    throw std::invalid_argument("invalid BF16 graph fork");
-  }
-  const GraphStorage storage{
+  return {
       graph_region<GraphJob>(arena, layout.first),
       graph_region<GraphJob>(arena, layout.last),
       graph_region<Decision>(arena, layout.decisions),
@@ -268,30 +253,70 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
       {graph_region<BFloat16>(arena, layout.potential_values),
        graph_region<uint32_t>(arena, layout.potential_indices)},
   };
+}
+
+dim3 graph_grid(BFloat16GraphShape shape, int threads) {
+  const uint32_t row_cap = std::max(1u, shape.block_cap / shape.batch);
+  return dim3(primitive_blocks(shape.vocabulary, row_cap, PrimitiveMode::radik,
+                               threads),
+              shape.batch);
+}
+}  // namespace
+
+uint64_t bfloat16_graph_bytes(BFloat16GraphShape shape) {
+  return graph_layout(shape).bytes;
+}
+
+void begin_bfloat16_selection(BFloat16GraphShape shape, const void* input,
+                              void* arena, uint64_t bytes, cudaStream_t stream,
+                              uint32_t* pinned_nonfinite) {
+  if (!input) throw std::invalid_argument("missing BF16 selection input");
+  const auto layout = graph_layout(shape);
+  const auto storage = bind_graph_storage(arena, bytes, layout);
   const uint32_t plan_blocks =
       (shape.batch + kGraphPlanThreads - 1) / kGraphPlanThreads;
-  const uint32_t row_cap = std::max(1u, shape.block_cap / shape.batch);
-  const auto grid = [&](int threads) {
-    return dim3(primitive_blocks(shape.vocabulary, row_cap,
-                                 PrimitiveMode::radik, threads),
-                shape.batch);
-  };
-  const uint32_t gather_bytes = gather_shared_bytes(shape.k, true, true);
-  const uint32_t sort_bytes = shape.sort_limit * 2 * sizeof(uint32_t);
-  const GraphBuffer output{static_cast<BFloat16*>(values), indices};
-
   CK(cudaMemsetAsync(storage.histogram, 0, layout.histogram.bytes, stream));
   init_graph_jobs<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, static_cast<const BFloat16*>(input), storage);
-  count_packed<4096, 1024, true, BFloat16, true>
-      <<<grid(1024), 1024, 0, stream>>>({}, 0, 0, nullptr, storage.first);
+  if (pinned_nonfinite) {
+    auto* flag = storage.histogram + uint64_t(shape.batch) * kGraphHistogramStride;
+    count_packed<4096, 1024, true, BFloat16, true, true>
+        <<<graph_grid(shape, 1024), 1024, 0, stream>>>(
+            {}, 0, 0, nullptr, storage.first, nullptr, flag);
+    CK(cudaMemcpyAsync(pinned_nonfinite, flag, sizeof(*flag),
+                       cudaMemcpyDeviceToHost, stream));
+  } else {
+    count_packed<4096, 1024, true, BFloat16, true>
+        <<<graph_grid(shape, 1024), 1024, 0, stream>>>(
+            {}, 0, 0, nullptr, storage.first);
+  }
+  CK(cudaGetLastError());
+}
+
+void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
+                                uint32_t* indices, void* arena, uint64_t bytes,
+                                cudaStream_t stream, BFloat16GraphFork fork,
+                                BFloat16GraphRow* rows) {
+  if (!values || !indices)
+    throw std::invalid_argument("missing BF16 selection output");
+  if ((fork.stream && (!fork.ready || !fork.done || fork.ready == fork.done ||
+                       fork.stream == stream)) ||
+      (!fork.stream && (fork.ready || fork.done))) {
+    throw std::invalid_argument("invalid BF16 selection fork");
+  }
+  const auto storage = bind_graph_storage(arena, bytes, graph_layout(shape));
+  const uint32_t plan_blocks =
+      (shape.batch + kGraphPlanThreads - 1) / kGraphPlanThreads;
+  const uint32_t gather_bytes = gather_shared_bytes(shape.k, true, true);
+  const uint32_t sort_bytes = shape.sort_limit * 2 * sizeof(uint32_t);
+  const GraphBuffer output{static_cast<BFloat16*>(values), indices};
   select_bin_warp<4096, true, false, BFloat16>
       <<<dim3(1, shape.batch), 1024, 0, stream>>>(nullptr, 0, nullptr,
                                                   storage.first);
   plan_graph_partition<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, storage, output, rows);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 0, 0, {}, 0, {}, 0,
+      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 0, 0, {}, 0, {}, 0,
                                                      nullptr, storage.first);
 
   const auto sort_stream = fork.stream ? fork.stream : stream;
@@ -304,11 +329,11 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
   if (fork.stream) CK(cudaEventRecord(fork.done, fork.stream));
 
   count_packed<16, BLOCK, true, BFloat16, true>
-      <<<grid(BLOCK), BLOCK, 0, stream>>>({}, 0, 1, nullptr, storage.last);
+      <<<graph_grid(shape, BLOCK), BLOCK, 0, stream>>>({}, 0, 1, nullptr, storage.last);
   plan_graph_tail<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(shape,
                                                                  storage);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<grid(BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 1, 0, {}, 0, {}, 0,
+      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 1, 0, {}, 0, {}, 0,
                                                      nullptr, storage.last);
   sort_graph_run<<<shape.batch, BLOCK, sort_bytes, stream>>>(storage.last_sort);
 
@@ -316,4 +341,13 @@ void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
   // and rows that ended early never touch their potential buffer again.
   if (fork.stream) CK(cudaStreamWaitEvent(stream, fork.done, 0));
   CK(cudaGetLastError());
+}
+
+void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
+                           void* values, uint32_t* indices, void* arena,
+                           uint64_t bytes, cudaStream_t stream,
+                           BFloat16GraphFork fork, BFloat16GraphRow* rows) {
+  begin_bfloat16_selection(shape, input, arena, bytes, stream);
+  finish_bfloat16_selection(shape, values, indices, arena, bytes, stream, fork,
+                            rows);
 }

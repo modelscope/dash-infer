@@ -125,7 +125,7 @@ AsStatus gen_sample_cpu(DataType dtype, int64_t* total_out_tokens,
                         float* p_arr_list, float* temperature_arr_unused,
                         const DeviceContext* ctx, RuntimeContext* runtime_ctx,
                         void* ws_ptr, size_t ws_bytes, void* device_prop,
-                        cuda::R2skSampling*) {
+                        bool) {
   constexpr int batch_size = 1;
   for (int i = 0; i < total_batch_size; i++) {
     GenerateContext* gen_ctx;

@@ -15,10 +15,6 @@
 #include <limits>
 #include <random>
 
-#ifdef ENABLE_R2SK_SAMPLING
-#include <core/kernel/cuda/topk_r2sk/sampling.h>
-#endif
-
 #include "float16.h"
 #include "generate_op.h"  // NOLINT
 namespace allspark {
@@ -124,7 +120,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
                         float* temperature_arr, const DeviceContext* ctx,
                         RuntimeContext* runtime_ctx, void* ws_ptr,
                         size_t ws_bytes, void* device_prop,
-                        cuda::R2skSampling* r2sk_sampling) {
+                        bool topk_preselected) {
   if (max_k > length) {
     LOG(ERROR) << "Top-k: max_k should not exceed length" << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
@@ -167,28 +163,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
       bool topp_input_is_sorted = false;
       if (max_k != length) {
 #ifdef CONFIG_ENABLE_RADIX_TOPK
-        bool selected = false;
-#ifdef ENABLE_R2SK_SAMPLING
-        static_assert(sizeof(hie::bfloat16) == sizeof(uint16_t));
-        if (r2sk_sampling && dtype == DataType::BFLOAT16) {
-          const auto scratch = reinterpret_cast<uintptr_t>(ws_ptr);
-          const auto output = reinterpret_cast<uintptr_t>(topk_value);
-          // ws_bytes also includes the output buffers. Pass only the prefix
-          // that GenerateOp reserved for top-k and top-p scratch.
-          if (output >= scratch && output - scratch <= ws_bytes) {
-            try {
-              selected = r2sk_sampling->Try(
-                  in_logits, topk_value, topk_indice, batch_size, length,
-                  max_k, ws_ptr, output - scratch, gpu_stream);
-            } catch (const std::exception& error) {
-              LOG(ERROR) << "R2S-K sampling failed: " << error.what();
-              status = AsStatus::ALLSPARK_RUNTIME_ERROR;
-              return;
-            }
-          }
-        }
-#endif
-        if (!selected) {
+        if (!topk_preselected) {
           cuda::TopKRadixKernelLauncher(typed_topk_value, topk_indice,
                                         typed_in_logits, ws_ptr, batch_size,
                                         length, max_k, gpu_stream);

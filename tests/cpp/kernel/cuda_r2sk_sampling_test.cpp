@@ -73,15 +73,18 @@ void TestSampling(int device, cudaStream_t stream) {
                    cudaMemcpyHostToDevice));
 
   for (int batch : {3, 1, 2, 3}) {
-    for (int k : {2, 20, 50}) {
+    for (int k : {2, 20, 50, 51, 256}) {
       auto* scratch = k == 20 ? first.data : second.data;
       std::vector<uint16_t> selected(batch * k + 2);
       std::vector<int> ids(batch * k + 2);
       Check(cudaMemsetAsync(values.data, 0xcc, selected.size() * sizeof(uint16_t), stream));
       Check(cudaMemsetAsync(indices.data, 0xcc, ids.size() * sizeof(int), stream));
-      Require(selector.Try(logits.data, values.data + 1, indices.data + 1,
-                           batch, n, k, scratch, bytes, stream),
-              "BF16 selection fell back unexpectedly");
+      Require(selector.Prepare(logits.data, values.data + 1, indices.data + 1,
+                               batch, n, k, scratch, bytes, stream),
+              "BF16 preparation fell back unexpectedly");
+      Check(cudaStreamSynchronize(stream));
+      Require(selector.FinishPrepared(), "finite BF16 selection fell back");
+      Require(!selector.FinishPrepared(), "preparation was consumed twice");
       // The real top-p stage also reuses this storage on the caller stream.
       Check(cudaMemsetAsync(scratch, 0xa5, bytes, stream));
       Check(cudaMemcpyAsync(selected.data(), values.data,
@@ -135,7 +138,7 @@ void TestSampling(int device, cudaStream_t stream) {
               "fallback changed the output");
     }
   };
-  for (int k : {51, 256}) {
+  for (int k : {257, 512}) {
     check_fallback(1, k, "rank above the eager cutoff must fall back");
   }
   for (uint16_t nonfinite : {uint16_t{0xff80}, uint16_t{0x7f80}, uint16_t{0x7fc0}}) {
@@ -394,11 +397,12 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
   const size_t kept = size_t(shape.batch) * shape.k;
   std::vector<uint16_t> input(count), values(kept);
   std::vector<uint32_t> indices(kept);
-  if (input_source == "gaussian") {
+  if (input_source == "gaussian" || input_source == "uniform") {
     std::mt19937 rng(42);
     std::normal_distribution<float> normal;
+    std::uniform_real_distribution<float> uniform;
     for (auto& w : input) {
-      float value = normal(rng);
+      float value = input_source == "gaussian" ? normal(rng) : uniform(rng);
       uint32_t bits;
       std::memcpy(&bits, &value, sizeof(bits));
       w = static_cast<uint16_t>(bits >> 16);
@@ -412,10 +416,10 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
   size_t radik_bytes = 0;
   using Bf16 = hie::bfloat16;
   allspark::cuda::TopKRadixGetWorkspaceSize<Bf16>(&radik_bytes, shape.batch, shape.vocabulary);
-  allspark::cuda::R2skSampling original(device);
-  const size_t original_bytes = original.ReserveBytes(shape.batch, shape.vocabulary);
+  allspark::cuda::R2skSampling eager(device);
+  const size_t eager_bytes = eager.ReserveBytes(shape.batch, shape.vocabulary);
   const auto graph_bytes = r2sk::bfloat16_graph_bytes(shape);
-  const size_t bytes = std::max({radik_bytes, original_bytes, size_t(graph_bytes)});
+  const size_t bytes = std::max({radik_bytes, eager_bytes, size_t(graph_bytes)});
   DeviceBuffer<unsigned char> scratch(bytes);
   DeviceBuffer<uint16_t> logits(count), out(kept);
   DeviceBuffer<uint32_t> ids(kept);
@@ -441,9 +445,9 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
             scratch.data, shape.batch, shape.vocabulary, shape.k, stream);
         break;
       case 1:
-        Require(original.Try(logits.data, out.data, reinterpret_cast<int*>(ids.data),
+        Require(eager.Try(logits.data, out.data, reinterpret_cast<int*>(ids.data),
             shape.batch, shape.vocabulary, shape.k, scratch.data, bytes, stream),
-            "original R2S-K declined benchmark");
+            "integrated eager R2S-K declined benchmark");
         break;
       case 2:
         enqueue(fork);
@@ -469,9 +473,9 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
     Check(cudaMemcpy(indices.data(), ids.data, kept * 4, cudaMemcpyDeviceToHost));
     CheckGraphOutput(input, values, indices, shape);
   }
-  const char* names[] = {"radik_eager", "r2sk_pr_eager", "device_eager",
+  const char* names[] = {"radik_eager", "r2sk_device_eager", "device_eager",
                          "graph_overlap", "graph_serial"};
-  const size_t arena_bytes[] = {radik_bytes, original_bytes, size_t(graph_bytes),
+  const size_t arena_bytes[] = {radik_bytes, eager_bytes, size_t(graph_bytes),
                                  size_t(graph_bytes), size_t(graph_bytes)};
   for (int rep = 0; rep < 12; ++rep)
     for (int method : methods) {

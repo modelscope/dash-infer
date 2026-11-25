@@ -61,7 +61,7 @@ build/bin/cpp_r2sk_sampling_test --graph-replay /path/to/capture.bin 1 151936 20
 
 The test replays different data through one instantiated graph for each
 shape and schedule, including concurrent rows that finish on different
-passes. The benchmark compares eager RadiK, the device controller in a
-benchmark-only eager mode, and R2S-K graph replay with and without winner
-overlap. It includes the engine's eager R2S-K wrapper at eager-eligible
-ranks through 50. See the [results and limits](r2sk_review_validation.md).
+passes. The benchmark compares eager RadiK, the engine's device-controlled
+eager wrapper, a bare device selector benchmark, and R2S-K graph replay
+with and without winner overlap. The engine's eager wrapper handles ranks
+through 256. See the [historical results and limits](r2sk_review_validation.md).

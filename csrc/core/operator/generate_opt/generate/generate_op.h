@@ -134,7 +134,7 @@ class GenerateOp : public AsOperator {
                               float* temperature_arr, const DeviceContext* ctx,
                               RuntimeContext* runtime_ctx, void* ws_ptr,
                               size_t ws_bytes, void* device_prop,
-                              cuda::R2skSampling* r2sk_sampling) = nullptr;
+                              bool topk_preselected) = nullptr;
 
   void (*beam_init_launcher)(DataType dtype, void* beam_score,
                              void* hyps_beam_score, int64_t* hyps_beam_idx,

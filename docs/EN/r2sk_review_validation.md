@@ -81,7 +81,7 @@ The [Modal run](https://modal.com/apps/siraajr/main/ap-RQTqTAc3MEhBQQP9pP9xla)
 saved build logs, all 120 timing samples, and all 1,200 scored responses under
 `dash-decode-20261124T040747Z` in the `r2sk-results` volume.
 
-## Large-k selector validation on B200
+## Historical large-k selector validation on B200
 
 The standalone selector suite ran on one B200 with CUDA 13.1.115 targeting
 `sm_100`, from source revision `779a20e267ea9077d389d7939999448f20dcb5ce`.
@@ -101,17 +101,14 @@ completion. Graph instantiation is outside the timed region.
 | 64 | 122.300 | 150.834 | 86.600 | 82.565 |
 
 Before the dispatch cutoff, eager `R2skSampling::Try` was 4.1% slower than
-RadiK at batch 16 and 23.3% slower at batch 64 on this workload. Eager
-dispatch now caps the active batch's maximum rank at 50, where the reviewer's
-GB300 results favored R2S-K on all tested shapes. Higher ranks fall back to
-RadiK. The cutoff avoids the measured eager regression by dispatch policy.
-Device-controlled eager is a benchmark-only mode. It reduced latency
+RadiK at batch 16 and 23.3% slower at batch 64 on this workload. Commit
+`a4cd8ce` capped the old eager path at 50 to avoid that regression.
+The device-controlled eager column measured the bare selector. It reduced latency
 relative to eager RadiK by 56.6%, 48.6%, and 29.2% at batches 1, 16, and
 64, respectively, with separated timing IQRs and about 24% less selector
 scratch.
 
-In the engine, the device controller is used only when the additional graph
-flag is enabled and the request meets the decode-only, single-GPU, native
-sampler and no-log-probability requirements. Eligible graph calls still
-support ranks through 256. The graph column compares R2S-K replay with eager
-RadiK. The reviewer's GB300 retest of the new dispatch remains outstanding.
+The graph column compares R2S-K replay with eager RadiK. The newer eager
+engine wrapper reuses this device controller and includes a finite-input
+check in its first histogram. The B200 numbers above predate that wrapper.
+The reviewer's GB300 retest remains outstanding.

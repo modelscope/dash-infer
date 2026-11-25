@@ -22,20 +22,21 @@ AS_BUILD_R2SK_SAMPLING=ON AS_CUDA_VERSION=12.4 AS_CUDA_SM=89 bash build.sh
 Set `AS_ENABLE_R2SK_SAMPLING=1` before starting the source-built engine and
 loading a BF16 model. Leave it unset for the RadiK default in the same build.
 The eager backend applies to token sampling with compute capability 8.0 or
-newer, finite BF16 logits, and `2 <= max_k <= 50` where `max_k < vocabulary`.
-The cutoff applies to the largest requested k in the active batch. The
-existing launcher uses RadiK when eager R2S-K declines the call. The
-[review validation](r2sk_review_validation.md#large-k-selector-validation-on-b200)
-records the earlier eager regressions at `k=256` and the basis for the cutoff.
+newer, finite BF16 logits, and `2 <= max_k <= 256` where
+`max_k < vocabulary`. The bound applies to the largest requested k in
+the active batch. The existing launcher uses RadiK when eager R2S-K
+declines the call.
 The first histogram checks for NaN and infinities and sends that batch to
 RadiK before writing any R2S-K output. Greedy, full-vocabulary and non-BF16
 requests retain the existing dispatch.
 
-The operator reserves scratch for its configured maximum batch and the
-bounded rank range. It borrows the arena used by top-k and top-p. Per-operator
-pinned descriptors, a second CUDA stream and events are allocated on first
-use. The caller stream waits for the winner stream before subsequent work
-reuses scratch. The eager path retains host decisions between radix passes.
+The operator borrows the shared top-k/top-p arena and reserves space for
+its configured maximum batch. The eager path runs the BF16 selector's two
+radix passes with per-row device decisions. Its first histogram checks
+input finiteness, and the flag is read during the engine's existing
+pre-sampling synchronization. A nonfinite flag leaves the output untouched
+for RadiK fallback. A pinned flag, winner stream and events are allocated
+on first use. The caller stream joins the winner stream before reusing scratch.
 
 Set `AS_ENABLE_R2SK_DECODE_GRAPH=1` in addition to the build and runtime
 opt-ins to enable the [experimental sampler graph](r2sk_cuda_graph.md).
@@ -70,10 +71,11 @@ bash scripts/bench_r2sk_selector.sh 100 results-b200
 
 The harness generates BF16 Gaussian logits with seed 42 for `k=256` and
 batches 1, 16 and 64. It checks eager dispatch and selector graph replay,
-then saves raw timing CSVs for eager RadiK, the benchmark-only device
-controller, and graph replay with and without overlap. The earlier eager
-R2S-K arm requires a pre-cutoff checkout. This benchmark runs without model
-downloads, external fixtures or a Modal account.
+then saves raw timing CSVs for eager RadiK, integrated eager R2S-K, the
+bare device selector, and graph replay with and without overlap. The
+earlier host-controlled eager arm is recorded in the historical results.
+This benchmark runs without model downloads, external fixtures or a Modal
+account.
 
 The same test binary can replay captured pre-top-k logits for eager-eligible
 shapes as a dense, little-endian `[batch,vocabulary]` array of BF16 words.

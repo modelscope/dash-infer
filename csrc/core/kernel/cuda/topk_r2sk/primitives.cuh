@@ -30,11 +30,12 @@ __device__ FourValues load_four(const Value* input) {
 }
 
 template <int BINS, int THREADS, bool BATCHED = false, class Value = float,
-          bool GRAPH_BF16 = false>
+          bool GRAPH_BF16 = false, bool CHECK_NONFINITE = false>
 __global__ void __launch_bounds__(THREADS)
     count_packed(ValueView<Value> src, uint32_t n, int pass, uint32_t* hist,
                  const KernelJobT<Value>* jobs = nullptr,
-                 uint32_t* scale_unsafe = nullptr) {
+                 uint32_t* scale_unsafe = nullptr,
+                 uint32_t* batch_nonfinite = nullptr) {
   if constexpr (BATCHED) {
     auto job = jobs[blockIdx.y];
     src = job.src;
@@ -59,7 +60,8 @@ __global__ void __launch_bounds__(THREADS)
     if constexpr (GRAPH_BF16 && BINS == 16) bin >>= 8;
     atomicAdd(local + bin, 1u);
     if constexpr (GRAPH_BF16) {
-      if (scale_unsafe && (float_bits(value) & 0x7fffffffu) > 0x7f800000u)
+      constexpr uint32_t max_valid = CHECK_NONFINITE ? 0x7f7fffffu : 0x7f800000u;
+      if (scale_unsafe && (float_bits(value) & 0x7fffffffu) > max_valid)
         unsafe = 1;
     } else if (scale_unsafe &&
                (shifted ? !shift_reversible(value, key_value, reference)
@@ -82,7 +84,10 @@ __global__ void __launch_bounds__(THREADS)
   }
   if (scale_unsafe) {
     int bad = __syncthreads_or(unsafe);
-    if (threadIdx.x == 0 && bad) atomicOr(scale_unsafe, 1u);
+    if (threadIdx.x == 0 && bad) {
+      atomicOr(scale_unsafe, 1u);
+      if constexpr (CHECK_NONFINITE) atomicOr(batch_nonfinite, 1u);
+    }
   } else
     __syncthreads();
   for (int j = threadIdx.x; j < BINS; j += THREADS)

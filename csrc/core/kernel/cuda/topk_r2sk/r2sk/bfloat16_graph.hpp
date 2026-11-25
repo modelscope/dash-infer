@@ -34,6 +34,20 @@ struct BFloat16GraphFork {
 
 uint64_t bfloat16_graph_bytes(BFloat16GraphShape shape);
 
+// Start a selection and optionally copy the batch-wide nonfinite flag into
+// pinned host memory. With that option, synchronize the stream and decline
+// on a nonzero flag before finishing. The same arena, shape and stream must
+// be used for both calls.
+void begin_bfloat16_selection(BFloat16GraphShape shape, const void* input,
+                              void* arena, uint64_t arena_bytes,
+                              cudaStream_t stream,
+                              uint32_t* pinned_nonfinite = nullptr);
+void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
+                                uint32_t* indices, void* arena,
+                                uint64_t arena_bytes, cudaStream_t stream,
+                                BFloat16GraphFork fork = {},
+                                BFloat16GraphRow* rows = nullptr);
+
 // Dense BF16 [batch,vocabulary] in, descending BF16 [batch,k] and
 // row-relative indices out. Signed zeros compare as equal numerically.
 // Infinities are ordered numerically. NaN rows leave both outputs untouched

@@ -1,91 +1,123 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "sampling.h"
 
+#include <glog/logging.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+
+#include "r2sk/bfloat16_graph.hpp"
 #include "r2sk/cuda.hpp"
 
-#include <cstdint>
-#include <vector>
-
 namespace allspark::cuda {
-namespace {
-// Keep the shared arena reservation used by the decode graph.
-constexpr int kArenaRankCapacity = 256;
-constexpr int kSortLimit = 1024;
-constexpr size_t kArenaAlignment = 256;
-}  // namespace
 
 struct R2skSampling::State {
-  explicit State(int device) : device(device) {}
+  explicit State(int device_id)
+      : device(device_id), trace(std::getenv("AS_TRACE_R2SK_EAGER") != nullptr) {}
 
   ~State() {
-    if (!workspace && !completion) return;
+    if (!fork.stream && !complete && !nonfinite) return;
     int previous = device;
     const bool restore =
         cudaGetDevice(&previous) == cudaSuccess && previous != device;
     if (restore) cudaSetDevice(device);
-    if (pending) cudaEventSynchronize(completion);
-    workspace.reset();
-    if (completion) cudaEventDestroy(completion);
+    if (prepared.arena) cudaStreamSynchronize(prepared.stream);
+    if (pending) cudaEventSynchronize(complete);
+    if (complete) cudaEventDestroy(complete);
+    if (fork.ready) cudaEventDestroy(fork.ready);
+    if (fork.done) cudaEventDestroy(fork.done);
+    if (fork.stream) cudaStreamDestroy(fork.stream);
+    if (nonfinite) cudaFreeHost(nonfinite);
     if (restore) cudaSetDevice(previous);
   }
 
+  void Initialize() {
+    if (nonfinite) return;
+    if (!fork.stream)
+      r2sk::cuda_check(
+          cudaStreamCreateWithFlags(&fork.stream, cudaStreamNonBlocking),
+          "create eager R2S-K winner stream");
+    if (!fork.ready)
+      r2sk::cuda_check(
+          cudaEventCreateWithFlags(&fork.ready, cudaEventDisableTiming),
+          "create eager R2S-K ready event");
+    if (!fork.done)
+      r2sk::cuda_check(
+          cudaEventCreateWithFlags(&fork.done, cudaEventDisableTiming),
+          "create eager R2S-K join event");
+    if (!complete)
+      r2sk::cuda_check(
+          cudaEventCreateWithFlags(&complete, cudaEventDisableTiming),
+          "create eager R2S-K completion event");
+    r2sk::cuda_check(
+        cudaMallocHost(reinterpret_cast<void**>(&nonfinite), sizeof(*nonfinite)),
+        "allocate eager R2S-K input status");
+  }
+
+  struct Selection {
+    r2sk::BFloat16GraphShape shape;
+    void* values;
+    int* indices;
+    void* arena;
+    size_t bytes;
+    cudaStream_t stream;
+  };
+
   int device;
+  bool trace;
   int batch = 0;
   int vocabulary = 0;
-  int rank_capacity = 0;
   size_t bytes = 0;
-  void* base = nullptr;
-  cudaEvent_t completion = nullptr;
+  uint32_t* nonfinite = nullptr;
+  r2sk::BFloat16GraphFork fork;
+  cudaEvent_t complete = nullptr;
+  cudaStream_t last_stream = nullptr;
   bool pending = false;
-  std::vector<uint32_t> lengths;
-  std::unique_ptr<r2sk::BFloat16BatchWorkspace> workspace;
+  Selection prepared{};
 };
 
-R2skSampling::R2skSampling(int device) : state_(new State(device)) {}
+R2skSampling::R2skSampling(int device) : state_(std::make_unique<State>(device)) {}
 R2skSampling::~R2skSampling() = default;
 
 size_t R2skSampling::ReserveBytes(int max_batch, int vocabulary) {
-  auto& state = *state_;
-  if (max_batch < 1 || max_batch > 65535 || vocabulary <= 2) {
-    state.rank_capacity = 0;
-    return 0;
+  auto& s = *state_;
+  if (s.batch != max_batch || s.vocabulary != vocabulary) {
+    Wait();
+    s.bytes = max_batch < 1 || max_batch > 65535 || vocabulary <= 2
+                  ? 0
+                  : r2sk::bfloat16_graph_bytes({
+                        static_cast<uint32_t>(max_batch),
+                        static_cast<uint32_t>(vocabulary),
+                        static_cast<uint32_t>(
+                            std::min(kMaxEagerRank, vocabulary - 1))});
+    s.batch = max_batch;
+    s.vocabulary = vocabulary;
   }
-  if (state.batch == max_batch && state.vocabulary == vocabulary) {
-    state.rank_capacity = std::min(kArenaRankCapacity, vocabulary - 1);
-    return state.bytes;
-  }
-  const int rank = std::min(kArenaRankCapacity, vocabulary - 1);
-  const auto bytes = r2sk::BFloat16BatchWorkspace::required_device_bytes(
-      max_batch, vocabulary, rank, kSortLimit, true, true);
-  Wait();
-  state.workspace.reset();
-  state.base = nullptr;
-  state.lengths.assign(max_batch, vocabulary);
-  state.batch = max_batch;
-  state.vocabulary = vocabulary;
-  state.rank_capacity = rank;
-  state.bytes = bytes;
-  return bytes;
+  return s.bytes;
 }
 
 void R2skSampling::Wait() {
-  auto& state = *state_;
-  if (state.pending) {
-    r2sk::cuda_check(cudaEventSynchronize(state.completion),
-                     "wait for R2S-K scratch");
-    state.pending = false;
+  auto& s = *state_;
+  if (s.prepared.arena) {
+    r2sk::cuda_check(cudaStreamSynchronize(s.prepared.stream),
+                     "wait for eager R2S-K preparation");
+    s.prepared = {};
+  }
+  if (s.pending) {
+    r2sk::cuda_check(cudaEventSynchronize(s.complete), "wait for R2S-K scratch");
+    s.pending = false;
   }
 }
 
-bool R2skSampling::Try(const void* logits, void* values, int* indices,
-                       int batch, int vocabulary, int k, void* arena,
-                       size_t arena_bytes, cudaStream_t stream) {
-  auto& state = *state_;
-  // Use the small-rank regime that improved across the GB300 test cases.
-  if (batch < 1 || batch > state.batch || vocabulary != state.vocabulary ||
-      k <= 1 || k > kMaxEagerRank || k > state.rank_capacity || !arena ||
-      reinterpret_cast<uintptr_t>(arena) % kArenaAlignment != 0 ||
-      arena_bytes < state.bytes) {
+bool R2skSampling::Prepare(const void* logits, void* values, int* indices,
+                           int batch, int vocabulary, int k, void* arena,
+                           size_t arena_bytes, cudaStream_t stream) {
+  auto& s = *state_;
+  if (!s.bytes || batch < 1 || batch > s.batch || vocabulary != s.vocabulary ||
+      k < 2 || k > kMaxEagerRank || k >= vocabulary || !logits || !values ||
+      !indices || !arena || reinterpret_cast<uintptr_t>(arena) % 256 ||
+      arena_bytes < s.bytes) {
     return false;
   }
   cudaStreamCaptureStatus capture;
@@ -93,49 +125,54 @@ bool R2skSampling::Try(const void* logits, void* values, int* indices,
                    "query R2S-K stream capture status");
   if (capture != cudaStreamCaptureStatusNone) return false;
 
-  // Pinned descriptors can only be reused after their asynchronous uploads
-  // complete. The prior completion event includes the winner-stream join.
-  Wait();
-  if (!state.completion) {
-    r2sk::cuda_check(
-        cudaEventCreateWithFlags(&state.completion, cudaEventDisableTiming),
-        "create R2S-K completion event");
-  }
-  if (!state.workspace) {
-    state.workspace = std::make_unique<r2sk::BFloat16BatchWorkspace>(
-        state.batch, vocabulary, state.rank_capacity, kSortLimit, true, true,
-        arena, arena_bytes);
-  } else if (state.base != arena) {
-    state.workspace->bind_device_storage(arena, arena_bytes);
-  }
-  state.base = arena;
+  if (s.prepared.arena || (s.pending && s.last_stream != stream)) Wait();
+  s.Initialize();
+  const r2sk::BFloat16GraphShape shape{
+      static_cast<uint32_t>(batch), static_cast<uint32_t>(vocabulary),
+      static_cast<uint32_t>(k)};
+  // Retain the preparation binding until the stream has completed its flag copy.
+  s.prepared = {shape, values, indices, arena, arena_bytes, stream};
+  r2sk::begin_bfloat16_selection(shape, logits, arena, arena_bytes, stream,
+                                 s.nonfinite);
+  return true;
+}
 
-  r2sk::Options options;
-  options.primitives = r2sk::PrimitiveMode::radik;
-  options.winner_sort = r2sk::WinnerSort::overlap;
-  options.entry_sort = false;
-  options.reject_nonfinite = true;
+bool R2skSampling::FinishPrepared() {
+  auto& s = *state_;
+  const auto a = s.prepared;
+  s.prepared = {};
+  if (!a.arena || *s.nonfinite) return false;
+
   static_assert(sizeof(int) == sizeof(uint32_t));
   try {
-    r2sk::topk_batch_bf16(static_cast<const r2sk::BFloat16*>(logits),
-                          state.lengths.data(), batch, k,
-                          static_cast<r2sk::BFloat16*>(values),
-                          reinterpret_cast<uint32_t*>(indices),
-                          *state.workspace, options, stream);
-    r2sk::cuda_check(cudaEventRecord(state.completion, stream),
-                     "record R2S-K completion");
-    state.pending = true;
-  } catch (const r2sk::NonFiniteInput&) {
-    // The entry histogram is synchronized before reporting this condition.
-    // No gather, output, or winner-stream work has been queued.
-    return false;
+    r2sk::finish_bfloat16_selection(a.shape, a.values,
+                                    reinterpret_cast<uint32_t*>(a.indices),
+                                    a.arena, a.bytes, a.stream, s.fork);
+    r2sk::cuda_check(cudaEventRecord(s.complete, a.stream),
+                     "record eager R2S-K completion");
+    s.last_stream = a.stream;
+    s.pending = true;
   } catch (...) {
-    // A launch failure may leave queued work on either stream. Drain it
-    // before allowing teardown or arena reuse on the error path.
+    // A launch failure may leave work on either stream.
     cudaDeviceSynchronize();
     throw;
   }
+  if (s.trace) {
+    LOG(INFO) << "R2SK_DEVICE_EAGER batch=" << a.shape.batch
+              << " k=" << a.shape.k;
+  }
   return true;
+}
+
+bool R2skSampling::Try(const void* logits, void* values, int* indices, int batch,
+                       int vocabulary, int k, void* arena, size_t arena_bytes,
+                       cudaStream_t stream) {
+  if (!Prepare(logits, values, indices, batch, vocabulary, k, arena, arena_bytes,
+               stream)) {
+    return false;
+  }
+  r2sk::cuda_check(cudaStreamSynchronize(stream), "read eager R2S-K input status");
+  return FinishPrepared();
 }
 
 }  // namespace allspark::cuda

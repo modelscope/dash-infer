@@ -7,6 +7,7 @@
 
 #ifdef ENABLE_R2SK_SAMPLING
 #include <core/kernel/cuda/topk_r2sk/decode_graph.h>
+#include <core/kernel/cuda/topk_r2sk/sampling.h>
 #endif
 
 #include <core/kernel/kernel.h>
@@ -648,15 +649,45 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
   }
 #endif
 
+#if defined(ENABLE_R2SK_SAMPLING) && defined(CONFIG_ENABLE_RADIX_TOPK)
+  bool eager_prepared = false;
+  if (r2sk_sampling_ && !graph_prepared) {
+    const auto scratch = reinterpret_cast<uintptr_t>(ws_ptr);
+    const auto scores = reinterpret_cast<uintptr_t>(topk_value_ptr_);
+    if (scores >= scratch && scores - scratch <= ws_bytes) {
+      try {
+        eager_prepared = r2sk_sampling_->Prepare(
+            in_ptr, topk_value_ptr_, static_cast<int*>(topk_indice_ptr_),
+            batch_size_, vocab_size_, max_k_, ws_ptr, scores - scratch,
+            static_cast<const CUDAContext*>(ctx_)->GetStream());
+      } catch (const std::exception& error) {
+        LOG(ERROR) << "Failed to prepare eager R2S-K: " << error.what();
+        return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      }
+    }
+  }
+#endif
+
   // Synchronize per-step host preparation before capture or eager sampling.
   ctx_->Synchronize();
   bool sampled = false;
+  bool topk_preselected = false;
 #ifdef ENABLE_R2SK_SAMPLING
   if (graph_prepared) {
     try {
       sampled = r2sk_decode_graph_->LaunchPrepared();
     } catch (const std::exception& error) {
       LOG(ERROR) << "Failed to replay decode graph: " << error.what();
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+    }
+  }
+#endif
+#if defined(ENABLE_R2SK_SAMPLING) && defined(CONFIG_ENABLE_RADIX_TOPK)
+  if (eager_prepared) {
+    try {
+      topk_preselected = r2sk_sampling_->FinishPrepared();
+    } catch (const std::exception& error) {
+      LOG(ERROR) << "Failed to finish eager R2S-K: " << error.what();
       return AsStatus::ALLSPARK_RUNTIME_ERROR;
     }
   }
@@ -668,7 +699,7 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
         max_k_, vocab_size_, static_cast<int*>(topk_list_->GetDataPtr()),
         static_cast<float*>(topp_list_->GetDataPtr()),
         static_cast<float*>(temperature_list_->GetDataPtr()), ctx_, runtime_ctx,
-        ws_ptr, ws_bytes, device_prop_ptr, r2sk_sampling_.get()));
+        ws_ptr, ws_bytes, device_prop_ptr, topk_preselected));
   }
 
   if (need_logprobs_) {
