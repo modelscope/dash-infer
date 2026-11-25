@@ -157,7 +157,8 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
           r2sk_sampling_ = std::make_shared<cuda::R2skSampling>(device);
           const char* graph = std::getenv("AS_ENABLE_R2SK_DECODE_GRAPH");
           if (graph && std::strcmp(graph, "1") == 0) {
-            r2sk_decode_graph_ = std::make_shared<cuda::R2skDecodeGraph>(device);
+            r2sk_decode_graph_ =
+                std::make_shared<cuda::R2skDecodeGraph>(device);
           }
         }
       }
@@ -633,14 +634,15 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
     if (scores >= scratch && scores - scratch <= ws_bytes) {
       const auto* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
       try {
-        graph_prepared = r2sk_decode_graph_->Prepare({
-            in_ptr, topk_value_ptr_, topp_value_ptr_,
-            static_cast<int*>(topk_indice_ptr_), static_cast<int64_t*>(out_ptr),
-            sample_states, static_cast<int*>(topk_list_->GetDataPtr()),
-            static_cast<float*>(topp_list_->GetDataPtr()),
-            static_cast<float*>(temperature_list_->GetDataPtr()), ws_ptr,
-            scores - scratch, ws_bytes, cuda_ctx->GetHiednnHandle(),
-            cuda_ctx->GetStream(), batch_size_, vocab_size_, max_k_});
+        graph_prepared = r2sk_decode_graph_->Prepare(
+            {in_ptr, topk_value_ptr_, topp_value_ptr_,
+             static_cast<int*>(topk_indice_ptr_),
+             static_cast<int64_t*>(out_ptr), sample_states,
+             static_cast<int*>(topk_list_->GetDataPtr()),
+             static_cast<float*>(topp_list_->GetDataPtr()),
+             static_cast<float*>(temperature_list_->GetDataPtr()), ws_ptr,
+             scores - scratch, ws_bytes, cuda_ctx->GetHiednnHandle(),
+             cuda_ctx->GetStream(), batch_size_, vocab_size_, max_k_});
       } catch (const std::exception& error) {
         LOG(ERROR) << "Failed to prepare decode graph: " << error.what();
         return AsStatus::ALLSPARK_RUNTIME_ERROR;
@@ -694,9 +696,10 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
 #endif
   if (!sampled) {
     AS_CHECK_STATUS(kernel_launcher(
-        dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_, topp_value_ptr_,
-        static_cast<int*>(topk_indice_ptr_), in_ptr, sample_states, batch_size_,
-        max_k_, vocab_size_, static_cast<int*>(topk_list_->GetDataPtr()),
+        dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
+        topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
+        sample_states, batch_size_, max_k_, vocab_size_,
+        static_cast<int*>(topk_list_->GetDataPtr()),
         static_cast<float*>(topp_list_->GetDataPtr()),
         static_cast<float*>(temperature_list_->GetDataPtr()), ctx_, runtime_ctx,
         ws_ptr, ws_bytes, device_prop_ptr, topk_preselected));

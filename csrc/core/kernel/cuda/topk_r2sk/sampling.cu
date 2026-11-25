@@ -14,7 +14,8 @@ namespace allspark::cuda {
 
 struct R2skSampling::State {
   explicit State(int device_id)
-      : device(device_id), trace(std::getenv("AS_TRACE_R2SK_EAGER") != nullptr) {}
+      : device(device_id),
+        trace(std::getenv("AS_TRACE_R2SK_EAGER") != nullptr) {}
 
   ~State() {
     if (!fork.stream && !complete && !nonfinite) return;
@@ -50,9 +51,9 @@ struct R2skSampling::State {
       r2sk::cuda_check(
           cudaEventCreateWithFlags(&complete, cudaEventDisableTiming),
           "create eager R2S-K completion event");
-    r2sk::cuda_check(
-        cudaMallocHost(reinterpret_cast<void**>(&nonfinite), sizeof(*nonfinite)),
-        "allocate eager R2S-K input status");
+    r2sk::cuda_check(cudaMallocHost(reinterpret_cast<void**>(&nonfinite),
+                                    sizeof(*nonfinite)),
+                     "allocate eager R2S-K input status");
   }
 
   struct Selection {
@@ -77,20 +78,21 @@ struct R2skSampling::State {
   Selection prepared{};
 };
 
-R2skSampling::R2skSampling(int device) : state_(std::make_unique<State>(device)) {}
+R2skSampling::R2skSampling(int device)
+    : state_(std::make_unique<State>(device)) {}
 R2skSampling::~R2skSampling() = default;
 
 size_t R2skSampling::ReserveBytes(int max_batch, int vocabulary) {
   auto& s = *state_;
   if (s.batch != max_batch || s.vocabulary != vocabulary) {
     Wait();
-    s.bytes = max_batch < 1 || max_batch > 65535 || vocabulary <= 2
-                  ? 0
-                  : r2sk::bfloat16_graph_bytes({
-                        static_cast<uint32_t>(max_batch),
-                        static_cast<uint32_t>(vocabulary),
-                        static_cast<uint32_t>(
-                            std::min(kMaxEagerRank, vocabulary - 1))});
+    s.bytes =
+        max_batch < 1 || max_batch > 65535 || vocabulary <= 2
+            ? 0
+            : r2sk::bfloat16_graph_bytes({static_cast<uint32_t>(max_batch),
+                                          static_cast<uint32_t>(vocabulary),
+                                          static_cast<uint32_t>(std::min(
+                                              kMaxEagerRank, vocabulary - 1))});
     s.batch = max_batch;
     s.vocabulary = vocabulary;
   }
@@ -105,7 +107,8 @@ void R2skSampling::Wait() {
     s.prepared = {};
   }
   if (s.pending) {
-    r2sk::cuda_check(cudaEventSynchronize(s.complete), "wait for R2S-K scratch");
+    r2sk::cuda_check(cudaEventSynchronize(s.complete),
+                     "wait for R2S-K scratch");
     s.pending = false;
   }
 }
@@ -127,10 +130,11 @@ bool R2skSampling::Prepare(const void* logits, void* values, int* indices,
 
   if (s.prepared.arena || (s.pending && s.last_stream != stream)) Wait();
   s.Initialize();
-  const r2sk::BFloat16GraphShape shape{
-      static_cast<uint32_t>(batch), static_cast<uint32_t>(vocabulary),
-      static_cast<uint32_t>(k)};
-  // Retain the preparation binding until the stream has completed its flag copy.
+  const r2sk::BFloat16GraphShape shape{static_cast<uint32_t>(batch),
+                                       static_cast<uint32_t>(vocabulary),
+                                       static_cast<uint32_t>(k)};
+  // Retain the preparation binding until the stream has completed its flag
+  // copy.
   s.prepared = {shape, values, indices, arena, arena_bytes, stream};
   r2sk::begin_bfloat16_selection(shape, logits, arena, arena_bytes, stream,
                                  s.nonfinite);
@@ -164,14 +168,15 @@ bool R2skSampling::FinishPrepared() {
   return true;
 }
 
-bool R2skSampling::Try(const void* logits, void* values, int* indices, int batch,
-                       int vocabulary, int k, void* arena, size_t arena_bytes,
-                       cudaStream_t stream) {
-  if (!Prepare(logits, values, indices, batch, vocabulary, k, arena, arena_bytes,
-               stream)) {
+bool R2skSampling::Try(const void* logits, void* values, int* indices,
+                       int batch, int vocabulary, int k, void* arena,
+                       size_t arena_bytes, cudaStream_t stream) {
+  if (!Prepare(logits, values, indices, batch, vocabulary, k, arena,
+               arena_bytes, stream)) {
     return false;
   }
-  r2sk::cuda_check(cudaStreamSynchronize(stream), "read eager R2S-K input status");
+  r2sk::cuda_check(cudaStreamSynchronize(stream),
+                   "read eager R2S-K input status");
   return FinishPrepared();
 }
 

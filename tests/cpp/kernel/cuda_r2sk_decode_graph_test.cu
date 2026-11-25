@@ -19,7 +19,8 @@ constexpr int kVocab = 2053;
 constexpr int kRank = 20;
 
 void Check(cudaError_t result) {
-  if (result != cudaSuccess) throw std::runtime_error(cudaGetErrorString(result));
+  if (result != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(result));
 }
 void Require(bool value, const char* message) {
   if (!value) throw std::runtime_error(message);
@@ -53,7 +54,8 @@ struct Buffer {
 };
 
 template <class T>
-void Upload(Buffer<T>& buffer, const T* data, size_t count, cudaStream_t stream) {
+void Upload(Buffer<T>& buffer, const T* data, size_t count,
+            cudaStream_t stream) {
   Check(cudaMemcpyAsync(buffer.data, data, sizeof(T) * count,
                         cudaMemcpyHostToDevice, stream));
 }
@@ -61,7 +63,8 @@ void Upload(Buffer<T>& buffer, const T* data, size_t count, cudaStream_t stream)
 template <class T>
 std::vector<T> Read(const Buffer<T>& buffer, size_t count) {
   std::vector<T> data(count);
-  Check(cudaMemcpy(data.data(), buffer.data, count * sizeof(T), cudaMemcpyDeviceToHost));
+  Check(cudaMemcpy(data.data(), buffer.data, count * sizeof(T),
+                   cudaMemcpyDeviceToHost));
   return data;
 }
 
@@ -86,8 +89,9 @@ void Run(int device) {
   size_t radik_bytes = 0, topp_bytes = 0;
   TopKRadixGetWorkspaceSize<Bf16>(&radik_bytes, kBatch, kVocab);
   TopPSoftmaxGetWorkspaceSize<Bf16>(&topp_bytes, kBatch, kRank, true);
-  size_t bytes = std::max({radik_bytes, topp_bytes, static_cast<size_t>(
-      r2sk::bfloat16_graph_bytes({kBatch, kVocab, kRank}))});
+  size_t bytes = std::max({radik_bytes, topp_bytes,
+                           static_cast<size_t>(r2sk::bfloat16_graph_bytes(
+                               {kBatch, kVocab, kRank}))});
   Arm eager(bytes), graph(bytes);
   Buffer<uint16_t> alternate_tmp(kBatch * kRank);
   R2skDecodeGraph selector(device);
@@ -107,8 +111,10 @@ void Run(int device) {
     }
     for (int j = 0; j < 24; ++j) {
       // Row one has nine higher-bin winners, fifteen distinct upper-boundary
-      // values, and a large boundary bin. Its sorted selected values are unique.
-      input[kVocab + (step * 13 + j) % kVocab] = j < 9 ? 0x4000 + j : 0x3f81 + j - 9;
+      // values, and a large boundary bin. Its sorted selected values are
+      // unique.
+      input[kVocab + (step * 13 + j) % kVocab] =
+          j < 9 ? 0x4000 + j : 0x3f81 + j - 9;
     }
     const bool invalid = step == 8 || step == 12;
     if (step == 8) input.back() = 0x7fc1u;
@@ -126,16 +132,20 @@ void Run(int device) {
                                              a->state.data + (1 - first)};
       Upload(a->rng, states.data(), states.size(), stream);
       Upload(a->counts, initial_counts.data(), initial_counts.size(), stream);
-      Check(cudaMemsetAsync(a->tokens.data, 0xcc, kBatch * sizeof(int64_t), stream));
+      Check(cudaMemsetAsync(a->tokens.data, 0xcc, kBatch * sizeof(int64_t),
+                            stream));
       // Host arrays above may go out of scope after completion of these copies.
       Check(cudaStreamSynchronize(stream));
     }
-    // Switch buffers to capture a second graph after eager work used the handle.
+    // Switch buffers to capture a second graph after eager work used the
+    // handle.
     auto* temp_probs = step % 2 ? alternate_tmp.data : graph.tmp.data;
-    Require(selector.Prepare({logits.data, graph.scores.data, temp_probs,
-        graph.indices.data, graph.tokens.data, graph.rng.data, graph.counts.data,
-        p.data, temperature.data, graph.scratch.data, bytes, bytes, handle.value,
-        stream, kBatch, kVocab, kRank}), "valid graph shape failed preflight");
+    Require(selector.Prepare(
+                {logits.data, graph.scores.data, temp_probs, graph.indices.data,
+                 graph.tokens.data, graph.rng.data, graph.counts.data, p.data,
+                 temperature.data, graph.scratch.data, bytes, bytes,
+                 handle.value, stream, kBatch, kVocab, kRank}),
+            "valid graph shape failed preflight");
     Check(cudaStreamSynchronize(stream));
     Require(selector.LaunchPrepared() == !invalid, "preflight result mismatch");
     Check(cudaStreamSynchronize(stream));
@@ -150,31 +160,36 @@ void Run(int device) {
     TopKRadixKernelLauncher(scores, eager.indices.data,
                             reinterpret_cast<const Bf16*>(logits.data),
                             eager.scratch.data, kBatch, kVocab, kRank, stream);
-    TopPSoftmaxLauncher(eager.counts.data, scores, eager.indices.data,
+    TopPSoftmaxLauncher(
+        eager.counts.data, scores, eager.indices.data,
         static_cast<const Bf16*>(scores), p.data, temperature.data,
         reinterpret_cast<Bf16*>(eager.tmp.data), eager.scratch.data, bytes,
         kBatch, kRank, true, handle.value, stream);
-    SampleKernelLauncher(eager.tokens.data, eager.rng.data, scores, eager.indices.data,
-                         kBatch, eager.counts.data, kRank, stream, nullptr);
+    SampleKernelLauncher(eager.tokens.data, eager.rng.data, scores,
+                         eager.indices.data, kBatch, eager.counts.data, kRank,
+                         stream, nullptr);
     Check(cudaStreamSynchronize(stream));
 
     const auto counts = Read(graph.counts, kBatch);
     Require(counts == Read(eager.counts, kBatch), "top-p counts differ");
     const auto ids = Read(graph.indices, kBatch * kRank);
-    Require(ids == Read(eager.indices, kBatch * kRank), "top-k ranked IDs differ");
+    Require(ids == Read(eager.indices, kBatch * kRank),
+            "top-k ranked IDs differ");
     const auto logits_graph = Read(graph.scores, kBatch * kRank);
     const auto logits_eager = Read(eager.scores, kBatch * kRank);
     for (int row = 0; row < kBatch; ++row) {
       for (int rank = 0; rank < counts[row]; ++rank) {
         const int j = row * kRank + rank;
-        Require(logits_graph[j] == logits_eager[j], "top-p probabilities differ");
+        Require(logits_graph[j] == logits_eager[j],
+                "top-p probabilities differ");
       }
     }
     Require(Read(graph.tokens, kBatch) == Read(eager.tokens, kBatch),
             "graph and eager sampled tokens differ");
   }
   Require(graph_launches == 18, "unexpected replay count");
-  std::cout << "PASS decode sampling parity: 18 graph calls, two captured bindings, changing logits, top-p, "
+  std::cout << "PASS decode sampling parity: 18 graph calls, two captured "
+               "bindings, changing logits, top-p, "
                "temperatures and RNG pointers, exact probabilities and tokens, "
                "NaN and infinity fallback.\n";
 }
@@ -193,7 +208,8 @@ int main() {
     Check(status);
     int device = 0, major = 0;
     Check(cudaGetDevice(&device));
-    Check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device));
+    Check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor,
+                                 device));
     if (major < 8) return 77;
     Run(device);
   } catch (const std::exception& error) {

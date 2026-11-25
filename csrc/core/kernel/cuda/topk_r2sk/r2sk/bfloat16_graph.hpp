@@ -43,10 +43,10 @@ void begin_bfloat16_selection(BFloat16GraphShape shape, const void* input,
                               cudaStream_t stream,
                               uint32_t* pinned_nonfinite = nullptr);
 void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
-                                uint32_t* indices, void* arena,
-                                uint64_t arena_bytes, cudaStream_t stream,
-                                BFloat16GraphFork fork = {},
-                                BFloat16GraphRow* rows = nullptr);
+                               uint32_t* indices, void* arena,
+                               uint64_t arena_bytes, cudaStream_t stream,
+                               BFloat16GraphFork fork = {},
+                               BFloat16GraphRow* rows = nullptr);
 
 // Dense BF16 [batch,vocabulary] in, descending BF16 [batch,k] and
 // row-relative indices out. Signed zeros compare as equal numerically.

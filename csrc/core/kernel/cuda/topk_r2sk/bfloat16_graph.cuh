@@ -279,7 +279,8 @@ void begin_bfloat16_selection(BFloat16GraphShape shape, const void* input,
   init_graph_jobs<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, static_cast<const BFloat16*>(input), storage);
   if (pinned_nonfinite) {
-    auto* flag = storage.histogram + uint64_t(shape.batch) * kGraphHistogramStride;
+    auto* flag =
+        storage.histogram + uint64_t(shape.batch) * kGraphHistogramStride;
     count_packed<4096, 1024, true, BFloat16, true, true>
         <<<graph_grid(shape, 1024), 1024, 0, stream>>>(
             {}, 0, 0, nullptr, storage.first, nullptr, flag);
@@ -287,16 +288,16 @@ void begin_bfloat16_selection(BFloat16GraphShape shape, const void* input,
                        cudaMemcpyDeviceToHost, stream));
   } else {
     count_packed<4096, 1024, true, BFloat16, true>
-        <<<graph_grid(shape, 1024), 1024, 0, stream>>>(
-            {}, 0, 0, nullptr, storage.first);
+        <<<graph_grid(shape, 1024), 1024, 0, stream>>>({}, 0, 0, nullptr,
+                                                       storage.first);
   }
   CK(cudaGetLastError());
 }
 
 void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
-                                uint32_t* indices, void* arena, uint64_t bytes,
-                                cudaStream_t stream, BFloat16GraphFork fork,
-                                BFloat16GraphRow* rows) {
+                               uint32_t* indices, void* arena, uint64_t bytes,
+                               cudaStream_t stream, BFloat16GraphFork fork,
+                               BFloat16GraphRow* rows) {
   if (!values || !indices)
     throw std::invalid_argument("missing BF16 selection output");
   if ((fork.stream && (!fork.ready || !fork.done || fork.ready == fork.done ||
@@ -316,8 +317,8 @@ void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
   plan_graph_partition<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(
       shape, storage, output, rows);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 0, 0, {}, 0, {}, 0,
-                                                     nullptr, storage.first);
+      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>(
+          {}, 0, 0, 0, {}, 0, {}, 0, nullptr, storage.first);
 
   const auto sort_stream = fork.stream ? fork.stream : stream;
   if (fork.stream) {
@@ -329,12 +330,13 @@ void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
   if (fork.stream) CK(cudaEventRecord(fork.done, fork.stream));
 
   count_packed<16, BLOCK, true, BFloat16, true>
-      <<<graph_grid(shape, BLOCK), BLOCK, 0, stream>>>({}, 0, 1, nullptr, storage.last);
+      <<<graph_grid(shape, BLOCK), BLOCK, 0, stream>>>({}, 0, 1, nullptr,
+                                                       storage.last);
   plan_graph_tail<<<plan_blocks, kGraphPlanThreads, 0, stream>>>(shape,
                                                                  storage);
   gather_packed<true, false, true, true, BFloat16, true>
-      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>({}, 0, 1, 0, {}, 0, {}, 0,
-                                                     nullptr, storage.last);
+      <<<graph_grid(shape, BLOCK), BLOCK, gather_bytes, stream>>>(
+          {}, 0, 1, 0, {}, 0, {}, 0, nullptr, storage.last);
   sort_graph_run<<<shape.batch, BLOCK, sort_bytes, stream>>>(storage.last_sort);
 
   // Pass-one sorts write a row's prefix. Final sorts write only its tail,
@@ -344,9 +346,9 @@ void finish_bfloat16_selection(BFloat16GraphShape shape, void* values,
 }
 
 void enqueue_bfloat16_graph(BFloat16GraphShape shape, const void* input,
-                           void* values, uint32_t* indices, void* arena,
-                           uint64_t bytes, cudaStream_t stream,
-                           BFloat16GraphFork fork, BFloat16GraphRow* rows) {
+                            void* values, uint32_t* indices, void* arena,
+                            uint64_t bytes, cudaStream_t stream,
+                            BFloat16GraphFork fork, BFloat16GraphRow* rows) {
   begin_bfloat16_selection(shape, input, arena, bytes, stream);
   finish_bfloat16_selection(shape, values, indices, arena, bytes, stream, fork,
                             rows);

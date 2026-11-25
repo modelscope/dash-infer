@@ -60,7 +60,8 @@ __global__ void __launch_bounds__(THREADS)
     if constexpr (GRAPH_BF16 && BINS == 16) bin >>= 8;
     atomicAdd(local + bin, 1u);
     if constexpr (GRAPH_BF16) {
-      constexpr uint32_t max_valid = CHECK_NONFINITE ? 0x7f7fffffu : 0x7f800000u;
+      constexpr uint32_t max_valid =
+          CHECK_NONFINITE ? 0x7f7fffffu : 0x7f800000u;
       if (scale_unsafe && (float_bits(value) & 0x7fffffffu) > max_valid)
         unsafe = 1;
     } else if (scale_unsafe &&

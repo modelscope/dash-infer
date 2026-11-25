@@ -9,7 +9,7 @@ namespace allspark {
 namespace cuda {
 class R2skSampling;
 class R2skDecodeGraph;
-}
+}  // namespace cuda
 
 class GenerateOp : public AsOperator {
  public:
@@ -126,15 +126,12 @@ class GenerateOp : public AsOperator {
 #endif
   void build_batch_gencfg(RuntimeContext* runtime_ctx,
                           BatchGencfg& batch_gencfg, const DeviceContext* ctx);
-  AsStatus (*kernel_launcher)(DataType dtype, int64_t* out_tokens,
-                              void* topk_value, void* topp_value,
-                              int* topk_indice, void* in_logits,
-                              void** sample_states, int batch_size, int max_k,
-                              int length, int* k_arr, float* p_arr,
-                              float* temperature_arr, const DeviceContext* ctx,
-                              RuntimeContext* runtime_ctx, void* ws_ptr,
-                              size_t ws_bytes, void* device_prop,
-                              bool topk_preselected) = nullptr;
+  AsStatus (*kernel_launcher)(
+      DataType dtype, int64_t* out_tokens, void* topk_value, void* topp_value,
+      int* topk_indice, void* in_logits, void** sample_states, int batch_size,
+      int max_k, int length, int* k_arr, float* p_arr, float* temperature_arr,
+      const DeviceContext* ctx, RuntimeContext* runtime_ctx, void* ws_ptr,
+      size_t ws_bytes, void* device_prop, bool topk_preselected) = nullptr;
 
   void (*beam_init_launcher)(DataType dtype, void* beam_score,
                              void* hyps_beam_score, int64_t* hyps_beam_idx,

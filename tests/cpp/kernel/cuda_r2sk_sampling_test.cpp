@@ -18,7 +18,8 @@
 namespace {
 
 void Check(cudaError_t status) {
-  if (status != cudaSuccess) throw std::runtime_error(cudaGetErrorString(status));
+  if (status != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(status));
 }
 
 void Require(bool condition, const char* message) {
@@ -48,7 +49,8 @@ float Decode(uint16_t bf16) {
 }
 
 void TestSampling(int device, cudaStream_t stream) {
-  constexpr int n = 2053;  // Odd length exercises packed tails and row alignment.
+  constexpr int n =
+      2053;  // Odd length exercises packed tails and row alignment.
   constexpr int max_batch = 3;
   constexpr int max_k = 256;
   std::vector<uint16_t> input(max_batch * n, 0x3f80);  // All-tied first row.
@@ -77,8 +79,10 @@ void TestSampling(int device, cudaStream_t stream) {
       auto* scratch = k == 20 ? first.data : second.data;
       std::vector<uint16_t> selected(batch * k + 2);
       std::vector<int> ids(batch * k + 2);
-      Check(cudaMemsetAsync(values.data, 0xcc, selected.size() * sizeof(uint16_t), stream));
-      Check(cudaMemsetAsync(indices.data, 0xcc, ids.size() * sizeof(int), stream));
+      Check(cudaMemsetAsync(values.data, 0xcc,
+                            selected.size() * sizeof(uint16_t), stream));
+      Check(cudaMemsetAsync(indices.data, 0xcc, ids.size() * sizeof(int),
+                            stream));
       Require(selector.Prepare(logits.data, values.data + 1, indices.data + 1,
                                batch, n, k, scratch, bytes, stream),
               "BF16 preparation fell back unexpectedly");
@@ -88,7 +92,8 @@ void TestSampling(int device, cudaStream_t stream) {
       // The real top-p stage also reuses this storage on the caller stream.
       Check(cudaMemsetAsync(scratch, 0xa5, bytes, stream));
       Check(cudaMemcpyAsync(selected.data(), values.data,
-                            selected.size() * sizeof(uint16_t), cudaMemcpyDeviceToHost, stream));
+                            selected.size() * sizeof(uint16_t),
+                            cudaMemcpyDeviceToHost, stream));
       Check(cudaMemcpyAsync(ids.data(), indices.data, ids.size() * sizeof(int),
                             cudaMemcpyDeviceToHost, stream));
       Check(cudaStreamSynchronize(stream));
@@ -108,7 +113,8 @@ void TestSampling(int device, cudaStream_t stream) {
           Require(id >= 0 && id < n && !used[id], "invalid or duplicate index");
           used[id] = true;
           Require(selected[out] == input[row * n + id], "key/index mismatch");
-          Require(Decode(selected[out]) == expected[j], "incorrect sorted top-k");
+          Require(Decode(selected[out]) == expected[j],
+                  "incorrect sorted top-k");
         }
       }
     }
@@ -125,7 +131,8 @@ void TestSampling(int device, cudaStream_t stream) {
     Check(cudaMemsetAsync(values.data, 0xcc, count * sizeof(uint16_t), stream));
     Check(cudaMemsetAsync(indices.data, 0xcc, count * sizeof(int), stream));
     Require(!selector.Try(logits.data, values.data, indices.data, batch, n, k,
-                          first.data, bytes, stream), message);
+                          first.data, bytes, stream),
+            message);
     Check(cudaMemcpyAsync(untouched.data(), values.data,
                           count * sizeof(uint16_t), cudaMemcpyDeviceToHost,
                           stream));
@@ -141,14 +148,17 @@ void TestSampling(int device, cudaStream_t stream) {
   for (int k : {257, 512}) {
     check_fallback(1, k, "rank above the eager cutoff must fall back");
   }
-  for (uint16_t nonfinite : {uint16_t{0xff80}, uint16_t{0x7f80}, uint16_t{0x7fc0}}) {
-    // Put the value in a different row and at the last element of a partial tile.
-    Check(cudaMemcpy(logits.data + input.size() - 1, &nonfinite, sizeof(nonfinite),
-                     cudaMemcpyHostToDevice));
+  for (uint16_t nonfinite :
+       {uint16_t{0xff80}, uint16_t{0x7f80}, uint16_t{0x7fc0}}) {
+    // Put the value in a different row and at the last element of a partial
+    // tile.
+    Check(cudaMemcpy(logits.data + input.size() - 1, &nonfinite,
+                     sizeof(nonfinite), cudaMemcpyHostToDevice));
     check_fallback(3, 20, "nonfinite input must fall back");
   }
   Require(!selector.Try(logits.data, values.data, indices.data, 1, n, 20,
-                        first.data, bytes - 1, stream), "short arena must fall back");
+                        first.data, bytes - 1, stream),
+          "short arena must fall back");
   Check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
   const bool captured = selector.Try(logits.data, values.data, indices.data, 1,
                                      n, 20, first.data, bytes, stream);
@@ -160,8 +170,8 @@ void TestSampling(int device, cudaStream_t stream) {
 
 // A matched complete-call replay against the RadiK compiled into this tree.
 // The input is dense little-endian BF16 words from a pre-top-k capture.
-void Replay(int device, cudaStream_t stream, const char* path, int batch,
-            int n, int k) {
+void Replay(int device, cudaStream_t stream, const char* path, int batch, int n,
+            int k) {
   Require(batch >= 1 && batch <= 65535 && k > 1 &&
               k <= allspark::cuda::R2skSampling::kMaxEagerRank && k < n,
           "unsupported replay shape");
@@ -172,9 +182,9 @@ void Replay(int device, cudaStream_t stream, const char* path, int batch,
                                       count * sizeof(uint16_t))) &&
               file.peek() == std::ifstream::traits_type::eof(),
           "capture size must match batch * vocabulary * 2");
-  Require(std::none_of(input.begin(), input.end(), [](uint16_t key) {
-            return (key & 0x7f80u) == 0x7f80u;
-          }), "replay requires finite logits");
+  Require(std::none_of(input.begin(), input.end(),
+                       [](uint16_t key) { return (key & 0x7f80u) == 0x7f80u; }),
+          "replay requires finite logits");
   const size_t output_count = static_cast<size_t>(batch) * k;
   std::vector<uint16_t> reference(output_count), selected(output_count);
   std::vector<int> ids(output_count);
@@ -202,17 +212,19 @@ void Replay(int device, cudaStream_t stream, const char* path, int batch,
   auto invoke = [&](bool r2sk) {
     if (r2sk) {
       Require(selector.Try(logits.data, out.data, indices.data, batch, n, k,
-                           scratch.data, bytes, stream), "replay fell back to RadiK");
+                           scratch.data, bytes, stream),
+              "replay fell back to RadiK");
     } else {
       allspark::cuda::TopKRadixKernelLauncher(
           reinterpret_cast<Bf16*>(out.data), indices.data,
-          reinterpret_cast<const Bf16*>(logits.data), scratch.data,
-          batch, n, k, stream);
+          reinterpret_cast<const Bf16*>(logits.data), scratch.data, batch, n, k,
+          stream);
     }
     Check(cudaStreamSynchronize(stream));
   };
   for (bool r2sk : {false, true}) {
-    Check(cudaMemsetAsync(indices.data, 0xff, ids.size() * sizeof(int), stream));
+    Check(
+        cudaMemsetAsync(indices.data, 0xff, ids.size() * sizeof(int), stream));
     invoke(r2sk);
     auto& keys = r2sk ? selected : reference;
     Check(cudaMemcpy(keys.data(), out.data, keys.size() * sizeof(uint16_t),
@@ -227,7 +239,8 @@ void Replay(int device, cudaStream_t stream, const char* path, int batch,
         Require(id >= 0 && id < n && !used[id], "invalid replay index");
         used[id] = true;
         Require(keys[pos] == input[static_cast<size_t>(row) * n + id] &&
-                    Decode(keys[pos]) == expected[pos], "incorrect replay output");
+                    Decode(keys[pos]) == expected[pos],
+                "incorrect replay output");
       }
     }
   }
@@ -242,9 +255,11 @@ void Replay(int device, cudaStream_t stream, const char* path, int batch,
       const auto start = std::chrono::steady_clock::now();
       invoke(r2sk);
       const auto elapsed = std::chrono::steady_clock::now() - start;
-      std::cout << rep << ',' << (r2sk ? "r2sk" : "radik") << ',' << batch << ','
-                << n << ',' << k << ',' << (r2sk ? r2sk_bytes : native_bytes) << ','
-                << std::chrono::duration<double, std::micro>(elapsed).count() << '\n';
+      std::cout << rep << ',' << (r2sk ? "r2sk" : "radik") << ',' << batch
+                << ',' << n << ',' << k << ','
+                << (r2sk ? r2sk_bytes : native_bytes) << ','
+                << std::chrono::duration<double, std::micro>(elapsed).count()
+                << '\n';
     }
   }
 }
@@ -329,8 +344,9 @@ void TestGraph(cudaStream_t main) {
       static_assert(sizeof(uint16_t) == 2);
       CapturedSelector captured;
       Check(cudaStreamBeginCapture(main, cudaStreamCaptureModeGlobal));
-      r2sk::enqueue_bfloat16_graph(shape, logits.data, values.data + 1, ids.data + 1,
-          scratch.data, bytes, main, resources, device_reports.data);
+      r2sk::enqueue_bfloat16_graph(shape, logits.data, values.data + 1,
+                                   ids.data + 1, scratch.data, bytes, main,
+                                   resources, device_reports.data);
       // The output consumer may reuse the arena immediately after the join.
       Check(cudaMemsetAsync(scratch.data, 0xa5, bytes, main));
       captured.Finish(main);
@@ -340,12 +356,13 @@ void TestGraph(cudaStream_t main) {
           uint32_t pattern = (row + rep) % 6;
           std::fill_n(src, n, uint16_t{0xbf80});
           if (pattern == 0 || pattern == 1) {
-            const uint32_t high = std::min(shape.vocabulary,
-                shape.k + (pattern == 1 ? 9 : 0));
+            const uint32_t high =
+                std::min(shape.vocabulary, shape.k + (pattern == 1 ? 9 : 0));
             for (uint32_t j = 0; j < high; ++j) src[j] = 0x4000u + j % 16;
           } else if (pattern == 2) {
             for (size_t j = 0; j < n; ++j) src[j] = 0xbf8fu - j % 16;
-            for (size_t j = 0; j < std::min(n, size_t{5}); ++j) src[j] = 0x4000u + j;
+            for (size_t j = 0; j < std::min(n, size_t{5}); ++j)
+              src[j] = 0x4000u + j;
           } else if (pattern == 3) {
             src[n - 1] = 0x7fc1u;
           } else if (pattern == 4) {
@@ -361,14 +378,19 @@ void TestGraph(cudaStream_t main) {
         Check(cudaMemsetAsync(ids.data, 0xcc, indices.size() * 4, main));
         Check(cudaGraphLaunch(captured.exec, main));
         Check(cudaStreamSynchronize(main));
-        Check(cudaMemcpy(out.data(), values.data, out.size() * 2, cudaMemcpyDeviceToHost));
-        Check(cudaMemcpy(indices.data(), ids.data, indices.size() * 4, cudaMemcpyDeviceToHost));
-        Check(cudaMemcpy(saved.data(), logits.data, saved.size() * 2, cudaMemcpyDeviceToHost));
-        Check(cudaMemcpy(reports.data(), device_reports.data, reports.size() * sizeof(reports[0]),
+        Check(cudaMemcpy(out.data(), values.data, out.size() * 2,
+                         cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(indices.data(), ids.data, indices.size() * 4,
+                         cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(saved.data(), logits.data, saved.size() * 2,
+                         cudaMemcpyDeviceToHost));
+        Check(cudaMemcpy(reports.data(), device_reports.data,
+                         reports.size() * sizeof(reports[0]),
                          cudaMemcpyDeviceToHost));
         Require(saved == input, "graph modified its input");
         Require(out.front() == 0xcccc && out.back() == 0xcccc &&
-                    indices.front() == 0xcccccccc && indices.back() == 0xcccccccc,
+                    indices.front() == 0xcccccccc &&
+                    indices.back() == 0xcccccccc,
                 "graph output overrun");
         CheckGraphOutput(input, out, indices, shape, 1);
         for (uint32_t row = 0; row < shape.batch; ++row) {
@@ -377,21 +399,27 @@ void TestGraph(cudaStream_t main) {
           if (pattern == 0)
             Require(report.route == GraphRoute::exact, "expected exact route");
           if (pattern == 1 && n > 1024)
-            Require(report.route == GraphRoute::early_sort, "expected early sort");
+            Require(report.route == GraphRoute::early_sort,
+                    "expected early sort");
           if (pattern == 2 && n > 1024)
-            Require(report.route == GraphRoute::refine && report.first_winners == 5 &&
-                        report.passes == 2, "expected refine with independent winners");
+            Require(report.route == GraphRoute::refine &&
+                        report.first_winners == 5 && report.passes == 2,
+                    "expected refine with independent winners");
           if (pattern == 3)
-            Require(report.route == GraphRoute::invalid_nan, "expected NaN rejection");
+            Require(report.route == GraphRoute::invalid_nan,
+                    "expected NaN rejection");
         }
       }
     }
   }
-  std::cout << "PASS graph BF16: 108 captured replays, changed routes and logits, "
-               "both schedules, mixed rows, signed zeros, infinities, NaN, guards and arena reuse.\n";
+  std::cout
+      << "PASS graph BF16: 108 captured replays, changed routes and logits, "
+         "both schedules, mixed rows, signed zeros, infinities, NaN, guards "
+         "and arena reuse.\n";
 }
 
-void BenchGraph(int device, cudaStream_t stream, const std::string& input_source,
+void BenchGraph(int device, cudaStream_t stream,
+                const std::string& input_source,
                 r2sk::BFloat16GraphShape shape) {
   const size_t count = size_t(shape.batch) * shape.vocabulary;
   const size_t kept = size_t(shape.batch) * shape.k;
@@ -409,27 +437,32 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
     }
   } else {
     std::ifstream file(input_source, std::ios::binary);
-    Require(static_cast<bool>(file.read(reinterpret_cast<char*>(input.data()), count * 2)) &&
-                file.peek() == std::ifstream::traits_type::eof(), "graph fixture size");
+    Require(static_cast<bool>(
+                file.read(reinterpret_cast<char*>(input.data()), count * 2)) &&
+                file.peek() == std::ifstream::traits_type::eof(),
+            "graph fixture size");
   }
 
   size_t radik_bytes = 0;
   using Bf16 = hie::bfloat16;
-  allspark::cuda::TopKRadixGetWorkspaceSize<Bf16>(&radik_bytes, shape.batch, shape.vocabulary);
+  allspark::cuda::TopKRadixGetWorkspaceSize<Bf16>(&radik_bytes, shape.batch,
+                                                  shape.vocabulary);
   allspark::cuda::R2skSampling eager(device);
   const size_t eager_bytes = eager.ReserveBytes(shape.batch, shape.vocabulary);
   const auto graph_bytes = r2sk::bfloat16_graph_bytes(shape);
-  const size_t bytes = std::max({radik_bytes, eager_bytes, size_t(graph_bytes)});
+  const size_t bytes =
+      std::max({radik_bytes, eager_bytes, size_t(graph_bytes)});
   DeviceBuffer<unsigned char> scratch(bytes);
   DeviceBuffer<uint16_t> logits(count), out(kept);
   DeviceBuffer<uint32_t> ids(kept);
   Stream winners;
   Event ready, done;
   const r2sk::BFloat16GraphFork fork{winners.value, ready.value, done.value};
-  Check(cudaMemcpy(logits.data, input.data(), count * 2, cudaMemcpyHostToDevice));
+  Check(
+      cudaMemcpy(logits.data, input.data(), count * 2, cudaMemcpyHostToDevice));
   auto enqueue = [&](r2sk::BFloat16GraphFork resources) {
     r2sk::enqueue_bfloat16_graph(shape, logits.data, out.data, ids.data,
-        scratch.data, bytes, stream, resources);
+                                 scratch.data, bytes, stream, resources);
   };
   CapturedSelector overlap, serial;
   for (auto* captured : {&overlap, &serial}) {
@@ -440,13 +473,16 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
   auto invoke = [&](int method) {
     switch (method) {
       case 0:
-        allspark::cuda::TopKRadixKernelLauncher(reinterpret_cast<Bf16*>(out.data),
-            reinterpret_cast<int*>(ids.data), reinterpret_cast<const Bf16*>(logits.data),
-            scratch.data, shape.batch, shape.vocabulary, shape.k, stream);
+        allspark::cuda::TopKRadixKernelLauncher(
+            reinterpret_cast<Bf16*>(out.data), reinterpret_cast<int*>(ids.data),
+            reinterpret_cast<const Bf16*>(logits.data), scratch.data,
+            shape.batch, shape.vocabulary, shape.k, stream);
         break;
       case 1:
-        Require(eager.Try(logits.data, out.data, reinterpret_cast<int*>(ids.data),
-            shape.batch, shape.vocabulary, shape.k, scratch.data, bytes, stream),
+        Require(
+            eager.Try(logits.data, out.data, reinterpret_cast<int*>(ids.data),
+                      shape.batch, shape.vocabulary, shape.k, scratch.data,
+                      bytes, stream),
             "integrated eager R2S-K declined benchmark");
         break;
       case 2:
@@ -469,14 +505,16 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
     Check(cudaMemsetAsync(ids.data, 0xff, kept * 4, stream));
     invoke(method);
     Check(cudaStreamSynchronize(stream));
-    Check(cudaMemcpy(values.data(), out.data, kept * 2, cudaMemcpyDeviceToHost));
-    Check(cudaMemcpy(indices.data(), ids.data, kept * 4, cudaMemcpyDeviceToHost));
+    Check(
+        cudaMemcpy(values.data(), out.data, kept * 2, cudaMemcpyDeviceToHost));
+    Check(
+        cudaMemcpy(indices.data(), ids.data, kept * 4, cudaMemcpyDeviceToHost));
     CheckGraphOutput(input, values, indices, shape);
   }
   const char* names[] = {"radik_eager", "r2sk_device_eager", "device_eager",
                          "graph_overlap", "graph_serial"};
   const size_t arena_bytes[] = {radik_bytes, eager_bytes, size_t(graph_bytes),
-                                 size_t(graph_bytes), size_t(graph_bytes)};
+                                size_t(graph_bytes), size_t(graph_bytes)};
   for (int rep = 0; rep < 12; ++rep)
     for (int method : methods) {
       invoke(method);
@@ -500,9 +538,10 @@ void BenchGraph(int device, cudaStream_t stream, const std::string& input_source
       float gpu_ms;
       Check(cudaEventElapsedTime(&gpu_ms, start.value, stop.value));
       std::cout << rep << ',' << names[method] << ',' << shape.batch << ','
-                << shape.vocabulary << ',' << shape.k << ',' << arena_bytes[method] << ','
-                << std::chrono::duration<double, std::micro>(elapsed).count() << ','
-                << gpu_ms * 1000 << '\n';
+                << shape.vocabulary << ',' << shape.k << ','
+                << arena_bytes[method] << ','
+                << std::chrono::duration<double, std::micro>(elapsed).count()
+                << ',' << gpu_ms * 1000 << '\n';
     }
   }
 }
@@ -522,9 +561,11 @@ int main(int argc, char** argv) {
     int device;
     Check(cudaGetDevice(&device));
     int major;
-    Check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device));
+    Check(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor,
+                                 device));
     if (major < 8) {
-      std::cout << "R2S-K sampling tests require compute capability 8.0 or newer\n";
+      std::cout
+          << "R2S-K sampling tests require compute capability 8.0 or newer\n";
       return 77;
     }
     Stream stream;
@@ -544,7 +585,9 @@ int main(int argc, char** argv) {
                   static_cast<uint32_t>(std::stoul(argv[5]))});
       return 0;
     }
-    Require(argc == 1, "usage: cpp_r2sk_sampling_test [--graph-test | --graph-replay FILE B N K | --replay FILE B N K]");
+    Require(argc == 1,
+            "usage: cpp_r2sk_sampling_test [--graph-test | --graph-replay FILE "
+            "B N K | --replay FILE B N K]");
     TestSampling(device, stream.value);
     std::cout << "R2S-K sampling tests passed\n";
   } catch (const std::exception& error) {
