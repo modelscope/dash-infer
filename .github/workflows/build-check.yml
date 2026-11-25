@@ -56,12 +56,20 @@ jobs:
             then
                 export AS_PLATFORM="cuda"
                 export AS_CUDA_SM="'70;75;80;86;89;90a'"
+                export AS_BUILD_R2SK_SAMPLING=ON
                 bash scripts/release/cpp_build_cuda.sh
             else
                 export AS_PLATFORM="x86"
                 bash build.sh
             fi
         fi
+
+    - name: Verify R2S-K CUDA test binaries (compile only)
+      if: matrix.enable_cuda == 1
+      shell: bash
+      run: |
+        test -x build/bin/cpp_r2sk_sampling_test
+        test -x build/bin/cpp_r2sk_decode_graph_test
 
 
   build-wheels:

@@ -10,6 +10,8 @@
 #include <utility/datatype_dispatcher.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <limits>
 #include <random>
 
@@ -117,7 +119,8 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
                         int length, int* k_arr, float* p_arr,
                         float* temperature_arr, const DeviceContext* ctx,
                         RuntimeContext* runtime_ctx, void* ws_ptr,
-                        size_t ws_bytes, void* device_prop) {
+                        size_t ws_bytes, void* device_prop,
+                        bool topk_preselected) {
   if (max_k > length) {
     LOG(ERROR) << "Top-k: max_k should not exceed length" << std::endl;
     return AsStatus::ALLSPARK_RUNTIME_ERROR;
@@ -134,6 +137,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
   }
 
   bool use_torch_sample = ctx->GetUseTorchSample();
+  AsStatus status = AsStatus::ALLSPARK_SUCCESS;
   auto functor = [&]<typename T>() {
     cudaStream_t gpu_stream = static_cast<const CUDAContext*>(ctx)->GetStream();
     T* typed_topk_value = static_cast<T*>(topk_value);
@@ -159,10 +163,11 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
       bool topp_input_is_sorted = false;
       if (max_k != length) {
 #ifdef CONFIG_ENABLE_RADIX_TOPK
-        /* radix-based top-k */
-        cuda::TopKRadixKernelLauncher(typed_topk_value, topk_indice,
-                                      typed_in_logits, ws_ptr, batch_size,
-                                      length, max_k, gpu_stream);
+        if (!topk_preselected) {
+          cuda::TopKRadixKernelLauncher(typed_topk_value, topk_indice,
+                                        typed_in_logits, ws_ptr, batch_size,
+                                        length, max_k, gpu_stream);
+        }
 #else
         /* heap-based top-k */
         cuda::TopKKernelLauncher(typed_topk_value, topk_indice, typed_in_logits,
@@ -196,7 +201,7 @@ AsStatus gen_sample_gpu(DataType dtype, int64_t* out_tokens, void* topk_value,
     // update each gen_ctx.sample_state by sample_states
   };
   DispatchCUDA(dtype, functor);
-  return AsStatus::ALLSPARK_SUCCESS;
+  return status;
 }
 
 void gen_sample_init_gpu(void* sample_states, unsigned long long seed,

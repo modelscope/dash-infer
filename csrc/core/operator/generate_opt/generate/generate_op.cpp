@@ -5,10 +5,17 @@
 
 #include "generate_op.h"  // NOLINT
 
+#ifdef ENABLE_R2SK_SAMPLING
+#include <core/kernel/cuda/topk_r2sk/decode_graph.h>
+#include <core/kernel/cuda/topk_r2sk/sampling.h>
+#endif
+
 #include <core/kernel/kernel.h>
 #include <utility/datatype_dispatcher.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #ifdef ENABLE_CUDA
 #include <check_cuda.h>
@@ -137,6 +144,25 @@ AsStatus GenerateOp::Init(const OperatorProto& op_proto,
                               rank_info_.rank_id);
 
       const CUDAContext* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
+#ifdef ENABLE_R2SK_SAMPLING
+      const char* enable_r2sk = std::getenv("AS_ENABLE_R2SK_SAMPLING");
+      if (dtype_ == DataType::BFLOAT16 && enable_r2sk &&
+          std::strcmp(enable_r2sk, "1") == 0) {
+        // The BF16 sampling experiment targets Ampere and newer devices.
+        int device = cuda_ctx->GetDeviceId();
+        int major = 0;
+        AS_CHECK_CUDA(cudaDeviceGetAttribute(
+            &major, cudaDevAttrComputeCapabilityMajor, device));
+        if (major >= 8) {
+          r2sk_sampling_ = std::make_shared<cuda::R2skSampling>(device);
+          const char* graph = std::getenv("AS_ENABLE_R2SK_DECODE_GRAPH");
+          if (graph && std::strcmp(graph, "1") == 0) {
+            r2sk_decode_graph_ =
+                std::make_shared<cuda::R2skDecodeGraph>(device);
+          }
+        }
+      }
+#endif
       rank_id_ = cuda_ctx->GetRank();
       nrank_ = cuda_ctx->GetNranks();
       break;
@@ -410,6 +436,20 @@ AsStatus GenerateOp::Reshape(RuntimeContext* runtime_ctx) {
           cuda::TopKRadixGetWorkspaceSize<T>(&topk_ws_bytes, max_batch,
                                              vocab_size_);
         });
+#ifdef ENABLE_R2SK_SAMPLING
+        if (r2sk_sampling_) {
+          try {
+            // The workspace tensor may move during SetShape below.
+            r2sk_sampling_->Wait();
+            const size_t r2sk_bytes =
+                r2sk_sampling_->ReserveBytes(max_batch, vocab_size_);
+            topk_ws_bytes = std::max(topk_ws_bytes, r2sk_bytes);
+          } catch (const std::exception& error) {
+            LOG(ERROR) << "R2S-K workspace planning failed: " << error.what();
+            return AsStatus::ALLSPARK_RUNTIME_ERROR;
+          }
+        }
+#endif
         if (topk_ws_bytes > std::numeric_limits<dim_t>::max()) {
           LOG(ERROR) << "radix top-k workspace size too large in "
                         "SampleOp::Reshape()";
@@ -585,15 +625,85 @@ AsStatus GenerateOp::RunSample(RuntimeContext* runtime_ctx) {
   }
 #endif  // ENABLE_JSON_MODE
 
-  // don't remove this sync, otherwise wrong token will generate.
+#ifdef ENABLE_R2SK_SAMPLING
+  bool graph_prepared = false;
+  if (r2sk_decode_graph_ && !runtime_ctx->is_context && !need_logprobs_ &&
+      nrank_ == 1 && !ctx_->GetUseTorchSample()) {
+    const auto scratch = reinterpret_cast<uintptr_t>(ws_ptr);
+    const auto scores = reinterpret_cast<uintptr_t>(topk_value_ptr_);
+    if (scores >= scratch && scores - scratch <= ws_bytes) {
+      const auto* cuda_ctx = static_cast<const CUDAContext*>(ctx_);
+      try {
+        graph_prepared = r2sk_decode_graph_->Prepare(
+            {in_ptr, topk_value_ptr_, topp_value_ptr_,
+             static_cast<int*>(topk_indice_ptr_),
+             static_cast<int64_t*>(out_ptr), sample_states,
+             static_cast<int*>(topk_list_->GetDataPtr()),
+             static_cast<float*>(topp_list_->GetDataPtr()),
+             static_cast<float*>(temperature_list_->GetDataPtr()), ws_ptr,
+             scores - scratch, ws_bytes, cuda_ctx->GetHiednnHandle(),
+             cuda_ctx->GetStream(), batch_size_, vocab_size_, max_k_});
+      } catch (const std::exception& error) {
+        LOG(ERROR) << "Failed to prepare decode graph: " << error.what();
+        return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      }
+    }
+  }
+#endif
+
+#if defined(ENABLE_R2SK_SAMPLING) && defined(CONFIG_ENABLE_RADIX_TOPK)
+  bool eager_prepared = false;
+  if (r2sk_sampling_ && !graph_prepared) {
+    const auto scratch = reinterpret_cast<uintptr_t>(ws_ptr);
+    const auto scores = reinterpret_cast<uintptr_t>(topk_value_ptr_);
+    if (scores >= scratch && scores - scratch <= ws_bytes) {
+      try {
+        eager_prepared = r2sk_sampling_->Prepare(
+            in_ptr, topk_value_ptr_, static_cast<int*>(topk_indice_ptr_),
+            batch_size_, vocab_size_, max_k_, ws_ptr, scores - scratch,
+            static_cast<const CUDAContext*>(ctx_)->GetStream());
+      } catch (const std::exception& error) {
+        LOG(ERROR) << "Failed to prepare eager R2S-K: " << error.what();
+        return AsStatus::ALLSPARK_RUNTIME_ERROR;
+      }
+    }
+  }
+#endif
+
+  // Synchronize per-step host preparation before capture or eager sampling.
   ctx_->Synchronize();
-  kernel_launcher(dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
-                  topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
-                  sample_states, batch_size_, max_k_, vocab_size_,
-                  static_cast<int*>(topk_list_->GetDataPtr()),
-                  static_cast<float*>(topp_list_->GetDataPtr()),
-                  static_cast<float*>(temperature_list_->GetDataPtr()), ctx_,
-                  runtime_ctx, ws_ptr, ws_bytes, device_prop_ptr);
+  bool sampled = false;
+  bool topk_preselected = false;
+#ifdef ENABLE_R2SK_SAMPLING
+  if (graph_prepared) {
+    try {
+      sampled = r2sk_decode_graph_->LaunchPrepared();
+    } catch (const std::exception& error) {
+      LOG(ERROR) << "Failed to replay decode graph: " << error.what();
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+    }
+  }
+#endif
+#if defined(ENABLE_R2SK_SAMPLING) && defined(CONFIG_ENABLE_RADIX_TOPK)
+  if (eager_prepared) {
+    try {
+      topk_preselected = r2sk_sampling_->FinishPrepared();
+    } catch (const std::exception& error) {
+      LOG(ERROR) << "Failed to finish eager R2S-K: " << error.what();
+      return AsStatus::ALLSPARK_RUNTIME_ERROR;
+    }
+  }
+#endif
+  if (!sampled) {
+    AS_CHECK_STATUS(kernel_launcher(
+        dtype_, static_cast<int64_t*>(out_ptr), topk_value_ptr_,
+        topp_value_ptr_, static_cast<int*>(topk_indice_ptr_), in_ptr,
+        sample_states, batch_size_, max_k_, vocab_size_,
+        static_cast<int*>(topk_list_->GetDataPtr()),
+        static_cast<float*>(topp_list_->GetDataPtr()),
+        static_cast<float*>(temperature_list_->GetDataPtr()), ctx_, runtime_ctx,
+        ws_ptr, ws_bytes, device_prop_ptr, topk_preselected));
+  }
 
   if (need_logprobs_) {
     logprobs_launcher(dtype_, in_ptr, static_cast<int64_t*>(out_ptr),

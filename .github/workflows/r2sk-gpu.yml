@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+name: R2S-K GPU correctness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  r2sk-gpu:
+    runs-on: [self-hosted, Linux, X64, gpu]
+    container:
+      image: docker.cnb.cool/thinksrc/dashinfer/dev-ubi8-cu124:latest
+      options: --gpus all
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Build and run R2S-K on a CUDA device
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          source /root/.bashrc
+          if [ -f /miniconda/etc/profile.d/conda.sh ]; then
+            source /miniconda/etc/profile.d/conda.sh
+          fi
+          source activate ds_py
+          nvidia-smi
+          export AS_PLATFORM=cuda
+          export AS_CUDA_SM='80;86;89;90a'
+          export AS_BUILD_R2SK_SAMPLING=ON
+          export AS_BUILD_PACKAGE=OFF
+          bash scripts/release/cpp_build_cuda.sh
+          # Executing directly makes a no-device return of 77 fail this job.
+          build/bin/cpp_r2sk_sampling_test
+          build/bin/cpp_r2sk_sampling_test --graph-test
+          build/bin/cpp_r2sk_decode_graph_test
